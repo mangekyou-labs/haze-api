@@ -1,0 +1,2 @@
+@openzeppelin/contracts=node_modules/@openzeppelin/contracts
+poseidon-solidity/=node_modules/poseidon-solidity/

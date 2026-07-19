@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Rust
+target/
+
+# Build artifacts
+*.wasm
+*.r1cs
+*.wtns
+*.zkey
+*.ptau
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
