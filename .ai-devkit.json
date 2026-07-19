@@ -1,11 +1,8 @@
 {
   "version": "0.44.1",
   "environments": [
-    "cursor",
-    "claude",
     "codex",
-    "opencode",
-    "antigravity"
+    "opencode"
   ],
   "phases": [
     "requirements",
@@ -89,6 +86,10 @@
     {
       "registry": "codeaholicguy/ai-devkit",
       "name": "tdd"
+    },
+    {
+      "registry": "codeaholicguy/ai-devkit",
+      "name": "task"
     }
   ]
 }
