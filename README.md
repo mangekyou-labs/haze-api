@@ -26,7 +26,7 @@ A privacy gateway between coding agents (Claude Code, Codex, OpenCode, Cline) an
 - Stellar CLI 27+ (`cargo install stellar-cli`)
 - Circom 0.5.46+
 
-###1. Clone & Install
+### 1. Clone & Install
 
 ```bash
 git clone <repo>
@@ -42,7 +42,7 @@ cd web && npm install && cd ..
 cd circuits && npm install && cd ..
 ```
 
-###2. Environment
+### 2. Environment
 
 ```bash
 cp .env.example .env
@@ -54,7 +54,7 @@ cp .env.example .env
 # - GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
 ```
 
-###3. Build Circuits
+### 3. Build Circuits
 
 ```bash
 cd circuits
@@ -68,7 +68,7 @@ node scripts/setup.js
 cd ..
 ```
 
-###4. Build & Deploy Contract
+### 4. Build & Deploy Contract
 
 ```bash
 cd zk-credits-contract
@@ -89,7 +89,7 @@ RUSTUP_TOOLCHAIN=1.94 stellar contract deploy \
 cd ..
 ```
 
-###5. Start Gateway
+### 5. Start Gateway
 
 ```bash
 cd ts
@@ -97,7 +97,7 @@ npm run dev
 # Gateway runs on http://localhost:3001
 ```
 
-###6. Start Web App
+### 6. Start Web App
 
 ```bash
 cd web
@@ -105,13 +105,13 @@ npm run dev
 # Web app runs on http://localhost:3000
 ```
 
-###7. Run E2E Test
+### 7. Run E2E Test
 
 ```bash
 node scripts/e2e-test.js
 ```
 
-###8. Run Slash Demo
+### 8. Run Slash Demo
 
 ```bash
 node scripts/slash-demo.js
@@ -180,7 +180,7 @@ node scripts/slash-demo.js
 
 ## Contract
 
-**Testnet:** `CCJG427D5B2KCLQC4GNSUXLZU7T3455T763EEIX44DNLCUMLXYKGEE4R``
+**Testnet:** `CCJG427D5B2KCLQC4GNSUXLZU7T3455T763EEIX44DNLCUMLXYKGEE4R`
 
 Functions:
 - `deposit(depositor, commitment, new_root, amount)` — Register commitment + transfer USDC
