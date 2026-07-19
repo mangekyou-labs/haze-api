@@ -266,18 +266,14 @@ Response: { "spent": false }
 **Responsibility**: Tracks deposits, Merkle tree state, nullifiers, slashing.
 
 **Key design decisions:**
-- **Poseidon-2** hasher for Merkle tree (2-input, ZK-friendly, ~10x faster than Poseidon-1)
-- Library: `@poseidon/contracts` (npm) — audited, Foundry-compatible
+- Poseidon hash for Merkle tree (ZK-friendly, native to many circuits)
 - Append-only tree (no deletion) — withdrawal tracked via nullifier
-- Slashing requires two ZK proofs with same ticketIndex → extract secret k via RLN math (see RLN Mathematical Specification)
+- Slashing requires two ZK proofs with same ticketIndex → extract secret k via RLN math
 - Events emitted for all state changes → frontend/indexer consumption
-- `ReentrancyGuard` on all external-call functions
-- No owner/Admin - fully permissionless except `withdraw` restricted to depositor
 
 **Gas estimate**: ~150k gas per deposit, ~300k gas per proof verification (STARK verification expensive)
-- **Deposit finality**: 2 blocks on Base (~4s)
 
-### 2. ZK Circuit (Risc0)
+### 2. ZK Circuit (Circom + snarkjs or Risc0)
 
 **Responsibility**: Generate and verify STARK proofs of deposit membership + RLN constraints.
 
@@ -321,77 +317,8 @@ Response: { "spent": false }
 | Identity | Merkle tree | Paper-exact, self-contained, no ERC-8004 dep | ERC-8004 registry (deferred to v2) |
 | Session auth | EIP-191 | Universal wallet support, no special SDK | EIP-2771 meta-transactions (more complex) |
 | ZK proving | Client-side | Decentralized, no operator trust | Trusted operator (centralized) |
-| ZK toolchain | Risc0 (STARKs) | No trusted setup, RISC-V, native STARKs | Circom+snarkjs (PLONK, trusted setup) |
+| ZK toolchain | Risc0 | No trusted setup, RISC-V, EVM-native | Circom+snarkjs (trusted setup, older) |
 | Slash claimer | First submitter | Maximizes watchtower incentives | Protocol treasury (more governance) |
-
-### RLN Mathematical Specification
-
-**RLN (Rate Nullification)** derivation (per the paper):
-
-```
-Parameters:
-  - k: secret key (private, never onchain)
-  - i: ticket index (strictly increasing integer)
-  - x: signal hash = keccak256(api_request_bytes)
-  - a: RLN slope = keccak256(k || i)  [first 248 bits of hash]
-
-RLN share computation:
-  y = k + a * x  (modular arithmetic over BN254 field)
-
-Nullifier:
-  nullifier = keccak256(y || i)  (unique per (k, i) pair)
-
-Double-sign detection:
-  Given two RLN shares (x1, y1) and (x2, y2) where i1 == i2:
-    a = (y2 - y1) / (x2 - x1)  (mod BN254)
-    k = y1 - a * x1             (mod BN254)
-  The extracted k must match the commitment for slash to succeed.
-
-Solvency constraint (ZK circuit):
-  (i + 1) * C_max <= D + accumulated_refunds  [all as field elements]
-```
-
-**Critical**: This exact formula must be implemented identically in:
-1. Solidity `slash()` — RLN stake transfer logic
-2. Risc0 guest circuit — RLN constraint verification
-3. TypeScript client — RLN share generation
-
-**Test vector** (shared between all implementations):
-```
-k = 0x1234567890abcdef...
-i = 5
-x = keccak256("test_api_request")
-a = first_248_bits(keccak256(k || i))
-y = k + a * x (mod BN254)
-nullifier = keccak256(y || i)
-```
-
-### ZK Proof System Clarification
-
-| | STARK | PLONK (snarkjs) | Groth16 |
-|--|-------|-----------------|---------|
-| Trusted setup | None | Powers of Tau (phase2) | phase2 ceremony |
-| Proof size | ~400-600 bytes | ~200 bytes | ~128 bytes |
-| Verify gas (EVM) | ~300k (native) | ~200k (pairing) | ~200k (pairing) |
-| Risc0 | Yes (native) | No | No |
-| Circom | No | Yes | Yes |
-
-**Risc0** produces **STARKs** natively, verifiable on EVM via Risc0's Verifier contract (no pairing math). This is the chosen path.
-
-**snarkjs PLONK** is NOT being used despite "STARK" being mentioned in the design doc. The design doc's "Circom + snarkjs" alternative column is misleading — snarkjs produces PLONK/FLONK, not STARKs. The Risc0 path is the primary recommendation.
-
-### Security Checklist Compliance
-
-Per ethskills security/SKILL.md:
-
-- [x] **Access control**: `deposit()` open to anyone, `withdraw()` restricted to depositor, `slash()` open to anyone (watchtower pattern)
-- [x] **CEI pattern**: All external calls follow Checks → Effects → Interactions
-- [x] **Events**: `Deposited`, `NullifierSpent`, `Slashed` emitted for all state changes
-- [x] **SafeERC20**: N/A (ETH native, no ERC-20 in MVP)
-- [x] **ReentrancyGuard**: Apply to `deposit()`, `withdraw()`, `slash()`
-- [x] **No EOA owner**: Contract has no owner — all functions permissionless except withdraw-restricted to depositor
-- [ ] **Slither**: Add `slither .` to pre-deploy checklist
-- [ ] **Fuzz testing**: Add fuzz targets for `slash()` RLN math
 | Policy stake | Burned | Prevents false-ban profit motive | Goes to reporter (misaligned incentives) |
 | Withdrawals | Session depletion | Simple MVP, institution recurring budgets | Nullifier-based exit (complex v2) |
 | Session expiry | Explicit revocation | Funder controls, optional block-based | Count-based (provider must track) |
@@ -413,9 +340,8 @@ Per ethskills security/SKILL.md:
 **Security:**
 - Double-spend: mathematically impossible without revealing secret
 - Front-running slash: submitter race condition mitigated byRLN stake incentive
-- Reentrancy: Checks-Effects-Interactions on all contract functions + `ReentrancyGuard`
+- Reentrancy: Checks-Effects-Interactions on all contract functions
 - Signature replay: session tokens include chainId + provider address
-- **Pre-deployment**: `slither .` passes with 0 findings; fuzz tests cover RLN math edge cases
 
 **Scalability:**
 - Onchain: O(log n) Merkle proof verification per call
