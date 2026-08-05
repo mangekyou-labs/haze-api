@@ -8,15 +8,106 @@ import fs from 'fs';
 import path from 'path';
 import { OpenRouterAdapter, MockProviderAdapter, registerAdapter, getAdapter } from './providerAdapter.js';
 import { MerkleTree } from './merkle.js';
+import { verifyGroth16Proof } from '@zk-credits/shared';
+import {
+  MemoryGatewayStore,
+  PostgresGatewayStore,
+  reconstructGatewayState,
+  MemoryBillingStore,
+  PostgresBillingStore,
+  createPool,
+  runMigrations,
+  type AcceptedCall,
+  type GatewayStore,
+  type BillingStore,
+} from './db/index.js';
+import { startSpendWorker, type SpendSubmitter } from './spend-worker.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
-// ─── In-memory stores (replace with DB in production) ────────────
+// ─── Durable store (replaces the v1 in-memory Maps) ────────────
+// Tests/local dev default to the memory store; production startup picks the
+// Postgres store via initGatewayStore(). Handlers only talk to this contract,
+// never to Maps/arrays directly.
+let gatewayStore: GatewayStore = new MemoryGatewayStore();
+let billingStore: BillingStore = new MemoryBillingStore();
 
-const apiKeys = new Map<string, { commitment: string; label: string }>();
-const nullifierCache = new Set<string>();
-const callCounts = new Map<string, number>();
-const merkleTree = new MerkleTree();
+export function setGatewayStore(store: GatewayStore): void {
+  gatewayStore = store;
+}
+
+export function getGatewayStore(): GatewayStore {
+  return gatewayStore;
+}
+
+export function setBillingStore(store: BillingStore): void {
+  billingStore = store;
+}
+
+export function getBillingStore(): BillingStore {
+  return billingStore;
+}
+
+// Parse the RLN epoch (pub signal index 4) and hash the proof for the
+// accepted-call replay key (proofHash = SHA-256 of proof + public inputs).
+export function extractEpoch(pubSignals: string[]): number {
+  const v = Number(pubSignals[4]);
+  if (!Number.isFinite(v) || v <= 0) throw new Error('Invalid epoch public signal');
+  return Math.floor(v);
+}
+
+export function proofHashOf(proof: object, pubSignals: string[]): string {
+  return crypto.createHash('sha256').update(JSON.stringify({ proof, pubSignals })).digest('hex');
+}
+
+export function hashApiKey(key: string): string {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+export const merkleTree = new MerkleTree();
+
+// ─── Store startup (production) ─────────────────────────────────
+// Database configured → Postgres store (migrations + restart
+// reconstruction). No DB config → fails closed (getDbConfig throws). Dev and
+// tests opt into the memory store explicitly via resetGatewayStoreForTests().
+export async function initDurableGatewayStore(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<GatewayStore> {
+  const migrationsDir = path.resolve(import.meta.dirname!, 'db', 'migrations');
+  const pool = createPool(env);
+  await runMigrations(pool, migrationsDir);
+  const store = new PostgresGatewayStore(pool);
+  const state = await reconstructGatewayState(store);
+  if (state.nullifiers.size > 0 || state.callCounts.size > 0) {
+    console.log(
+      `[db] Restart reconstruction: ${state.nullifiers.size} nullifiers, ` +
+        `${state.callCounts.size} commitments with call counts`,
+    );
+  }
+  setGatewayStore(store);
+  setBillingStore(new PostgresBillingStore(pool));
+  startSpendWorker(
+    {
+      store,
+      secretKey: process.env.GATEWAY_SECRET_KEY || '',
+      submitSpend: (async (
+        secretKey,
+        proof,
+        pubSignals,
+      ) => {
+        const contractModule = await import('./contract.js');
+        return contractModule.spend(secretKey, proof, pubSignals);
+      }) as SpendSubmitter,
+    },
+    Number(process.env.SPEND_WORKER_INTERVAL_MS ?? '10000'),
+  );
+  return store;
+}
+
+export async function resetGatewayStoreForTests(): Promise<void> {
+  setGatewayStore(new MemoryGatewayStore());
+  setBillingStore(new MemoryBillingStore());
+}
 
 // ─── Config ──────────────────────────────────────────────────────
 
@@ -39,7 +130,11 @@ function loadVerificationKey(): object {
 
 // ─── Proof verification ─────────────────────────────────────────
 
-const snarkjs = require('snarkjs');
+// ─── Proof verification (via @zk-credits/shared) ────────────────
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 function parseProofHeader(header: string): { proof: object; pubSignals: string[] } {
   const decoded = Buffer.from(header, 'base64').toString();
@@ -62,7 +157,15 @@ async function verifyZkProof(
   proof: object,
   pubSignals: string[],
 ): Promise<boolean> {
-  return snarkjs.groth16.verify(verificationKey, pubSignals, proof);
+  return verifyGroth16Proof(verificationKey, pubSignals, proof);
+}
+
+// RLN circuit public signal layout (outputs first, then the public epoch
+// input): [root, nullifier, share_x, share_y, epoch]. The nullifier — the
+// replay-protection key — is index 1. (v1 bug: the handler read index 2,
+// which is share_x, silently disabling replay protection.)
+export function extractNullifier(pubSignals: string[]): string {
+  return pubSignals[1];
 }
 
 // ─── Express app ─────────────────────────────────────────────────
@@ -106,7 +209,7 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     }
 
     const apiKey = authHeader.slice(7).trim();
-    const keyRecord = apiKeys.get(apiKey);
+    const keyRecord = await gatewayStore.getApiKey(hashApiKey(apiKey));
 
     if (!keyRecord) {
       res.status(401).json({ error: 'invalid_api_key' });
@@ -121,8 +224,8 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     let zkProof: { proof: object; pubSignals: string[] };
     try {
       zkProof = parseProofHeader(proofHeader);
-    } catch (err: any) {
-      res.status(400).json({ error: 'invalid_proof_header', message: err.message });
+    } catch (err: unknown) {
+      res.status(400).json({ error: 'invalid_proof_header', message: errorMessage(err) });
       return;
     }
 
@@ -130,9 +233,9 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     let valid: boolean;
     try {
       valid = await verifyZkProof(zkProof.proof, zkProof.pubSignals);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Proof verification error:', err);
-      res.status(403).json({ error: 'proof_verification_failed', message: err.message });
+      res.status(403).json({ error: 'proof_verification_failed', message: errorMessage(err) });
       return;
     }
 
@@ -141,22 +244,47 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
       return;
     }
 
-    // pubSignals layout: [epoch, root, nullifier, share_x, share_y]
-    const nullifier = zkProof.pubSignals[2];
+    // RLN public signal layout: [root, nullifier, share_x, share_y, epoch]
+    const nullifier = extractNullifier(zkProof.pubSignals);
 
-    if (nullifierCache.has(nullifier)) {
+    // Replay check against the durable nullifier records (fast path).
+    const seen = await gatewayStore.getNullifier(nullifier);
+    if (seen) {
       res.status(403).json({ error: 'nullifier_spent', message: 'This nullifier has already been used' });
       return;
     }
 
-    const userCalls = callCounts.get(keyRecord.commitment) ?? 0;
+    // Stale-cache fallback: if we have no local record (e.g. after a cache
+    // wipe or an event we missed), ask the contract directly.
+    const contractModule = await import('./contract.js');
+    if (await contractModule.isNullifierSpent(nullifier)) {
+      await gatewayStore.markNullifierSpentOnChain(nullifier);
+      res.status(403).json({ error: 'nullifier_spent', message: 'This nullifier has already been spent on-chain' });
+      return;
+    }
+
+    const userCalls = await gatewayStore.getCallCount(keyRecord.commitment);
     if (userCalls >= EPOCH_QUOTA) {
       res.status(403).json({ error: 'over_quota', message: `Exceeded ${EPOCH_QUOTA} calls this epoch` });
       return;
     }
 
-    nullifierCache.add(nullifier);
-    callCounts.set(keyRecord.commitment, userCalls + 1);
+    // DURABLE ACCEPT — persist before forwarding upstream, so no accepted
+    // call is lost or duplicated on a crash/restart (v1 in-memory defect).
+    const epoch = extractEpoch(zkProof.pubSignals);
+    const acceptedCall: AcceptedCall = {
+      proofHash: proofHashOf(zkProof.proof, zkProof.pubSignals),
+      nullifier,
+      epoch,
+      slot: 0,
+      nonceHash: proofHashOf(zkProof.proof, zkProof.pubSignals),
+      acceptedAt: new Date(),
+      // Persist the full proof so the async spend worker (M2.6) can resume the
+      // settlement queue after a restart without asking the client again.
+      proof: zkProof.proof,
+      pubSignals: zkProof.pubSignals,
+    };
+    await gatewayStore.recordAcceptedCall(acceptedCall, keyRecord.commitment);
 
     const adapter = getAdapter(OPENROUTER_API_KEY ? 'openrouter' : 'mock')!;
     const upstream = await adapter.forwardRequest(req.body, OPENROUTER_API_KEY);
@@ -186,7 +314,7 @@ app.post('/v1/slash', (req: Request, res: Response) => {
 
 // ─── POST /v1/api-keys (onboarding, requires auth header) ──────
 
-app.post('/v1/api-keys', (req: Request, res: Response) => {
+app.post('/v1/api-keys', async (req: Request, res: Response) => {
   try {
     // Require shared secret from web app for inter-service auth
     const authHeader = req.headers.authorization;
@@ -207,7 +335,7 @@ app.post('/v1/api-keys', (req: Request, res: Response) => {
       return;
     }
     const key = 'sk-zk-' + crypto.randomBytes(32).toString('hex');
-    apiKeys.set(key, { commitment, label: label || 'default' });
+    await gatewayStore.createApiKey(hashApiKey(key), commitment, label || 'default');
     res.json({ apiKey: key, baseUrl: `${req.protocol}://${req.get('host')}/v1` });
   } catch (err) {
     console.error('/v1/api-keys error:', err);
@@ -217,22 +345,18 @@ app.post('/v1/api-keys', (req: Request, res: Response) => {
 
 // ─── GET /v1/status/:commitment (dashboard data) ────────────────
 
-app.get('/v1/status/:commitment', (req: Request, res: Response) => {
+app.get('/v1/status/:commitment', async (req: Request, res: Response) => {
   try {
-    const { commitment } = req.params;
+    const { commitment } = req.params as { commitment: string };
     if (!commitment) {
       res.status(400).json({ error: 'missing_commitment' });
       return;
     }
 
-    const userCalls = callCounts.get(commitment) ?? 0;
+    const userCalls = await gatewayStore.getCallCount(commitment);
 
-    const userKeys: { label: string; createdAt: number }[] = [];
-    for (const [, record] of apiKeys) {
-      if (record.commitment === commitment) {
-        userKeys.push({ label: record.label, createdAt: Date.now() });
-      }
-    }
+    const keyRecords = await gatewayStore.listApiKeys(commitment);
+    const userKeys = keyRecords.map((record) => ({ label: record.label, createdAt: record.issuedAt.getTime() }));
 
     res.json({
       commitment,
@@ -276,6 +400,36 @@ app.get('/v1/contract-status', async (_req: Request, res: Response) => {
 
 // ─── POST /v1/deposits (on-chain deposit, requires GATEWAY_SECRET) ─
 
+// Shared deposit path: insert into the off-chain Merkle tree, then submit the
+// on-chain deposit. Used by /v1/deposits and by the billing webhook relay
+// (once per unique Stripe event — idempotency is enforced in billingStore).
+export async function submitDeposit(
+  commitment: string,
+  amount: string | number,
+): Promise<{
+  txHash: string;
+  newRoot: string;
+  leafIndex: number;
+}> {
+  const gatewaySecretKey = process.env.GATEWAY_SECRET_KEY;
+  if (!gatewaySecretKey) {
+    throw new Error('gateway_key_not_configured');
+  }
+
+  const commitmentBigInt = BigInt(commitment);
+  const newRoot = await merkleTree.insert(commitmentBigInt);
+
+  const contractModule = await import('./contract.js');
+  const txHash = await contractModule.deposit(
+    gatewaySecretKey,
+    commitment,
+    newRoot.toString(),
+    amount.toString(),
+  );
+
+  return { txHash, newRoot: newRoot.toString(), leafIndex: merkleTree.getLeafCount() - 1 };
+}
+
 app.post('/v1/deposits', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
@@ -295,49 +449,186 @@ app.post('/v1/deposits', async (req: Request, res: Response) => {
       return;
     }
 
+    const result = await submitDeposit(commitment, amount);
+    res.json({
+      deposited: true,
+      txHash: result.txHash,
+      commitment,
+      amount: amount.toString(),
+      newRoot: result.newRoot,
+      leafIndex: result.leafIndex,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown';
+    console.error('/v1/deposits error:', message);
+    if (message === 'gateway_key_not_configured') {
+      res.status(500).json({ error: 'gateway_key_not_configured', message: 'GATEWAY_SECRET_KEY not set' });
+      return;
+    }
+    res.status(500).json({ error: 'deposit_failed', message });
+  }
+});
+
+// ─── POST /v1/billing/stripe-event (idempotent webhook relay, M2.3) ─
+// The web app verifies the Stripe signature, then relays the verified event
+// here. billingStore.recordStripeEventOnce() makes redeliveries a no-op so a
+// checkout->webhook->deposit flow never double-submits.
+
+app.post('/v1/billing/stripe-event', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const gatewaySecret = process.env.GATEWAY_SECRET || '';
+    if (!gatewaySecret) {
+      res.status(500).json({ error: 'server_misconfigured' });
+      return;
+    }
+    if (!authHeader || authHeader !== `Bearer ${gatewaySecret}`) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+
+    const { eventId, eventType, payloadHash, commitment, amount } = req.body;
+    if (!eventId || !eventType || !payloadHash) {
+      res.status(400).json({
+        error: 'missing_fields',
+        required: ['eventId', 'eventType', 'payloadHash'],
+      });
+      return;
+    }
+
+    // Idempotency: the first delivery is processed; every retry is a no-op.
+    const { inserted, event } = await billingStore.recordStripeEventOnce(
+      eventId,
+      eventType,
+      payloadHash,
+    );
+
+    if (!inserted) {
+      res.json({ received: true, processed: false, duplicate: true, eventId });
+      return;
+    }
+
+    if (eventType === 'checkout.session.completed') {
+      if (!commitment || !amount) {
+        // Event delivered, but the deposit cannot be submitted yet (e.g. the
+        // user never completed onboarding). Record the receipt so a retry is
+        // not lost on restart; surface the warning to the web app.
+        await billingStore.markStripeEventProcessed(eventId);
+        res.json({
+          received: true,
+          processed: false,
+          skipped: 'missing_commitment_or_amount',
+          eventId,
+        });
+        return;
+      }
+      const result = await submitDeposit(commitment, amount);
+      await billingStore.markStripeEventProcessed(eventId);
+      res.json({
+        received: true,
+        processed: true,
+        eventId,
+        txHash: result.txHash,
+        newRoot: result.newRoot,
+      });
+      return;
+    }
+
+    // Non-checkout event types are recorded but require no deposit.
+    await billingStore.markStripeEventProcessed(eventId);
+    res.json({ received: true, processed: true, eventId });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown';
+    console.error('/v1/billing/stripe-event error:', message);
+    res.status(500).json({ error: 'billing_event_failed', message });
+  }
+});
+
+// ─── POST /v1/withdraw (gateway-mediated withdrawal, M2.5) ───────
+// The gateway co-signs the inner withdraw tx as the depositor (the contract
+// requires deposit.depositor auth), then hands the envelope to the fee-sponsor
+// relay so the user never needs XLM. GATEWAY_SECRET-gated (web app relays the
+// user's request).
+
+app.post('/v1/withdraw', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const gatewaySecret = process.env.GATEWAY_SECRET || '';
+    if (!gatewaySecret) {
+      res.status(500).json({ error: 'server_misconfigured' });
+      return;
+    }
+    if (!authHeader || authHeader !== `Bearer ${gatewaySecret}`) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+
+    const { commitment, recipient } = req.body;
+    if (!commitment || !recipient) {
+      res.status(400).json({ error: 'missing_fields', required: ['commitment', 'recipient'] });
+      return;
+    }
+
     const gatewaySecretKey = process.env.GATEWAY_SECRET_KEY;
     if (!gatewaySecretKey) {
       res.status(500).json({ error: 'gateway_key_not_configured', message: 'GATEWAY_SECRET_KEY not set' });
       return;
     }
 
-    // Insert commitment into off-chain Merkle tree
-    const commitmentBigInt = BigInt(commitment);
-    const newRoot = await merkleTree.insert(commitmentBigInt);
-
-    // Submit on-chain deposit
     const contractModule = await import('./contract.js');
-    const txHash = await contractModule.deposit(
+    const innerTxXdr = await contractModule.buildWithdrawEnvelope(
       gatewaySecretKey,
       commitment,
-      newRoot.toString(),
-      amount.toString(),
+      recipient,
     );
 
+    // Hand the envelope to the fee-sponsor relay for a fee bump (fee-only).
+    const feeSponsorUrl =
+      process.env.FEE_SPONSOR_URL || 'http://localhost:3002';
+    const relayRes = await fetch(`${feeSponsorUrl}/v1/fee-relay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ innerTransactionXdr: innerTxXdr }),
+    });
+    const relayData = await relayRes.json();
+
+    if (!relayRes.ok) {
+      res.status(502).json({ error: 'fee_relay_rejected', message: relayData.error ?? 'unknown' });
+      return;
+    }
+
     res.json({
-      deposited: true,
-      txHash,
+      withdrawn: true,
       commitment,
-      amount: amount.toString(),
-      newRoot: newRoot.toString(),
-      leafIndex: merkleTree.getLeafCount() - 1,
+      recipient,
+      feeBumpHash: relayData.feeBumpHash,
+      duplicate: relayData.duplicate ?? false,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'unknown';
-    console.error('/v1/deposits error:', message);
-    res.status(500).json({ error: 'deposit_failed', message });
+    console.error('/v1/withdraw error:', message);
+    res.status(500).json({ error: 'withdraw_failed', message });
   }
 });
 
 // ─── Start ───────────────────────────────────────────────────────
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`ZK-API Credits Gateway running on port ${PORT}`);
-    console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
-    console.log(`Quota: ${EPOCH_QUOTA} calls/epoch`);
-    console.log(`Proof verification: enabled`);
-  });
+  initDurableGatewayStore()
+    .catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : 'unknown';
+      console.error('FATAL: database unavailable — refusing to start with non-durable state:', message);
+      process.exit(1);
+    })
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`ZK-API Credits Gateway running on port ${PORT}`);
+        console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
+        console.log(`Quota: ${EPOCH_QUOTA} calls/epoch`);
+        console.log('Proof verification: enabled');
+        console.log('Durable storage: postgresql (gateway schema)');
+      });
+    });
 }
 
-export { app, apiKeys, nullifierCache, callCounts };
+export { app };

@@ -1,11 +1,9 @@
-// Browser Groth16 Prover — wraps snarkjs for browser proof generation
-// with per-session proof caching
+// Gateway Groth16 Prover — wraps snarkjs (via @zk-credits/shared) for Node
+// proof generation with per-session proof caching. Resources are Node
+// filesystem paths resolved from CIRCUITS_DIR.
 
-import { createRequire } from 'module';
 import { resolve } from 'path';
-
-const require = createRequire(import.meta.url);
-const snarkjs = require('snarkjs');
+import { proveGroth16, type ProofResult } from '@zk-credits/shared';
 
 const CIRCUITS_DIR = process.env.CIRCUITS_DIR || resolve(import.meta.dirname!, '..', '..', 'circuits');
 
@@ -17,10 +15,7 @@ export interface ZkInput {
   merkle_path_indices: string[];
 }
 
-export interface ProofResult {
-  proof: object;
-  publicSignals: string[];
-}
+export type { ProofResult };
 
 // ─── Proof Cache ──────────────────────────────────────────────────
 
@@ -110,7 +105,7 @@ export function clearProverCache(): void {
 export async function generateRlnProof(input: ZkInput): Promise<ProofResult> {
   const start = Date.now();
 
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+  const result = await proveGroth16(
     input,
     resolve(CIRCUITS_DIR, 'rln_nullifier.wasm'),
     resolve(CIRCUITS_DIR, 'rln_nullifier_final.zkey'),
@@ -119,7 +114,7 @@ export async function generateRlnProof(input: ZkInput): Promise<ProofResult> {
   provingTime += Date.now() - start;
   provingCount += 1;
 
-  return { proof, publicSignals };
+  return result;
 }
 
 export async function generateRlnProofCached(input: ZkInput): Promise<ProofResult> {
@@ -132,10 +127,9 @@ export async function generateDepositProof(input: {
   merkle_path_elements: string[];
   merkle_path_indices: string[];
 }): Promise<ProofResult> {
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+  return proveGroth16(
     input,
     resolve(CIRCUITS_DIR, 'deposit_membership.wasm'),
     resolve(CIRCUITS_DIR, 'deposit_membership_final.zkey'),
   );
-  return { proof, publicSignals };
 }

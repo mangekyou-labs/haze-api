@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "dev": "ts-node server.ts"
   },
   "keywords": [],
@@ -18,11 +19,13 @@
     "@scure/bip39": "^2.2.0",
     "@stellar/stellar-base": "^15.0.0",
     "@stellar/stellar-sdk": "^16.0.1",
+    "@zk-credits/shared": "file:../packages/zk-credits-shared",
     "bip39": "^3.1.0",
     "body-parser": "^2.3.0",
     "circomlibjs": "^0.1.7",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "pg": "^8.13.1",
     "snarkjs": "^0.7.6",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.0",
@@ -32,6 +35,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/pg": "^8.11.10",
     "@types/supertest": "^7.2.0",
     "supertest": "^7.2.2",
     "vitest": "^4.1.10"

@@ -1,0 +1,5 @@
+# Build output (consumed via `file:` dep after `npm run build`)
+dist/
+
+# Dependencies (root .gitignore also covers this)
+node_modules/
