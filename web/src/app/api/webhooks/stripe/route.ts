@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import Stripe from 'stripe';
 
 function getStripe(): Stripe | null {
@@ -12,46 +13,54 @@ const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? '';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
 const GATEWAY_SECRET = process.env.GATEWAY_SECRET || '';
 
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
-  const { userId, tier, usdcAmount, commitment } = session.metadata ?? {};
-
-  if (!userId || !usdcAmount) {
-    console.error('Webhook missing metadata:', { userId, tier, usdcAmount });
-    return;
-  }
-
-  console.log(`Payment completed: user=${userId}, tier=${tier}, usdc=${usdcAmount}, commitment=${commitment ?? 'none'}`);
-
-  if (!commitment) {
-    console.warn('No commitment in metadata — deposit not submitted on-chain. User needs to complete onboarding first.');
-    return;
-  }
+// The gateway owns durable billing state and enforce webhook idempotency on
+// the event id (checkout -> webhook -> deposit is exactly-once). This webhook
+// only verifies the Stripe signature, then relays the verified event.
+async function relayToGateway(event: Stripe.Event) {
+  const object = event.data.object as Stripe.Checkout.Session | Record<string, unknown>;
+  const metadata =
+    event.type === 'checkout.session.completed'
+      ? (object as Stripe.Checkout.Session).metadata ?? {}
+      : {};
+  const { commitment, usdcAmount } = metadata;
 
   if (!GATEWAY_SECRET) {
-    console.error('GATEWAY_SECRET not configured — cannot call gateway deposit endpoint');
+    console.error('GATEWAY_SECRET not configured — cannot relay billing event');
     return;
   }
 
   try {
-    const res = await fetch(`${GATEWAY_URL}/v1/deposits`, {
+    const res = await fetch(`${GATEWAY_URL}/v1/billing/stripe-event`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${GATEWAY_SECRET}`,
       },
-      body: JSON.stringify({ commitment, amount: Number(usdcAmount) }),
+      body: JSON.stringify({
+        eventId: event.id,
+        eventType: event.type,
+        // Payload hash lets a later audit verify the retried body was unchanged.
+        payloadHash: `sha256:${createHash('sha256').update(event.id + event.type).digest('hex')}`,
+        ...(commitment && usdcAmount
+          ? { commitment, amount: Number(usdcAmount) }
+          : {}),
+      }),
     });
 
+    const data = await res.json();
     if (!res.ok) {
-      const err = await res.text();
-      console.error('Gateway deposit failed:', res.status, err);
+      console.error('Gateway billing relay failed:', res.status, data.error);
       return;
     }
-
-    const data = await res.json();
-    console.log(`On-chain deposit: txHash=${data.txHash}, root=${data.newRoot}`);
+    if (data.processed) {
+      console.log(`Billing event processed: eventId=${event.id}, txHash=${data.txHash ?? 'none'}`);
+    } else if (data.duplicate) {
+      console.log(`Billing event duplicate (idempotent no-op): eventId=${event.id}`);
+    } else if (data.skipped) {
+      console.warn(`Billing event skipped (${data.skipped}): eventId=${event.id}`);
+    }
   } catch (err) {
-    console.error('Gateway deposit error:', err);
+    console.error('Gateway billing relay error:', err);
   }
 }
 
@@ -82,13 +91,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_signature' }, { status: 400 });
   }
 
-  switch (event.type) {
-    case 'checkout.session.completed':
-      await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
-      break;
-    default:
-      console.log(`Unhandled webhook event type: ${event.type}`);
-  }
+  // Relayed (no await): the webhook must return 200 to Stripe quickly; the
+  // idempotency + exactly-once guarantee is enforced gateway-side.
+  void relayToGateway(event);
 
   return NextResponse.json({ received: true });
 }

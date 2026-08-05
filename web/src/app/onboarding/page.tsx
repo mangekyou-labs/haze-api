@@ -2,9 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { generateSecretK, computeCommitment } from '@/lib/crypto';
-import { entropyToMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { generateSecretK, computeCommitment, deriveMnemonic } from '@/lib/crypto';
 
 type Step = 'generate' | 'backup' | 'confirm' | 'done';
 
@@ -24,7 +22,7 @@ export default function OnboardingPage() {
     try {
       const sk = generateSecretK();
       setSecretK(sk);
-      const words = entropyToMnemonic(sk, wordlist).split(' ');
+      const words = deriveMnemonic(sk).split(' ');
       setMnemonic(words);
 
       const comm = await computeCommitment(sk);

@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { generateSecretK, computeCommitment } from '@/lib/crypto';
-import { entropyToMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { generateSecretK, computeCommitment, deriveMnemonic } from '@/lib/crypto';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -71,12 +69,12 @@ export function ApiKeySection({ userId }: { userId: string }) {
         secretK = new Uint8Array(
           existingSk.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
         );
-        words = entropyToMnemonic(secretK, wordlist);
+        words = deriveMnemonic(secretK);
       } else {
         // Generate new secret_k
         secretK = generateSecretK();
         commitment = await computeCommitment(secretK);
-        words = entropyToMnemonic(secretK, wordlist);
+        words = deriveMnemonic(secretK);
 
         // Persist to IndexedDB
         const hex = Array.from(secretK)
