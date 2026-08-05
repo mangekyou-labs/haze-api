@@ -11,7 +11,7 @@ description: Ordered implementation plan derived from the approved requirements,
 
 This is the working plan for `stellar-launch`, a parallel track to `feature-mina-protocol-migration`. The existing Stellar v1 codebase (circuits, Soroban contract, gateway, web) is already built; this plan adds the PRXVT-derived hardening (fee sponsorship, durable storage, type safety, self-verify, isomorphism), resolves the six v1 open questions, and takes the result to a public hosted testnet launch.
 
-Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 todo (3.5 CI GREEN 2026-08-05; 3.1-3.4 blocked on accounts/secrets)` -> `M4 todo`.
+Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 todo (3.5 CI GREEN 2026-08-05, final verified run 31026106925; 3.1-3.4 blocked on accounts/secrets)` -> `M4 todo`.
 
 ### Current Status (reconciled 2026-08-04)
 
@@ -33,7 +33,7 @@ M2 (Durable storage + fee sponsorship) is **in progress**: 2.1 done (PostgreSQL 
 M2 in progress — **all M2 code tasks done offline (2.1–2.6)**. Remaining M2 work is the live testnet validation (user provides funded Stellar keys):
 1. **Live Stellar testnet spike** — run real `spend()` submissions (spend worker), real fee-bump relay (slash + withdraw), and a real co-signed withdrawal through `/v1/withdraw`.
 2. Then **M3 hosted deployment** (Fly.io gateway + fee-sponsor, Vercel web, Soroban testnet contract confirm) — the fee-sponsor service package is ready (`services/fee-sponsor`).
-3. **M3.5 CI — DONE 2026-08-05** (run 31025062673 GREEN: all 6 jobs; the workflows + web test baseline + circuit-artifact tracking shipped earlier, then 4 failed runs were iterated to green — @emnapi lockfile gap, `@zk-credits/shared` dist build gap, and a step working-directory path bug).
+3. **M3.5 CI — DONE 2026-08-05** (final verified run 31026106925 GREEN: all 6 jobs; the workflows + web test baseline + circuit-artifact tracking shipped earlier, then 4 failed runs were iterated to green — @emnapi lockfile gap, `@zk-credits/shared` dist build gap, and a step working-directory path bug).
 
 Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); OpenRouter per-key limits (M4.6 pre-check); CI needs circuit artifacts + circom/stellar-cli in Docker (risk table); fresh trusted-setup regen deferred to a capable machine — and if it lands, M3.1 becomes a redeploy again.
 
