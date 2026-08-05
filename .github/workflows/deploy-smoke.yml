@@ -26,14 +26,18 @@ jobs:
     name: Hosted health + client smoke
     runs-on: ubuntu-latest
     if: >-
-      (github.event_name == 'workflow_dispatch' ||
-       github.event.workflow_run.conclusion == 'success') &&
-      secrets.GATEWAY_URL != ''
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     env:
       GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
       WEB_URL: ${{ secrets.WEB_URL }}
       FEE_SPONSOR_URL: ${{ secrets.FEE_SPONSOR_URL }}
     steps:
+      # NOTE: `secrets` context is not available in job-level `if`, so the
+      # GATEWAY_URL guard lives here rather than in the job `if` above.
+      - name: Require GATEWAY_URL (guards until M3.2/3.3/3.4 secrets exist)
+        if: env.GATEWAY_URL == ''
+        run: echo "::notice::GATEWAY_URL not configured; skipping hosted smoke (template pre-deploy)"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

@@ -6,6 +6,11 @@
 # Node
 node_modules/
 
+# Test coverage output (vitest --coverage)
+coverage/
+test-results/
+playwright-report/
+
 # Next.js
 .next/
 out/

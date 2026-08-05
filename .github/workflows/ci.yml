@@ -25,6 +25,9 @@ jobs:
           cache-dependency-path: ts/package-lock.json
       - name: Install
         run: npm ci
+      - name: Build @zk-credits/shared package (file dep needs dist before typecheck)
+        working-directory: packages/zk-credits-shared
+        run: npm ci && npm run build
       - name: Typecheck
         run: npm run typecheck
       - name: Unit tests
@@ -71,8 +74,14 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: services/fee-sponsor/package-lock.json
-      - name: Install
+      - name: Install fee-sponsor deps
         run: npm ci
+      - name: Install gateway deps (fee-sponsor type-checks the shared ts/ sources via @gateway/*)
+        working-directory: ts
+        run: npm ci
+      - name: Build @zk-credits/shared package (file dep needs dist before typecheck)
+        working-directory: packages/zk-credits-shared
+        run: npm ci && npm run build
       - name: Typecheck
         run: npm run typecheck
       # Behavior tests for the fee-relay (method gate, idempotency, fee-only
@@ -93,6 +102,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install
         run: npm ci
+      - name: Build @zk-credits/shared package (file dep needs dist before typecheck)
+        working-directory: packages/zk-credits-shared
+        run: npm ci && npm run build
       - name: Typecheck
         run: npm run typecheck
       - name: Unit tests
