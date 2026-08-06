@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatUsdc } from '@/lib/format';
 
 interface StatusData {
   commitment: string;
@@ -60,26 +61,26 @@ export function DashboardStatus() {
 
   if (loading) {
     return (
-      <div className="p-6 border rounded-lg animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-1/3 mb-4" />
-        <div className="h-8 bg-gray-200 rounded w-1/2 mb-2" />
-        <div className="h-4 bg-gray-200 rounded w-2/3" />
+      <div className="animate-pulse rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div className="mb-4 h-4 w-1/3 rounded bg-zinc-800" />
+        <div className="mb-2 h-8 w-1/2 rounded bg-zinc-800" />
+        <div className="h-4 w-2/3 rounded bg-zinc-800" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="p-6 border rounded-lg">
-        <p className="text-red-600 text-sm">{error}</p>
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <p className="text-sm text-red-400">{error}</p>
       </div>
     );
   }
 
   if (!status) {
     return (
-      <div className="p-6 border rounded-lg">
-        <p className="text-sm text-gray-500">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <p className="text-sm text-zinc-400">
           Generate an API key to see your usage status.
         </p>
       </div>
@@ -87,49 +88,45 @@ export function DashboardStatus() {
   }
 
   return (
-    <div className="p-6 border rounded-lg">
-      <h2 className="text-lg font-semibold mb-4">Usage</h2>
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+      <h2 className="mb-4 text-lg font-semibold text-zinc-100">Usage</h2>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="p-4 bg-blue-50 rounded">
-          <p className="text-sm text-blue-600 font-medium">Calls Today</p>
-          <p className="text-2xl font-bold text-blue-900">{status.callsThisEpoch}</p>
-          <p className="text-xs text-blue-500">
-            of {status.epochQuota} (limit)
+        <div className="rounded-xl bg-blue-500/10 p-4">
+          <p className="text-sm font-medium text-blue-300">Calls Today</p>
+          <p className="text-2xl font-bold text-blue-100">
+            {status.callsThisEpoch}
           </p>
+          <p className="text-xs text-blue-400/80">of {status.epochQuota} (limit)</p>
         </div>
 
-        <div className="p-4 bg-green-50 rounded">
-          <p className="text-sm text-green-600 font-medium">Remaining</p>
-          <p className="text-2xl font-bold text-green-900">{status.remainingCalls}</p>
-          <p className="text-xs text-green-500">
-            calls this epoch
+        <div className="rounded-xl bg-green-500/10 p-4">
+          <p className="text-sm font-medium text-green-300">Remaining</p>
+          <p className="text-2xl font-bold text-green-100">
+            {status.remainingCalls}
           </p>
+          <p className="text-xs text-green-400/80">calls this epoch</p>
         </div>
 
-        <div className="p-4 bg-purple-50 rounded">
-          <p className="text-sm text-purple-600 font-medium">Balance</p>
-          <p className="text-2xl font-bold text-purple-900">
-            {Number(status.balanceUsdc) / 1_000_0000}
+        <div className="rounded-xl bg-purple-500/10 p-4">
+          <p className="text-sm font-medium text-purple-300">Balance</p>
+          <p className="text-2xl font-bold text-purple-100">
+            {formatUsdc(status.balanceUsdc)}
           </p>
-          <p className="text-xs text-purple-500">
-            USDC (on-chain in M8)
-          </p>
+          <p className="text-xs text-purple-400/80">USDC deposit (testnet)</p>
         </div>
 
-        <div className="p-4 bg-gray-50 rounded">
-          <p className="text-sm text-gray-600 font-medium">Active Keys</p>
-          <p className="text-2xl font-bold text-gray-900">{status.activeKeys}</p>
-          <p className="text-xs text-gray-500">
-            API keys for this account
-          </p>
+        <div className="rounded-xl bg-zinc-500/10 p-4">
+          <p className="text-sm font-medium text-zinc-300">Active Keys</p>
+          <p className="text-2xl font-bold text-zinc-100">{status.activeKeys}</p>
+          <p className="text-xs text-zinc-400">API keys for this account</p>
         </div>
       </div>
 
       {status.depositStatus?.slashed && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
-          <p className="text-sm text-red-700 font-semibold">⚠ Slashed</p>
-          <p className="text-xs text-red-600">
+        <div className="mt-4 rounded-lg border border-red-900/60 bg-red-950/50 p-3">
+          <p className="text-sm font-semibold text-red-300">⚠ Slashed</p>
+          <p className="text-xs text-red-400/90">
             This deposit has been slashed due to rate limit violation.
           </p>
         </div>
@@ -137,3 +134,4 @@ export function DashboardStatus() {
     </div>
   );
 }
+

@@ -28,8 +28,10 @@ export default defineConfig({
   webServer: {
     // AUTH_URL makes next-auth trust the local host so the session endpoint
     // responds normally during the smoke (otherwise harmless UntrustedHost
-    // errors spam the server log).
-    command: `npm run build && AUTH_URL=http://127.0.0.1:${PORT} npm run start -- -p ${PORT}`,
+    // errors spam the server log). AUTH_SECRET is required by next-auth v5
+    // in production mode (`next start`); without it every page 500s with
+    // MissingSecret. This value is test-only configuration, not a credential.
+    command: `npm run build && AUTH_URL=http://127.0.0.1:${PORT} AUTH_SECRET=stellar-launch-e2e-test-secret-not-for-production ENABLE_DEV_LOGIN=1 npm run start -- -p ${PORT}`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

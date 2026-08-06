@@ -59,14 +59,14 @@ export function BuyCreditsSection() {
   };
 
   return (
-    <div className="p-6 border rounded-lg">
-      <h2 className="text-lg font-semibold mb-2">Buy Credits</h2>
-      <p className="text-sm text-gray-500 mb-4">
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+      <h2 className="mb-2 text-lg font-semibold text-zinc-100">Buy Credits</h2>
+      <p className="mb-4 text-sm text-zinc-400">
         Purchase credits to use with your API key. Each call costs $0.001.
       </p>
 
       {error && (
-        <div className="p-3 mb-4 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-900/60 bg-red-950/50 p-3 text-sm text-red-300">
           {error}
         </div>
       )}
@@ -75,23 +75,24 @@ export function BuyCreditsSection() {
         {TIERS.map((t) => (
           <div
             key={t.id}
-            className="p-4 border rounded-lg text-center hover:border-blue-500 transition-colors"
+            className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 text-center transition-colors hover:border-indigo-500/60"
           >
-            <h3 className="font-semibold">{t.label}</h3>
-            <p className="text-2xl font-bold mt-1">{t.amount}</p>
-            <p className="text-sm text-gray-500 mt-1">{t.calls}</p>
+            <h3 className="font-semibold text-zinc-100">{t.label}</h3>
+            <p className="mt-1 text-2xl font-bold text-white">{t.amount}</p>
+            <p className="mt-1 text-sm text-zinc-500">{t.calls}</p>
             <button
               onClick={() => handleCheckout(t.id)}
               disabled={loading !== null}
-              className="mt-3 w-full px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="mt-3 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading === t.id ? 'Redirecting...' : 'Buy Now'}
             </button>
           </div>
         ))}
       </div>
-      <p className="text-xs text-gray-400 mt-3">
-        Payments via Stripe (test mode). Credits are added after payment confirmation.
+      <p className="mt-3 text-xs text-zinc-500">
+        Payments via Stripe (test mode). Credits are added after payment
+        confirmation.
       </p>
     </div>
   );
