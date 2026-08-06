@@ -26,3 +26,5 @@ target/
 # IDE
 .vscode/
 .idea/
+.worktrees/
+.vercel
