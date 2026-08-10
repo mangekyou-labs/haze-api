@@ -2,15 +2,15 @@
  * Minimal type declaration for `circomlibjs`.
  *
  * `circomlibjs` ships no type definitions. We declare only the members the
- * codebase uses (MiMCSponge hash), keeping strict mode intact without an
- * `any`-escape. Values are typed as `Uint8Array` to match the byte-array
- * conversion performed by the Merkle tree implementation.
+ * codebase uses (MiMCSponge constants), keeping strict mode intact without
+ * an `any`-escape. The constants are read from circomlibjs, while the hash
+ * arithmetic itself is performed over BLS12-381 Fr in `merkle.ts`.
  */
 declare module 'circomlibjs' {
   export function buildMimcSponge(): Promise<{
+    cts: Uint8Array[];
     F: {
-      e: (x: Uint8Array) => Uint8Array;
+      toObject: (x: Uint8Array) => bigint;
     };
-    multiHash: (arr: bigint[]) => Uint8Array;
   }>;
 }

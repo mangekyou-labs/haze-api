@@ -1,33 +1,80 @@
 // Off-chain Merkle tree — mirrors the on-chain tree for computing new roots.
-// Uses MiMCSponge (same hash as the Circom circuits) with arity-2, depth-3.
+// The circuits are compiled with `-p bls12381`, so the MiMCSponge arithmetic
+// must use BLS12-381 Fr. circomlibjs exposes the standard round constants but
+// its convenience hash is BN254-only; the field arithmetic below is local.
 
 import { buildMimcSponge } from 'circomlibjs';
 
 const TREE_DEPTH = 3;
 const ZERO_VALUE = BigInt(0);
+const MIMC_ROUNDS = 220;
+const FIELD_ORDER = BigInt(
+  '0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001',
+);
 
-let mimc: Awaited<ReturnType<typeof buildMimcSponge>> | null = null;
+let mimcConstantsPromise: Promise<bigint[]> | null = null;
 
-async function getMimc() {
-  if (!mimc) {
-    mimc = await buildMimcSponge();
+async function getMimcConstants(): Promise<bigint[]> {
+  if (!mimcConstantsPromise) {
+    mimcConstantsPromise = buildMimcSponge().then((mimc) =>
+      mimc.cts.map((constant) => BigInt(mimc.F.toObject(constant).toString())),
+    );
   }
-  return mimc;
+  return mimcConstantsPromise;
 }
 
 export function frOrder(): bigint {
-  return BigInt('0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001');
+  return FIELD_ORDER;
+}
+
+function mod(value: bigint): bigint {
+  return value % FIELD_ORDER;
+}
+
+function pow5(value: bigint): bigint {
+  const square = mod(value * value);
+  return mod(mod(square * square) * value);
+}
+
+function mimcFeistel(
+  xLInput: bigint,
+  xRInput: bigint,
+  constants: bigint[],
+): { xL: bigint; xR: bigint } {
+  let xL = mod(xLInput);
+  let xR = mod(xRInput);
+
+  for (let round = 0; round < MIMC_ROUNDS; round++) {
+    const roundConstant = round === 0 || round === MIMC_ROUNDS - 1
+      ? 0n
+      : constants[round];
+    const t = mod(xL + roundConstant);
+    const xRPrevious = xR;
+
+    if (round < MIMC_ROUNDS - 1) {
+      xR = xL;
+      xL = mod(xRPrevious + pow5(t));
+    } else {
+      xR = mod(xRPrevious + pow5(t));
+    }
+  }
+
+  return { xL, xR };
 }
 
 async function hash(left: bigint, right: bigint): Promise<bigint> {
-  const m = await getMimc();
-  const result = m.F.e(m.multiHash([left, right]));
-  // result is a Uint8Array — convert to bigint
-  let val = BigInt(0);
-  for (let i = 0; i < result.length; i++) {
-    val = (val << BigInt(8)) | BigInt(result[i]);
+  const constants = await getMimcConstants();
+  let rate = 0n;
+  let capacity = 0n;
+
+  for (const input of [left, right]) {
+    rate = mod(rate + input);
+    const state = mimcFeistel(rate, capacity, constants);
+    rate = state.xL;
+    capacity = state.xR;
   }
-  return val % frOrder();
+
+  return rate;
 }
 
 export class MerkleTree {

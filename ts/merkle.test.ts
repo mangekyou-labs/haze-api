@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { MerkleTree, frOrder } from './merkle.js';
+import { groth16 } from 'snarkjs';
+import { resolve } from 'node:path';
+
+const CIRCUITS_DIR = resolve(import.meta.dirname!, '..', 'circuits');
 
 describe('MerkleTree', () => {
   it('starts with zero root', () => {
@@ -70,4 +74,20 @@ describe('MerkleTree', () => {
     const root = await tree.insert(BigInt(42));
     expect(root).toBeLessThan(frOrder());
   });
+
+  it('matches the BLS12-381 MiMC root produced by the RLN circuit', async () => {
+    const { publicSignals } = await groth16.fullProve(
+      {
+        secret_k: '12345',
+        merkle_path_elements: ['0', '0', '0'],
+        merkle_path_indices: ['0', '0', '0'],
+      },
+      resolve(CIRCUITS_DIR, 'deposit_membership.wasm'),
+      resolve(CIRCUITS_DIR, 'deposit_membership_final.zkey'),
+    );
+    const tree = new MerkleTree();
+    const root = await tree.insert(BigInt(publicSignals[1]));
+
+    expect(root.toString()).toBe(publicSignals[0]);
+  }, 120_000);
 });
