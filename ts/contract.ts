@@ -98,6 +98,38 @@ export async function buildWithdrawEnvelope(
   return tx.toEnvelope().toXDR('base64');
 }
 
+// Permissionless slash transaction builder. The reporter signs the inner
+// transaction locally; the fee-sponsor service adds the fee payer signature
+// without changing the slash call or its effects.
+export async function buildSlashEnvelope(
+  reporterSecretKey: string,
+  slashProof: object,
+  pubSignals: string[],
+  commitment: string,
+  submitter: string,
+): Promise<string> {
+  const server = getServer();
+  const contract = getContract();
+  const keypair = Keypair.fromSecret(reporterSecretKey);
+  const source = await server.getAccount(keypair.publicKey());
+
+  const proofVal = nativeToScVal(slashProof, {});
+  const signalsVal = nativeToScVal(pubSignals.map((signal) => BigInt(signal)), {});
+  const commitmentVal = nativeToScVal(BigInt(commitment), { type: 'u256' });
+  const submitterVal = new Address(submitter).toScVal();
+
+  const tx = new TransactionBuilder(source, {
+    fee: '100000',
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call('slash', proofVal, signalsVal, commitmentVal, submitterVal))
+    .setTimeout(30)
+    .build();
+
+  tx.sign(keypair);
+  return tx.toEnvelope().toXDR('base64');
+}
+
 export async function getDeposit(
   commitment: string,
 ): Promise<{ amount: string; depositor: string; slashed: boolean; withdrawn: boolean } | null> {

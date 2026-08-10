@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "prebuild": "node scripts/prepare-shared-package.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
@@ -16,7 +17,7 @@
     "@stellar/stellar-sdk": "^16.0.1",
     "@stripe/react-stripe-js": "^6.7.0",
     "@stripe/stripe-js": "^9.9.0",
-    "@zk-credits/shared": "file:../packages/zk-credits-shared",
+    "@zk-credits/shared": "file:vendor/zk-credits-shared",
     "next": "16.2.10",
     "next-auth": "^5.0.0-beta.31",
     "react": "19.2.4",

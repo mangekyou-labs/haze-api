@@ -11,9 +11,9 @@ description: Ordered implementation plan derived from the approved requirements,
 
 This is the working plan for `stellar-launch`, a parallel track to `feature-mina-protocol-migration`. The existing Stellar v1 codebase (circuits, Soroban contract, gateway, web) is already built; this plan adds the PRXVT-derived hardening (fee sponsorship, durable storage, type safety, self-verify, isomorphism), resolves the six v1 open questions, and takes the result to a public hosted testnet launch.
 
-Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 todo (3.5 CI GREEN 2026-08-05, final verified run 31026106925; 3.1-3.4 blocked on accounts/secrets)` -> `M4 todo` -> `Web UI fix & browser verification IN PROGRESS (user-directed 2026-08-06; see 2026-08-06 reconciliation)`.
+Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 IN PROGRESS (3.1 confirmed; 3.2/3.4 deployed; 3.3 Vercel web is next)` -> `M4 todo` -> `Web UI fix & browser verification DONE (W1–W7)`.
 
-### Current Status (reconciled 2026-08-04)
+### Current Status (reconciled 2026-08-09)
 
 M1 (Hardening foundation) is **COMPLETE and verified**:
 
@@ -26,14 +26,26 @@ M1 (Hardening foundation) is **COMPLETE and verified**:
 
 Full gates green: `ts` 63/64 (1 pre-existing skip), shared package 12/12, all circuit tests pass, both typechecks exit 0, escape-scan 0.
 
-M2 (Durable storage + fee sponsorship) is **in progress**: 2.1 done (PostgreSQL schemas + migrations + fails-closed config, verified against local Postgres 16); 2.2 done (gateway durable store + server wiring + restart reconstruction + stale-cache on-chain fallback); 2.3 done (billing webhook idempotency); 2.6 done (per-call async `spend()` worker, durable settlement queue); 2.4 done (fee-sponsor service + public fee-relay, method-validation gate, fee-bump + idempotency); 2.5 done (gateway `/v1/withdraw` co-signer → fee-relay handoff; suite 129/139 + DB 36/36 green). **M2 code complete offline** — the only remaining M2 items are the live Stellar testnet spikes (spend worker + fee relay + withdraw) pending user-funded keys.
+M2 (Durable storage + fee sponsorship) is **CODE COMPLETE offline**: 2.1 done (PostgreSQL schemas + migrations + fails-closed config, verified against local Postgres 16); 2.2 done (gateway durable store + server wiring + restart reconstruction + stale-cache on-chain fallback); 2.3 done (billing webhook idempotency); 2.6 done (per-call async `spend()` worker, durable settlement queue); 2.4 done (fee-sponsor service + public fee-relay, method-validation gate, fee-bump + idempotency); 2.5 done (gateway `/v1/withdraw` co-signer → fee-relay handoff; suite 129/139 + DB 36/36 green). **M2 code complete offline** — the only remaining M2 items are the live Stellar testnet spikes (spend worker + fee relay + withdraw) pending user-funded keys.
+
+M3 (Hosted deployment) is **IN PROGRESS**:
+- **3.5 CI** ✅ DONE 2026-08-05 (final verified run 31026106925 GREEN: all 6 jobs)
+- **3.2 Gateway deployment** ✅ DEPLOYED — deployed to Fly.io at https://zk-credits-gateway.fly.dev with Postgres attached (`zk-credits-api-db`); the trial Postgres machine stopped during hosted verification and was restarted, so a launch deployment needs a durable/non-autostopping database policy
+- **3.4 Fee-sponsor deployment** ✅ DEPLOYED — deployed to Fly.io at https://zk-credits-fee-sponsor.fly.dev; `/health` returned `200` on 2026-08-09, but live fee-bump validation remains pending
+- **3.1 Contract confirm** ✅ VERIFIED 2026-08-09 — after restarting the attached Postgres machine, public HTTPS `/v1/contract-status` returned HTTP 200 with `depositCount: 3`, `currentRoot`, the deployed contract ID, and `stellar:testnet`
+- **3.3 Vercel web** 🔄 BLOCKED ON CONFIGURATION — project `feature-zk-api-credits` is linked and `vercel build --yes` is green after the shared-package packaging fix; Vercel has no environment variables, so GitHub OAuth, Stripe checkout, gateway proxy auth, and production auth cannot be validated or promoted yet
+
+M4 (Launch validation) is **NOT STARTED** — will begin after M3.3 and the live testnet spike.
+
+Web UI fix track (user-directed 2026-08-06): **DONE** — W1–W7 implemented, committed in `ba47f4c`, and re-verified locally on 2026-08-09.
 
 ### Next Focus
 
-M2 in progress — **all M2 code tasks done offline (2.1–2.6)**. Remaining M2 work is the live testnet validation (user provides funded Stellar keys):
-1. **Live Stellar testnet spike** — run real `spend()` submissions (spend worker), real fee-bump relay (slash + withdraw), and a real co-signed withdrawal through `/v1/withdraw`.
-2. Then **M3 hosted deployment** (Fly.io gateway + fee-sponsor, Vercel web, Soroban testnet contract confirm) — the fee-sponsor service package is ready (`services/fee-sponsor`).
-3. **M3.5 CI — DONE 2026-08-05** (final verified run 31026106925 GREEN: all 6 jobs; the workflows + web test baseline + circuit-artifact tracking shipped earlier, then 4 failed runs were iterated to green — @emnapi lockfile gap, `@zk-credits/shared` dist build gap, and a step working-directory path bug).
+M3 is now **in progress** with the gateway and fee-sponsor deployed; implementation focus advances to **3.3 Vercel web deployment**:
+1. **3.3 Vercel web deployment** — linked locally; user must configure Vercel env vars (`NEXT_PUBLIC_GATEWAY_URL` → `https://zk-credits-gateway.fly.dev`, `GATEWAY_URL`, `GATEWAY_SECRET`, `AUTH_SECRET`/`AUTH_URL`, GitHub OAuth, and Stripe) before `vercel deploy --prod`.
+2. **Fly Postgres continuity** — the trial database stopped during verification and was restarted; provision a durable replacement or disable autostop before treating the hosted gateway as launch-stable.
+3. **Live Stellar testnet spike** — once hosted access is verified and user-funded keys are available, run real `spend()` submissions, fee-bump relay, and co-signed withdrawal through `/v1/withdraw`.
+4. **M4 launch validation** — hosted E2E, slash/withdraw demos, restart durability, honest-caveats README, and OpenRouter tier check.
 
 Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); OpenRouter per-key limits (M4.6 pre-check); CI needs circuit artifacts + circom/stellar-cli in Docker (risk table); fresh trusted-setup regen deferred to a capable machine — and if it lands, M3.1 becomes a redeploy again.
 
@@ -42,7 +54,7 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
 
 - [x] **M1 — Hardening foundation:** TypeScript strict mode, isomorphic shared crypto package, client-side proof self-verification. (PRXVT guardrails first, so later code builds on a clean base.) — DONE (2026-08-04): 1.0–1.3 all complete and verified.
 - [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — CODE COMPLETE (2026-08-04): 2.1–2.6 all done and verified offline (durable store, restart reconstruction, billing idempotency, spend worker, fee-relay, withdraw co-signer). Remaining: live Stellar testnet spike (pending user-funded keys) before M3.
-- [ ] **M3 — Hosted deployment:** Soroban testnet contract, Fly.io gateway, Vercel web, fee-sponsor service, CI pipeline. — Prep: `services/fee-sponsor` package is code-complete and boots via tsx (offline); 3.1 remains a contract confirm; **3.5 (CI) DONE 2026-08-05** (run 31025062673 GREEN, all 6 jobs). 3.1–3.4 remain blocked on testnet keys/accounts + Fly.io/Vercel secrets.
+- [ ] **M3 — Hosted deployment:** Soroban testnet contract, Fly.io gateway, Vercel web, fee-sponsor service, CI pipeline. — **IN PROGRESS**: 3.5 CI DONE 2026-08-05; **3.2 gateway deployed 2026-08-08** (https://zk-credits-gateway.fly.dev) with Postgres attached; free-tier Postgres replacement policy recorded; **3.4 fee-sponsor deployed 2026-08-08** (https://zk-credits-fee-sponsor.fly.dev); 3.1 contract confirm pending; **3.3 Vercel web is next** (`vercel link` + env vars).
 - [ ] **M4 — Launch validation + evidence:** hosted E2E, slash demo, withdraw demo, restart durability, README/landing honest caveats, OpenRouter tier check.
 
 ## Task Breakdown
@@ -123,14 +135,14 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
 
 ### M3 — Hosted deployment
 
-- [ ] **3.1 Deploy `ZkCreditsContract` to Soroban testnet.** — SCOPE CHANGED: now a CONFIRM, not a redeploy
+- [x] **3.1 Deploy `ZkCreditsContract` to Soroban testnet.** — SCOPE CHANGED: now a CONFIRM, not a redeploy — VERIFIED 2026-08-09
   - Outcome: Confirm the already-deployed `ZkCreditsContract` on Stellar testnet uses the committed real verification keys; configure gateway to read contract state.
   - Depends on: 2.2 (gateway reads from durable state + on-chain events).
-  - Validation: `GET /v1/contract-status` returns deposit count and roots from the public gateway. (Covers testing: integration gateway + Soroban.)
+  - Validation: `GET /v1/contract-status` returns deposit count and roots from the public gateway. (Covers testing: integration gateway + Soroban.) **PASS:** HTTP 200, `depositCount: 3`, `currentRoot` present, `network: stellar:testnet`.
   - Related testing scenarios: gateway + Soroban integration; hosted E2E.
-  - Status: the contract was deployed 2026-07-14 with the real BLS12-381 VK, and M1.0 verified the committed `verification_key_*.json` match both the zkeys and (via the `_soroban` conversions) the deployed contract. Redeploy only becomes necessary if the optional fresh trusted-setup regen ships new VKs.
+  - Status: the contract was deployed 2026-07-14 with the real BLS12-381 VK, and M1.0 verified the committed `verification_key_*.json` match both the zkeys and (via the `_soroban` conversions) the deployed contract. Public gateway confirmation passed after the attached Postgres machine was restarted. Redeploy only becomes necessary if the optional fresh trusted-setup regen ships new VKs.
 
-- [ ] **3.2 Deploy the gateway to Fly.io with PostgreSQL.**
+- [x] **3.2 Deploy the gateway to Fly.io with PostgreSQL.** — DEPLOYED; replace a terminated free-tier Postgres machine with a fresh Fly Postgres database when needed
   - Outcome: Deploy the hardened gateway to Fly.io with a PostgreSQL instance (Fly.io Postgres or external); public URL; environment-separated secrets; `/health` endpoint.
   - Depends on: 2.2, 3.1.
   - Validation: Public `GET /health` returns 200 from an external network. (Covers testing: public URL accessibility.)
@@ -142,7 +154,7 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
   - Validation: Public sign-in -> buy -> dashboard works end-to-end. (Covers testing: public URL accessibility; hosted E2E.)
   - Related testing scenarios: hosted E2E; manual onboarding UX.
 
-- [ ] **3.4 Deploy the fee-sponsor service.**
+- [x] **3.4 Deploy the fee-sponsor service.** — DEPLOYED; live fee-bump validation remains pending
   - Outcome: Deploy `services/fee-sponsor` (Fly.io or co-hosted with gateway); public fee-relay endpoint; environment-separated sponsor XLM key.
   - Depends on: 2.4, 3.1.
   - Validation: Fee-relay reachable from an external network; a valid slash/withdraw transaction is fee-bumped. (Covers testing: fee-sponsor + Soroban integration; public URL accessibility.)
@@ -318,22 +330,44 @@ User reported the web UI "sucks, ugly and didn't work at all" and directed a Pla
 - [x] **W4 Functional fixes.** — DONE: `formatUsdc` helper + vitest spec wired into `dashboard-status.tsx` (10⁶ fix, label "USDC deposit (testnet)"); `AUTH_SECRET` + `ENABLE_DEV_LOGIN=1` in the Playwright webServer (test-only values); GitHub placeholder → real repo; env-driven gateway URL (`NEXT_PUBLIC_GATEWAY_URL`, fallback localhost:3001) + onboarding/recover links in `api-key-section.tsx`; dashboard + buy-credits restyle; `web/.env.example` + gitignored `.env.local`; **opt-in dev login** (`ENABLE_DEV_LOGIN=1`, off by default, never for production) so the signed-in flow is usable/testable without a GitHub OAuth app.
 - [x] **W5 Playwright specs authored (TDD red confirmed).** — DONE: `e2e/auth-flow.spec.ts`, `e2e/landing.spec.ts`, `e2e/onboarding.spec.ts` (full wizard + IndexedDB persistence + recover round-trip + malformed-phrase error). Red evidence `/tmp/e2e-red.log`: landing-styled ✘, header/footer ✘, round-trip ✘ (missing hooks); auth-flow ✓ only after the AUTH_SECRET fix (500 at baseline).
 - [x] **W6 Live Playwright MCP verification (prod build).** — DONE: landing renders styled (`after-landing.png`); onboarding wizard works end-to-end in a real browser (Generate → 24 words → confirm 3 → "All Set!" → IndexedDB `secret_k` 64-hex + `commitment` persisted); anonymous "Go to Dashboard" → `/sign-in`. Discovered dev-only artifact: the Next dev client's failing HMR WebSocket triggers full page reloads that destroy React state mid-proving — not a product bug; prod builds unaffected.
-- [ ] **W7 Completion.** — dashboard restyle + `formatUsdc` wiring + env-driven gateway URL; `.env.example`/`.env.local`; full gates green (vitest, typecheck, e2e, build); testing + implementation doc updates; commit.
+- [x] **W7 Completion.** — dashboard restyle + `formatUsdc` wiring + env-driven gateway URL; `.env.example`/`.env.local`; full gates green; testing + implementation docs updated; implementation committed in `ba47f4c`.
 
-### Reconciliation (Dev-Planning · Phase 6 — reconciled 2026-08-06)
+### Reconciliation (Dev-Planning · Phase 6 — reconciled 2026-08-08)
 
-**Milestone status:** `M1 DONE` · `M2 CODE-COMPLETE (live testnet spike pending)` · `M3 not started (3.5 CI DONE)` · `M4 not started` · **NEW track: Web UI fix & browser verification — IN PROGRESS** (W1–W6 done, W7 in progress).
+**Milestone status:** `M1 DONE` · `M2 CODE-COMPLETE (live testnet spike pending)` · `M3 IN PROGRESS (3.5 CI DONE; 3.2 gateway deployed; 3.4 fee-sponsor deployed; 3.1 contract confirm pending; 3.3 Vercel web pending)` · `M4 todo` · **Web UI fix & browser verification — IN PROGRESS** (W1–W6 done, W7 in progress).
 
-**Done this phase:** W1 baseline, W2 Tailwind v4, W3 design polish (4 pages + shared header/footer), W4 partial (formatUsdc, AUTH_SECRET test config, real repo link), W5 red Playwright specs, W6 live MCP verification of the browser crypto path (first time it was ever browser-tested).
+**Done this phase (2026-08-08):**
+- C1–C7 deployment config work: `ts/Dockerfile`, `services/fee-sponsor/Dockerfile`, `ts/fly.toml`, `services/fee-sponsor/fly.toml`, `web/vercel.json`, `.dockerignore`, `docker-compose.yml`
+- Updated `.env.example` (root + web) with deployment-specific env var documentation
+- Created deployment guide: `docs/ai/deployment/2026-08-04-feature-stellar-launch.md`
+- **Gateway deployed to Fly.io** (2026-08-08): https://zk-credits-gateway.fly.dev with Postgres attached
+- **Fee-sponsor deployed to Fly.io** (2026-08-08): https://zk-credits-fee-sponsor.fly.dev
+- Resolved Docker build issues: copied `packages/zk-credits-shared` into gateway image, fixed fee-sponsor Dockerfile path, added `NODE_OPTIONS=--import tsx` for ESM support, copied `node_modules` into shared package
+- Created Fly.io account setup guide in deployment doc
+- Created Stripe setup guide in deployment doc
 
-**Evidence:** after-fix screenshots `web/e2e-screenshots/*.png` (baseline screenshots were ephemeral under Playwright-cleaned `test-results/`); red run `/tmp/e2e-red.log`; prod verification via Playwright MCP (landing screenshot, wizard IndexedDB round-trip, anonymous redirect, dev-login dashboard); `ai-devkit lint --feature stellar-launch` exit 0.
+**Done this phase (2026-08-06, Web UI fix):** W1 baseline, W2 Tailwind v4, W3 design polish (4 pages + shared header/footer), W4 partial (formatUsdc, AUTH_SECRET test config, real repo link), W5 red Playwright specs, W6 live MCP verification of the browser crypto path (first time it was ever browser-tested).
 
-**Blocked / deferred:** unchanged — M3.1–3.4 + live testnet spike remain blocked on user-funded keys and Fly.io/Vercel/Stripe/GitHub-OAuth secrets. No new blockers.
+**Evidence:** Gateway URL https://zk-credits-gateway.fly.dev; fee-sponsor URL https://zk-credits-fee-sponsor.fly.dev; Fly secrets set (gateway + fee-sponsor); Postgres cluster `zk-credits-api-db` attached; `ai-devkit lint --feature stellar-launch` exit 0.
 
-**Scope changes recognized this phase:** (1) new Web-UI-fix track added by user direction; (2) `AUTH_SECRET` is now a documented hard requirement for the web app in production mode (to be added to `web/.env.example` and the deployment doc); (3) `/onboarding` becomes a first-class entry point (linked from the signed-in flow in W7); (4) Playwright e2e grows from 2 smoke tests to 10, finally covering the browser commitment path the vitest config comment already promised.
+**Blocked / deferred:** (1) M3.1 contract confirm — needs manual verification that on-chain `ZK_CONTRACT_ID` matches repo VKs (user action); (2) M3.3 Vercel web — needs user to run `vercel link` + configure env vars; (3) live Stellar testnet spike — needs user-funded testnet keys; (4) Stripe account still needs to be created by user. **Fly continuity policy:** if free-tier Postgres is terminated, provision a fresh Fly Postgres database and reattach/reconfigure the gateway; do not treat the termination as a source-code blocker.
 
-**Next 2-3 actionable tasks:** (1) finish W7 (dashboard restyle + formatUsdc wiring + env-driven gateway URL + `.env.example`/`.env.local`); (2) run full gates green (vitest, typecheck, `playwright test`, `next build`) and capture after-fix screenshots; (3) update testing + implementation docs and commit; then resume M3 prep (3.1 contract confirm) and the live testnet spike when keys arrive.
+**Scope changes recognized this phase:** (1) M3 moved from "todo/blocked" to "in progress" with two services deployed; (2) new deployment infrastructure docs created; (3) `Dockerfile` + `fly.toml` created for both gateway and fee-sponsor; (4) Web-UI-fix track added by user direction (W1–W6 done, W7 pending).
 
-**Summary:** The user-directed Web-UI-fix track diagnosed why the app "didn't work at all": Tailwind classes with no Tailwind installed (unstyled UI) plus next-auth `MissingSecret` 500s poisoning every page via the root `SessionProvider`. W1–W6 fixed the styling (Tailwind v4 per the Next 16 recipe), shipped a dark modern redesign of landing/sign-in/onboarding/recover with an honest-caveats footer, fixed the placeholder GitHub link, added the `formatUsdc` helper for the USDC-decimals bug, and — for the first time — browser-verified the full onboarding crypto flow via Playwright MCP against a production build (24-word mnemonic → confirm → IndexedDB persistence → anonymous redirect), with red-first Playwright specs now guarding all of it. W7 (dashboard restyle + remaining functional wiring + gates + docs + commit) is the only remaining work in this track; M2/M3/M4 status is unchanged.
+**Next 2-3 actionable tasks:** (1) **3.1 Contract confirm** — call `/v1/contract-status` on the deployed gateway to verify on-chain VK matches repo; (2) **3.3 Vercel web** — user runs `vercel link` + `vercel env add` for each required var + `vercel deploy`; (3) **W7 Completion** — finish dashboard restyle + formatUsdc wiring + env-driven gateway URL + full gates green + testing/implementation doc updates + commit.
 
+**Summary:** M3 is now in progress with the gateway (https://zk-credits-gateway.fly.dev) and fee-sponsor (https://zk-credits-fee-sponsor.fly.dev) both deployed to Fly.io with Postgres attached. The deployment infrastructure (Dockerfiles, fly.toml, deployment guide, env var docs) is complete. Remaining M3 work: contract confirm (3.1, user verification), Vercel web deployment (3.3, user runs `vercel link`). The live testnet spike (M2) and M4 launch validation are deferred until after M3.3 and user-funded keys arrive. The Web UI fix track (W1–W6 done) has W7 (dashboard restyle + gates + commit) as its final step.
 
+### Reconciliation (Fly deployment recovery · 2026-08-09)
+
+- The attached Postgres machine `zk-credits-api-db` had been stopped with `requested_stop=true`; it was started and its `pg` and `role` checks passed.
+- The gateway machine was started after Postgres recovery. Fly reports its `/health` check passing with the expected Stellar testnet/proof-verification payload.
+- A read-only request from inside the gateway machine returned `/v1/contract-status` with `depositCount: 3`, a current root, and the configured contract ID. Public HTTPS checks still timed out from this environment, so public edge verification remains open.
+- W7 is complete and committed in `ba47f4c`; the next user-dependent step is Vercel setup, followed by the live testnet spike and M4 validation.
+
+### Reconciliation (Dev-Planning · next-task advance · 2026-08-09)
+
+- User clarified that Fly.io deployment remains active work; the free-tier Postgres lifecycle is an operational condition, not a reason to defer M3.
+- M3.2 and M3.4 are recorded as deployed. If the attached free-tier Postgres machine is terminated, the recovery action is to provision a fresh Fly Postgres database and reattach/reconfigure the gateway.
+- No additional Fly.io health checks are required in this pass. The next implementation task is **M3.3 Vercel web deployment**: `vercel link`, configure the documented environment variables, and deploy.
+- M3.1 public contract-status verification and the live Stellar testnet spike remain subsequent validation tasks; they are not changed into source-code blockers.

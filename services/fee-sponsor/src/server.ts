@@ -54,7 +54,7 @@ async function main() {
   }
 
   const pool = createPool(process.env);
-  const migrationsDir = new URL('../../ts/db/migrations/', import.meta.url).pathname;
+  const migrationsDir = new URL('../../../ts/db/migrations/', import.meta.url).pathname;
   await runMigrations(pool, migrationsDir);
 
   const app = createFeeRelayApp({
@@ -67,7 +67,7 @@ async function main() {
 
   const healthApp = express();
   healthApp.use(app);
-  healthApp.listen(PORT, () => {
+  healthApp.listen(PORT, '0.0.0.0', () => {
     console.log(`Fee-sponsor service running on port ${PORT}`);
     console.log(`Contract: ${CONTRACT_ID}`);
   });

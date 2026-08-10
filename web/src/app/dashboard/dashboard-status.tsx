@@ -10,7 +10,7 @@ interface StatusData {
   remainingCalls: number;
   activeKeys: number;
   balanceUsdc: string;
-  depositStatus: { slashed: boolean; withdrawn: boolean } | null;
+  depositStatus: 'active' | 'unfunded' | 'slashed' | 'withdrawn';
 }
 
 export function DashboardStatus() {
@@ -19,7 +19,10 @@ export function DashboardStatus() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadStatus();
+    void loadStatus();
+    const refresh = () => void loadStatus();
+    window.addEventListener('zk-credits-status-refresh', refresh);
+    return () => window.removeEventListener('zk-credits-status-refresh', refresh);
   }, []);
 
   async function loadStatus() {
@@ -123,7 +126,7 @@ export function DashboardStatus() {
         </div>
       </div>
 
-      {status.depositStatus?.slashed && (
+      {status.depositStatus === 'slashed' && (
         <div className="mt-4 rounded-lg border border-red-900/60 bg-red-950/50 p-3">
           <p className="text-sm font-semibold text-red-300">⚠ Slashed</p>
           <p className="text-xs text-red-400/90">
@@ -134,4 +137,3 @@ export function DashboardStatus() {
     </div>
   );
 }
-

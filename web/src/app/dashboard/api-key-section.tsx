@@ -41,7 +41,13 @@ async function writeToStore(key: string, value: string): Promise<void> {
   });
 }
 
-export function ApiKeySection({ userId }: { userId: string }) {
+export function ApiKeySection({
+  userId,
+  gatewayConfigured,
+}: {
+  userId: string;
+  gatewayConfigured: boolean;
+}) {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<string | null>(null);
   const [existingCommitment, setExistingCommitment] = useState<string | null>(null);
@@ -134,6 +140,13 @@ export function ApiKeySection({ userId }: { userId: string }) {
         </div>
       )}
 
+      {!gatewayConfigured && (
+        <div className="mb-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-300">
+          API-key issuance is unavailable because the gateway integration is
+          not configured on this deployment.
+        </div>
+      )}
+
       {mnemonic && !apiKey && (
         <div className="mb-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4">
           <p className="mb-2 font-semibold text-amber-300">
@@ -175,7 +188,7 @@ export function ApiKeySection({ userId }: { userId: string }) {
       ) : (
         <button
           onClick={generateKey}
-          disabled={loading}
+          disabled={loading || !gatewayConfigured}
           className="rounded-xl bg-indigo-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
         >
           {loading
@@ -202,4 +215,3 @@ export function ApiKeySection({ userId }: { userId: string }) {
     </div>
   );
 }
-

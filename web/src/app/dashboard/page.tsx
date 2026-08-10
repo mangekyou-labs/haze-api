@@ -5,6 +5,7 @@ import { SiteFooter } from '@/components/site-footer';
 import { ApiKeySection } from './api-key-section';
 import { BuyCreditsSection } from './buy-credits-section';
 import { DashboardStatus } from './dashboard-status';
+import { isGatewayConfigured, isStripeConfigured } from '@/lib/runtime-config';
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -41,8 +42,17 @@ export default async function DashboardPage() {
 
         <div className="space-y-6">
           <DashboardStatus />
-          <ApiKeySection userId={session.user?.id ?? ''} />
-          <BuyCreditsSection />
+          <ApiKeySection
+            userId={session.user?.id ?? ''}
+            gatewayConfigured={isGatewayConfigured({
+              GATEWAY_SECRET: process.env.GATEWAY_SECRET,
+            })}
+          />
+          <BuyCreditsSection
+            stripeConfigured={isStripeConfigured({
+              STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+            })}
+          />
         </div>
       </div>
 
@@ -50,4 +60,3 @@ export default async function DashboardPage() {
     </main>
   );
 }
-

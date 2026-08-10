@@ -20,6 +20,16 @@ const adapterMock = vi.hoisted(() => ({
   }),
 }));
 
+const contractMock = vi.hoisted(() => ({
+  deposit: vi.fn().mockResolvedValue('mock-tx-hash-abc123'),
+  getDepositCount: vi.fn().mockResolvedValue(0),
+  getCurrentRoot: vi.fn().mockResolvedValue('0'),
+  getDeposit: vi.fn(),
+  isNullifierSpent: vi.fn().mockResolvedValue(false),
+  buildWithdrawEnvelope: vi.fn().mockResolvedValue('mock-withdraw-envelope-xdr'),
+  spend: vi.fn().mockResolvedValue('mock-spend-tx-hash'),
+}));
+
 vi.mock('@zk-credits/shared', () => ({
   verifyGroth16Proof: sharedVerify.verify,
 }));
@@ -31,21 +41,20 @@ vi.mock('./providerAdapter.js', () => ({
   getAdapter: () => adapterMock.adapter(),
 }));
 
-vi.mock('./contract.js', () => ({
-  deposit: vi.fn().mockResolvedValue('mock-tx-hash-abc123'),
-  getDepositCount: vi.fn().mockResolvedValue(0),
-  getCurrentRoot: vi.fn().mockResolvedValue('0'),
-  getDeposit: vi.fn().mockResolvedValue(null),
-  isNullifierSpent: vi.fn().mockResolvedValue(false),
-  buildWithdrawEnvelope: vi.fn().mockResolvedValue('mock-withdraw-envelope-xdr'),
-  spend: vi.fn().mockResolvedValue('mock-spend-tx-hash'),
-}));
+vi.mock('./contract.js', () => contractMock);
 
 beforeEach(async () => {
   await resetGatewayStoreForTests();
   process.env.GATEWAY_SECRET = 'test-secret';
   sharedVerify.verify.mockReset();
   sharedVerify.verify.mockResolvedValue(false);
+  contractMock.getDeposit.mockReset();
+  contractMock.getDeposit.mockResolvedValue({
+    amount: '5000000',
+    depositor: 'GATEWAY',
+    slashed: false,
+    withdrawn: false,
+  });
   adapterMock.forward.mockReset();
   adapterMock.forward.mockResolvedValue(
     new Response(JSON.stringify({ id: 'mock-response', choices: [] }), {
@@ -178,6 +187,33 @@ describe('gateway server', () => {
         .send({ model: 'test', messages: [] });
       // Proof verification should fail for dummy proof
       expect(chatRes.status).toBe(403);
+    });
+
+    it('does not forward a valid proof for an unfunded commitment', async () => {
+      sharedVerify.verify.mockResolvedValue(true);
+      contractMock.getDeposit.mockResolvedValueOnce(null);
+
+      const keyRes = await request(app)
+        .post('/v1/api-keys')
+        .set('Authorization', 'Bearer test-secret')
+        .send({ commitment: '0xunfunded', label: 'test' });
+      const key = keyRes.body.apiKey;
+
+      const proofHeader = Buffer.from(JSON.stringify({
+        proof: { a: '1', b: '2', c: '3' },
+        pubSignals: ['root', 'nullifier-unfunded', 'x', 'y', '20260804'],
+      })).toString('base64');
+
+      const chatRes = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', `Bearer ${key}`)
+        .set('X-ZK-Proof', proofHeader)
+        .send({ model: 'test', messages: [] });
+
+      expect(chatRes.status).toBe(402);
+      expect(chatRes.body.error).toBe('credits_required');
+      expect(adapterMock.forward).not.toHaveBeenCalled();
+      expect(await (getGatewayStore() as MemoryGatewayStore).listAcceptedCalls()).toHaveLength(0);
     });
 
     it('rejects proof with missing proof object fields', async () => {
@@ -323,12 +359,42 @@ describe('gateway server', () => {
 
 
 
-  describe('POST /v1/slash', () => {
-    it('accepts slash submission format', async () => {
+  describe('POST /v1/slash (permissionless → fee relay)', () => {
+    beforeEach(() => {
+      process.env.FEE_SPONSOR_URL = 'http://fee-sponsor.test';
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            accepted: true,
+            method: 'slash',
+            innerTxHash: 'inner-slash-hash',
+            feeBumpHash: 'fee-bump-slash-1',
+            duplicate: false,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ) as unknown as typeof fetch;
+    });
+
+    it('relays a reporter-signed slash transaction for a fee bump', async () => {
       const res = await request(app)
         .post('/v1/slash')
-        .send({ slashProof: { a: '1' }, publicInputs: { epoch: 1 } });
+        .send({ innerTransactionXdr: 'reporter-signed-inner-slash-xdr' });
       expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        slashed: true,
+        method: 'slash',
+        feeBumpHash: 'fee-bump-slash-1',
+        duplicate: false,
+        innerTxHash: 'inner-slash-hash',
+      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://fee-sponsor.test/v1/fee-relay',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ innerTransactionXdr: 'reporter-signed-inner-slash-xdr' }),
+        }),
+      );
     });
 
     it('rejects missing fields', async () => {
@@ -336,15 +402,34 @@ describe('gateway server', () => {
         .post('/v1/slash')
         .send({});
       expect(res.status).toBe(400);
+      expect(res.body.error).toBe('missing_inner_transaction');
+    });
+
+    it('does not claim a slash when the fee relay rejects the transaction', async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'invalid_relay_request' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ) as unknown as typeof fetch;
+
+      const res = await request(app)
+        .post('/v1/slash')
+        .send({ innerTransactionXdr: 'reporter-signed-inner-slash-xdr' });
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe('fee_relay_rejected');
     });
   });
 
   describe('GET /v1/status/:commitment', () => {
     it('returns 0 calls for unknown commitment', async () => {
+      contractMock.getDeposit.mockResolvedValueOnce(null);
       const res = await request(app).get('/v1/status/unknown-commitment');
       expect(res.status).toBe(200);
       expect(res.body.callsThisEpoch).toBe(0);
       expect(res.body.epochQuota).toBeGreaterThan(0);
+      expect(res.body.balanceUsdc).toBe('0');
+      expect(res.body.depositStatus).toBe('unfunded');
     });
 
     it('reflects calls made', async () => {
@@ -357,6 +442,8 @@ describe('gateway server', () => {
       expect(res.status).toBe(200);
       expect(res.body.activeKeys).toBe(1);
       expect(res.body.commitment).toBe('0xstatus-test');
+      expect(res.body.balanceUsdc).toBe('5000000');
+      expect(res.body.depositStatus).toBe('active');
     });
   });
 

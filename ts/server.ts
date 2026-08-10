@@ -114,6 +114,30 @@ export async function resetGatewayStoreForTests(): Promise<void> {
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const EPOCH_QUOTA = Number(process.env.DEFAULT_EPOCH_QUOTA ?? '100');
 
+type DepositState = {
+  amount: string;
+  depositor: string;
+  slashed: boolean;
+  withdrawn: boolean;
+};
+
+type DepositStatus = 'active' | 'unfunded' | 'slashed' | 'withdrawn';
+
+function getDepositStatus(deposit: DepositState | null): DepositStatus {
+  if (!deposit) return 'unfunded';
+  if (deposit.slashed) return 'slashed';
+  if (deposit.withdrawn) return 'withdrawn';
+  try {
+    return BigInt(String(deposit.amount)) > 0n ? 'active' : 'unfunded';
+  } catch {
+    return 'unfunded';
+  }
+}
+
+function hasSpendableDeposit(deposit: DepositState | null): boolean {
+  return getDepositStatus(deposit) === 'active';
+}
+
 // ─── Verification key (loaded at startup) ────────────────────────
 
 let verificationKey: object;
@@ -244,6 +268,27 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
       return;
     }
 
+    // API keys are identifiers, not credit. A valid proof must be backed by
+    // an active Soroban deposit before it can reach the paid upstream model.
+    // This keeps testnet Stripe checkout and on-chain USDC as the funding
+    // boundary without ever storing card or payment details in the gateway.
+    const contractModule = await import('./contract.js');
+    let deposit: DepositState | null;
+    try {
+      deposit = await contractModule.getDeposit(keyRecord.commitment);
+    } catch (err: unknown) {
+      console.error('Deposit status read failed:', errorMessage(err));
+      res.status(503).json({ error: 'credit_status_unavailable' });
+      return;
+    }
+    if (!hasSpendableDeposit(deposit)) {
+      res.status(402).json({
+        error: 'credits_required',
+        message: 'Complete testnet checkout and wait for the Soroban deposit to confirm',
+      });
+      return;
+    }
+
     // RLN public signal layout: [root, nullifier, share_x, share_y, epoch]
     const nullifier = extractNullifier(zkProof.pubSignals);
 
@@ -256,7 +301,6 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
 
     // Stale-cache fallback: if we have no local record (e.g. after a cache
     // wipe or an event we missed), ask the contract directly.
-    const contractModule = await import('./contract.js');
     if (await contractModule.isNullifierSpent(nullifier)) {
       await gatewayStore.markNullifierSpentOnChain(nullifier);
       res.status(403).json({ error: 'nullifier_spent', message: 'This nullifier has already been spent on-chain' });
@@ -296,19 +340,49 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
   }
 });
 
-// ─── POST /v1/slash (permissionless) ────────────────────────────
+// ─── POST /v1/slash (permissionless → fee sponsor) ─────────────
+// A reporter builds and signs the inner slash() transaction locally. The
+// reporter's account is the transaction source and submitter argument, but
+// does not need XLM: the fee sponsor wraps this exact inner transaction in a
+// fee bump and submits it. The contract remains the authority that verifies
+// the proof, binds it to the commitment, and pays the 50/50 split.
 
-app.post('/v1/slash', (req: Request, res: Response) => {
+app.post('/v1/slash', async (req: Request, res: Response) => {
   try {
-    const { slashProof, publicInputs } = req.body;
-    if (!slashProof || !publicInputs) {
-      res.status(400).json({ error: 'missing_fields' });
+    const innerTransactionXdr =
+      (req.body?.innerTransactionXdr ?? req.body?.innerTxXdr) as string | undefined;
+    if (!innerTransactionXdr) {
+      res.status(400).json({ error: 'missing_inner_transaction' });
       return;
     }
-    res.json({ slashed: false, note: 'Slash submission endpoint — E2E in milestone 9' });
-  } catch (err) {
-    console.error('/v1/slash error:', err);
-    res.status(500).json({ error: 'internal_error' });
+
+    const feeSponsorUrl = process.env.FEE_SPONSOR_URL || 'http://localhost:3002';
+    const relayRes = await fetch(`${feeSponsorUrl}/v1/fee-relay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ innerTransactionXdr }),
+    });
+    const relayData = await relayRes.json();
+
+    if (!relayRes.ok) {
+      res.status(502).json({
+        error: 'fee_relay_rejected',
+        message: relayData.error ?? 'unknown',
+      });
+      return;
+    }
+
+    res.json({
+      slashed: true,
+      method: relayData.method,
+      feeBumpHash: relayData.feeBumpHash,
+      duplicate: relayData.duplicate ?? false,
+      innerTxHash: relayData.innerTxHash,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'unknown';
+    console.error('/v1/slash error:', message);
+    res.status(503).json({ error: 'fee_relay_unavailable', message });
   }
 });
 
@@ -358,14 +432,25 @@ app.get('/v1/status/:commitment', async (req: Request, res: Response) => {
     const keyRecords = await gatewayStore.listApiKeys(commitment);
     const userKeys = keyRecords.map((record) => ({ label: record.label, createdAt: record.issuedAt.getTime() }));
 
+    const contractModule = await import('./contract.js');
+    let deposit: DepositState | null;
+    try {
+      deposit = await contractModule.getDeposit(commitment);
+    } catch (err: unknown) {
+      console.error('Deposit status read failed:', errorMessage(err));
+      res.status(503).json({ error: 'credit_status_unavailable' });
+      return;
+    }
+    const depositStatus = getDepositStatus(deposit);
+
     res.json({
       commitment,
       callsThisEpoch: userCalls,
       epochQuota: EPOCH_QUOTA,
       remainingCalls: Math.max(0, EPOCH_QUOTA - userCalls),
       activeKeys: userKeys.length,
-      balanceUsdc: '0',
-      depositStatus: null,
+      balanceUsdc: depositStatus === 'active' ? String(deposit!.amount) : '0',
+      depositStatus,
     });
   } catch (err) {
     console.error('/v1/status error:', err);
@@ -621,7 +706,7 @@ if (require.main === module) {
       process.exit(1);
     })
     .then(() => {
-      app.listen(PORT, () => {
+      app.listen(PORT, '0.0.0.0', () => {
         console.log(`ZK-API Credits Gateway running on port ${PORT}`);
         console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
         console.log(`Quota: ${EPOCH_QUOTA} calls/epoch`);

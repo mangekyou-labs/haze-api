@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 const TIERS = [
   { id: 'starter', label: 'Starter', amount: '$5', calls: '~5,000 calls' },
@@ -22,14 +23,71 @@ function getCommitmentFromDB(): Promise<string | null> {
   });
 }
 
-export function BuyCreditsSection() {
+export function BuyCreditsSection({
+  stripeConfigured,
+}: {
+  stripeConfigured: boolean;
+}) {
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [commitment, setCommitment] = useState<string | null>(null);
+  const [checkoutState, setCheckoutState] = useState<
+    | 'idle'
+    | 'pending'
+    | 'confirmed'
+    | 'cancelled'
+    | 'missing-identity'
+    | 'gateway-unavailable'
+  >('idle');
 
   useEffect(() => {
     getCommitmentFromDB().then(setCommitment);
   }, []);
+
+  useEffect(() => {
+    const result = searchParams.get('checkout');
+    if (result === 'cancelled') {
+      setCheckoutState('cancelled');
+      return;
+    }
+    if (result !== 'success') return;
+
+    setCheckoutState(commitment ? 'pending' : 'missing-identity');
+    if (!commitment) return;
+
+    let stopped = false;
+    let attempts = 0;
+    const poll = async () => {
+      if (stopped) return;
+      attempts += 1;
+      try {
+        const res = await fetch(
+          `/api/dashboard/status?commitment=${encodeURIComponent(commitment)}`,
+          { cache: 'no-store' },
+        );
+        if (res.status === 502 || res.status === 503) {
+          setCheckoutState('gateway-unavailable');
+        }
+        if (res.ok) {
+          const data = await res.json();
+          if (data.depositStatus === 'active') {
+            setCheckoutState('confirmed');
+            window.dispatchEvent(new Event('zk-credits-status-refresh'));
+            return;
+          }
+        }
+      } catch {
+        // Stripe's webhook and the Soroban transaction are asynchronous.
+      }
+      if (!stopped && attempts < 10) window.setTimeout(poll, 3000);
+    };
+    void poll();
+
+    return () => {
+      stopped = true;
+    };
+  }, [commitment, searchParams]);
 
   const handleCheckout = async (tierId: string) => {
     setLoading(tierId);
@@ -71,6 +129,43 @@ export function BuyCreditsSection() {
         </div>
       )}
 
+      {checkoutState === 'pending' && (
+        <div className="mb-4 rounded-lg border border-blue-900/60 bg-blue-950/30 p-3 text-sm text-blue-300">
+          Checkout completed. Waiting for the webhook and testnet deposit to
+          confirm…
+        </div>
+      )}
+      {checkoutState === 'confirmed' && (
+        <div className="mb-4 rounded-lg border border-green-900/60 bg-green-950/30 p-3 text-sm text-green-300">
+          Credits confirmed on the testnet deposit. Your API key can now make
+          paid requests.
+        </div>
+      )}
+      {checkoutState === 'gateway-unavailable' && (
+        <div className="mb-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-300">
+          Checkout completed, but the credit gateway is unreachable. Do not
+          pay again; the webhook must be retried after the gateway is restored.
+        </div>
+      )}
+      {checkoutState === 'cancelled' && (
+        <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-sm text-zinc-300">
+          Checkout was cancelled. No credits were added.
+        </div>
+      )}
+      {checkoutState === 'missing-identity' && (
+        <div className="mb-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-300">
+          Checkout completed, but this browser has no ZK commitment to attach
+          to the payment. Recover or generate your API identity before buying.
+        </div>
+      )}
+
+      {!stripeConfigured && (
+        <div className="mb-4 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-300">
+          Stripe checkout is unavailable because payments are not configured on
+          this deployment.
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-4">
         {TIERS.map((t) => (
           <div
@@ -82,7 +177,12 @@ export function BuyCreditsSection() {
             <p className="mt-1 text-sm text-zinc-500">{t.calls}</p>
             <button
               onClick={() => handleCheckout(t.id)}
-              disabled={loading !== null}
+              disabled={
+                loading !== null ||
+                !stripeConfigured ||
+                checkoutState === 'pending' ||
+                checkoutState === 'gateway-unavailable'
+              }
               className="mt-3 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading === t.id ? 'Redirecting...' : 'Buy Now'}

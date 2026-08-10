@@ -13,10 +13,14 @@ const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? '';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
 const GATEWAY_SECRET = process.env.GATEWAY_SECRET || '';
 
-// The gateway owns durable billing state and enforce webhook idempotency on
+// The gateway owns durable billing state and enforces webhook idempotency on
 // the event id (checkout -> webhook -> deposit is exactly-once). This webhook
 // only verifies the Stripe signature, then relays the verified event.
-async function relayToGateway(event: Stripe.Event) {
+async function relayToGateway(event: Stripe.Event): Promise<{
+  processed?: boolean;
+  duplicate?: boolean;
+  skipped?: string;
+}> {
   const object = event.data.object as Stripe.Checkout.Session | Record<string, unknown>;
   const metadata =
     event.type === 'checkout.session.completed'
@@ -25,43 +29,44 @@ async function relayToGateway(event: Stripe.Event) {
   const { commitment, usdcAmount } = metadata;
 
   if (!GATEWAY_SECRET) {
-    console.error('GATEWAY_SECRET not configured — cannot relay billing event');
-    return;
+    throw new Error('GATEWAY_SECRET not configured');
   }
 
-  try {
-    const res = await fetch(`${GATEWAY_URL}/v1/billing/stripe-event`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GATEWAY_SECRET}`,
-      },
-      body: JSON.stringify({
-        eventId: event.id,
-        eventType: event.type,
-        // Payload hash lets a later audit verify the retried body was unchanged.
-        payloadHash: `sha256:${createHash('sha256').update(event.id + event.type).digest('hex')}`,
-        ...(commitment && usdcAmount
-          ? { commitment, amount: Number(usdcAmount) }
-          : {}),
-      }),
-    });
+  const res = await fetch(`${GATEWAY_URL}/v1/billing/stripe-event`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GATEWAY_SECRET}`,
+    },
+    body: JSON.stringify({
+      eventId: event.id,
+      eventType: event.type,
+      // Payload hash lets a later audit verify the retried body was unchanged.
+      payloadHash: `sha256:${createHash('sha256').update(event.id + event.type).digest('hex')}`,
+      ...(commitment && usdcAmount
+        ? { commitment, amount: Number(usdcAmount) }
+        : {}),
+    }),
+  });
 
-    const data = await res.json();
-    if (!res.ok) {
-      console.error('Gateway billing relay failed:', res.status, data.error);
-      return;
-    }
-    if (data.processed) {
-      console.log(`Billing event processed: eventId=${event.id}, txHash=${data.txHash ?? 'none'}`);
-    } else if (data.duplicate) {
-      console.log(`Billing event duplicate (idempotent no-op): eventId=${event.id}`);
-    } else if (data.skipped) {
-      console.warn(`Billing event skipped (${data.skipped}): eventId=${event.id}`);
-    }
-  } catch (err) {
-    console.error('Gateway billing relay error:', err);
+  const data = await res.json() as {
+    processed?: boolean;
+    duplicate?: boolean;
+    skipped?: string;
+    error?: string;
+    txHash?: string;
+  };
+  if (!res.ok) {
+    throw new Error(`gateway relay failed (${res.status}): ${data.error ?? 'unknown'}`);
   }
+  if (data.processed) {
+    console.log(`Billing event processed: eventId=${event.id}, txHash=${data.txHash ?? 'none'}`);
+  } else if (data.duplicate) {
+    console.log(`Billing event duplicate (idempotent no-op): eventId=${event.id}`);
+  } else if (data.skipped) {
+    console.warn(`Billing event skipped (${data.skipped}): eventId=${event.id}`);
+  }
+  return data;
 }
 
 export async function POST(req: NextRequest) {
@@ -91,9 +96,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_signature' }, { status: 400 });
   }
 
-  // Relayed (no await): the webhook must return 200 to Stripe quickly; the
-  // idempotency + exactly-once guarantee is enforced gateway-side.
-  void relayToGateway(event);
-
-  return NextResponse.json({ received: true });
+  try {
+    const relay = await relayToGateway(event);
+    return NextResponse.json({
+      received: true,
+      processed: relay.processed ?? false,
+      duplicate: relay.duplicate ?? false,
+      skipped: relay.skipped,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'gateway relay failed';
+    console.error('Gateway billing relay error:', message);
+    // A non-2xx response tells Stripe to retry instead of acknowledging a
+    // payment whose on-chain deposit has not been created yet.
+    return NextResponse.json({ error: 'gateway_relay_failed' }, { status: 502 });
+  }
 }

@@ -1,0 +1,20 @@
+{
+  "name": "@zk-credits/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@scure/bip39": "^2.2.0",
+    "snarkjs": "^0.7.6"
+  }
+}

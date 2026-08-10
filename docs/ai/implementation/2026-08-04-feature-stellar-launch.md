@@ -18,7 +18,7 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - `cd zk-credits-contract && RUSTUP_TOOLCHAIN=1.94 stellar contract build` - Soroban contract (v1, unchanged for launch).
 - Environment: copy the repo `.env.example`; set Stellar testnet keys, Stripe test keys, GitHub OAuth, OpenRouter key, PostgreSQL URL, fee-sponsor XLM key.
 
-**Lockfile note:** `npm ci` fails on the pre-existing stale lockfiles (missing `@emnapi` transitive packages). Use `npm install` to sync the lockfile first - the same issue the Mina track recorded.
+**Lockfile note:** the Linux-sensitive `@emnapi` lockfile entries are committed and `npm ci` is the CI path. The web production build also rebuilds the local `@zk-credits/shared` package before running Next.js.
 
 ## Code Structure
 **How is the code organized?**
@@ -103,7 +103,7 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - New `ts/db/migrations/0003_billing.sql` — `billing.stripe_events` (`event_id` PK, `event_type`, `payload_hash`, `received_at`, `processed`, `processed_at`). Privacy: no customer PII, no card data, no commitment-to-call linkage.
 - New `ts/db/billing.ts`: `BillingStore` interface + `MemoryBillingStore` + `PostgresBillingStore`. `recordStripeEventOnce()` is the idempotency primitive — INSERT ... ON CONFLICT via the SQLSTATE-23505 catch (Stripe redeliveries return `inserted: false`); `markStripeEventProcessed()` marks a deposit as submitted.
 - New gateway endpoint `POST /v1/billing/stripe-event` (GATEWAY_SECRET-gated): relays a verified Stripe event; first delivery for `checkout.session.completed` extracts `commitment`+`amount` and calls the shared `submitDeposit()` (refactored out of `/v1/deposits`), then marks processed; duplicates return `duplicate: true` (no-op); missing commitment/amount returns `skipped: missing_commitment_or_amount`; non-checkout events are recorded without a deposit.
-- `web/src/app/api/webhooks/stripe/route.ts`: now only verifies the Stripe signature then relays the event to the gateway (fire-and-forget; Stripe gets a fast 200). `handleCheckoutCompleted` removed — exactly-once is enforced gateway-side; the web app no longer calls `/v1/deposits` directly.
+- `web/src/app/api/webhooks/stripe/route.ts`: verifies the Stripe signature, awaits the gateway relay, and returns 502 when the gateway is unavailable so Stripe retries instead of acknowledging an unfunded payment. `handleCheckoutCompleted` removed — exactly-once is enforced gateway-side; the web app no longer calls `/v1/deposits` directly.
 - Design decisions: DB access stays in the gateway (single Postgres owner; the web app is serverless and gets an idempotent relay instead of a direct DB handle). `payload_hash` uses SHA-256 of `event.id + event.type` (audit field).
 
 ### M2.2 - Gateway durable state (done 2026-08-04)
@@ -166,10 +166,16 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 ## Known Blockers
 - **snarkjs bls12381 Groth16 *setup*** is pathologically slow on this dev machine (~15-18% CPU for hours; both `groth16 setup` and `zkey new` paths) — matters only for the optional fresh trusted-setup regen (would also require a contract redeploy). Proof generation/verification at runtime is fast (~1-2s) and fully verified green. Tests/proofs use the verified-consistent v1 artifact set.
 - **Live Stellar testnet spike (M2.4/2.5/2.6 live submission)** — the fee-relay, withdrawal co-signer, and spend-worker are code-complete and offline-verified, but real testnet fee-bump / withdraw / spend submission is pending **user-funded Stellar testnet keys**.
-- **Hosted deploys (M3.2/3.3/3.4)** — pending Fly.io/Vercel accounts + `GATEWAY_URL`/`WEB_URL`/`FEE_SPONSOR_URL` deploy secrets; the deploy-smoke workflow is a template until these exist.
+- **Hosted deployment (M3.1/3.2/3.3/3.4)** — the Fly trial ended on 2026-08-10. A Render Blueprint now defines the gateway, fee-sponsor, and shared Postgres replacement; both Docker images build locally, but Render service creation is pending repository connection. The linked Vercel preview has the Stripe checkout route and gateway-unavailable UI deployed. Live fee-bump validation remains pending until Render is online.
 - **Local `cargo test` for the contract** — needs Rust ≥1.85 (`edition2024`); local toolchain is Cargo 1.79. CI pins `1.94.0`.
 
-## Web UI fix & browser verification (2026-08-06)
+## Vercel build packaging (2026-08-09)
+
+- `web/src/lib/vercel-build.test.ts` was added first and failed against the empty build configuration, establishing a regression guard for the deployment path.
+- `web/package.json` now builds the isomorphic shared package and runs `scripts/prepare-shared-package.mjs` before Next. The script replaces the workspace symlink with a self-contained copy of the built `@zk-credits/shared` package in `web/node_modules`; this is required because Vercel’s isolated install did not preserve the `file:../packages/...` link.
+- Verification: the regression test and web strict typecheck pass; `vercel build --yes` completes successfully through Next compilation, serverless-function tracing, and static-file collection. No production deployment was promoted because the linked Vercel project has no environment variables.
+
+## Web UI fix & browser verification (2026-08-06; W7 verified 2026-08-09)
 
 User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline screenshots captured pre-fix — ephemeral, Playwright later cleaned `web/test-results/`; durable after-fix evidence committed in `web/e2e-screenshots/`): (1) every page used Tailwind utility classes but **Tailwind was never installed** → raw unstyled HTML; (2) next-auth v5 `MissingSecret` under `next start` (production mode) 500s `/api/auth/session`, and the root-layout `SessionProvider` surfaced the auth error on every page; (3) landing GitHub link was a `https://github.com` placeholder; (4) dashboard USDC display divided by `1_000_0000` (10⁷) instead of 10⁶; (5) `/onboarding` was unreachable from any page; (6) the browser commitment path had no browser test despite the vitest config comment claiming otherwise.
 
@@ -177,12 +183,27 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - `web/postcss.config.mjs` + `tailwindcss`/`@tailwindcss/postcss` 4.3.3 (the bundled Next 16 docs recipe); `globals.css` → `@import 'tailwindcss'` + dark theme tokens (`zinc-950` body, Geist font vars); dead `page.module.css` removed.
 - New shared components: `components/site-header.tsx` (server component, session-aware nav, exports `REPO_URL` = the real repo) and `components/site-footer.tsx` (honest caveats: testnet only / no real money / single-contributor trusted setup / timing-pattern caveat).
 - Redesigned pages: `page.tsx` (hero + badge + 4 step cards + privacy/rate-limit cards), `sign-in/page.tsx` (centered card, GitHub mark, button disabled + explanatory notice when `GITHUB_CLIENT_ID/SECRET` missing), `dashboard/page.tsx` + `dashboard-status.tsx` / `api-key-section.tsx` / `buy-credits-section.tsx` (dark cards). `onboarding/` and `recover/` restructured as server shells + client islands (`onboarding-wizard.tsx`, `recover-form.tsx`) because `SiteHeader` calls `auth()` (server-only); wizard gained a step indicator and stable test hooks (`data-testid="mnemonic-word"`, `data-testid="confirm-input"` + `data-word-index`).
+- **Configuration-safe dashboard actions (2026-08-09):** `lib/runtime-config.ts` centralizes server-side presence checks for `GATEWAY_SECRET` and `STRIPE_SECRET_KEY`. `dashboard/page.tsx` passes booleans into the client sections; API-key issuance and all Stripe Buy Now buttons now explain missing configuration and disable themselves instead of issuing predictable 500 requests. Added Vitest coverage and a Playwright dashboard regression test.
 - `lib/format.ts` `formatUsdc` (USDC 6-decimals, malformed → "0") + `format.test.ts`; wired into `dashboard-status.tsx` (fixes the 10⁷ bug; label now "USDC deposit (testnet)").
 - `api-key-section.tsx`: setup snippet uses `NEXT_PUBLIC_GATEWAY_URL` (fallback `http://localhost:3001`); footer links to `/recover` and `/onboarding` (onboarding now reachable from the signed-in flow).
 - **Opt-in dev login** (`auth.ts` + sign-in page): `ENABLE_DEV_LOGIN=1` adds a `Credentials` provider ("Continue with dev account (test-only)") so the signed-in flow is usable/testable without a GitHub OAuth app. Off by default; JWT session strategy; documented in `web/.env.example` as never-for-production. Added because GitHub OAuth cannot work without external app credentials (M3/M4 dependency) and the signed-in UI was otherwise unreachable locally.
-- `playwright.config.ts`: webServer now sets a test-only `AUTH_SECRET` + `ENABLE_DEV_LOGIN=1`; new specs `e2e/auth-flow.spec.ts`, `e2e/landing.spec.ts`, `e2e/onboarding.spec.ts`, `e2e/dashboard.spec.ts` (12 tests total, was 2).
+- `playwright.config.ts`: webServer now sets a test-only `AUTH_SECRET` + `ENABLE_DEV_LOGIN=1`; new specs `e2e/auth-flow.spec.ts`, `e2e/landing.spec.ts`, `e2e/onboarding.spec.ts`, `e2e/dashboard.spec.ts` (13 tests total, was 2).
 - `web/.env.example` documents `AUTH_SECRET` as a hard production requirement; gitignored `web/.env.local` generated for local dev.
 
 **Decisions / deviations:** dark theme chosen as the default design direction; sign-in button is disabled (not hidden) when OAuth is unconfigured so E2E can still assert its presence while users get an explanation; landing hero keeps all pre-existing test hooks (h1 "ZK API Credits", value-prop text, Get Started → /sign-in). Discovered dev-only artifact: the Next dev client's failing HMR WebSocket triggers full page reloads that destroy React state mid-proving — production builds are unaffected (documented; not a product bug).
 
-**Verification:** `npm run typecheck` exit 0; vitest 7/7; `npx playwright test` 12/12 against `next build` + `next start` (wizard 2.6s, recover round-trip 3.2s, dev-login dashboard render); live Playwright MCP walkthrough (wizard → IndexedDB `secret_k`/`commitment` → anonymous redirect; dev login → dashboard); `ai-devkit lint --feature stellar-launch` exit 0.
+**Verification:** `npm run typecheck` exit 0; Vitest 10/10; `CI=1 E2E_PORT=3212 npm run test:e2e` 13/13 against `next build` + `next start`; `npm run build` exit 0; live Playwright MCP walkthrough (wizard → IndexedDB `secret_k`/`commitment` → sign-in → dev login → dashboard → API key request, copy action, disabled Stripe actions, sign-out, recovery error, and recovery wizard); `ai-devkit lint --feature stellar-launch` exit 0. W7 is complete in committed code (`ba47f4c`).
+
+## Historical Fly deployment recovery (2026-08-09)
+
+- Root cause of the gateway timeout: the attached Fly Postgres machine `zk-credits-api-db` was stopped with `requested_stop=true`; the gateway’s fail-closed durable-store initialization then exited and reached its restart limit.
+- Recovery: started Postgres, confirmed `pg`/`role` checks passing, then started the gateway machine. Fly’s gateway service check now passes; the gateway log confirms PostgreSQL durable storage initialized and the listener started on port 3001.
+- Verification: a public HTTPS request returned `/v1/contract-status` with HTTP 200, `depositCount: 3`, a current root, the deployed contract ID, and `network: stellar:testnet`. The same recovery also restored the public `/health` response; the trial database stop remains an operational caveat.
+
+## Credit funding and checkout confirmation (2026-08-10)
+
+- `ts/server.ts` now reads `getDeposit(commitment)` after proof verification and before upstream forwarding. Missing, zero, slashed, or withdrawn deposits return 402 `credits_required`; a contract-read failure returns 503 and no request is accepted.
+- `GET /v1/status/:commitment` now reports the on-chain amount in USDC base units plus `active`/`unfunded`/`slashed`/`withdrawn` status. The dashboard refreshes after checkout confirmation and polls while the Stripe webhook and Soroban transaction settle.
+- `web/src/app/dashboard/buy-credits-section.tsx` handles `checkout=success` and `checkout=cancelled` explicitly. It does not claim payment is usable until the gateway reports an active deposit.
+- Stripe test-mode webhook configuration was corrected to target the Vercel `/api/webhooks/stripe` route. The route verifies the signature and relays only event id/type/hash, commitment, and amount; no card data or Stripe secret is persisted in gateway billing state. A signed probe now returns `gateway_relay_failed`/502 while Fly is suspended, which is intentional retry behavior.
+- Acceptance evidence: direct OpenRouter HTTP 200; a temporary real-proof gateway acceptance test passed with an actual upstream response and 403 replay rejection; public Stripe checkout returned to the dashboard and showed pending confirmation. Hosted funded-call, slash, withdrawal, and restart evidence remain blocked by the ended Fly trial.

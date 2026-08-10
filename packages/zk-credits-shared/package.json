@@ -3,7 +3,15 @@
   "version": "0.1.0",
   "description": "Isomorphic crypto + proof helpers shared by the zk-api-credits browser (web) and Node (gateway/CLI) runtimes.",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": ["dist", "src"],
   "type": "module",
   "scripts": {

@@ -38,3 +38,24 @@ test('signed-in header shows Dashboard instead of Sign in', async ({
   const header = page.getByTestId('site-header');
   await expect(header.getByRole('link', { name: 'Dashboard' })).toBeVisible();
 });
+
+test('unconfigured integrations explain the disabled dashboard actions', async ({
+  page,
+}) => {
+  await page.goto('/sign-in');
+  await page
+    .getByRole('button', { name: /Continue with dev account/ })
+    .click();
+  await page.waitForURL('**/dashboard');
+
+  await expect(
+    page.getByText(/gateway integration is not configured/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Stripe checkout is unavailable/i),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Generate API Key' }),
+  ).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Buy Now' }).first()).toBeDisabled();
+});

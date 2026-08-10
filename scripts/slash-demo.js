@@ -13,6 +13,15 @@ const crypto = require('crypto');
 const snarkjs = require('snarkjs');
 const path = require('path');
 const fs = require('fs');
+const {
+  Contract,
+  Keypair,
+  Networks,
+  TransactionBuilder,
+  Address,
+  nativeToScVal,
+  rpc: SorobanRpc,
+} = require('@stellar/stellar-sdk');
 
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
 const GATEWAY_SECRET = process.env.GATEWAY_SECRET || 'dev-secret';
@@ -124,6 +133,7 @@ async function main() {
 
   // Verify the slash proof
   const valid = await snarkjs.groth16.verify(VERIFIERS.slash, slashSignals, slashProof);
+  if (!valid) throw new Error('slash proof failed local verification');
   console.log(`   Slash proof valid: ${valid}\n`);
 
   // Step 5: Submit first proof to gateway (should succeed)
@@ -173,7 +183,50 @@ async function main() {
   console.log(`   Error: ${call2Data.error}`);
   console.log(`   Message: ${call2Data.message}\n`);
 
-  // Step 7: Summary
+  // Step 7: submit the reporter-signed inner slash transaction through the
+  // public gateway and fee sponsor. The reporter signs locally but does not
+  // pay XLM; the contract still verifies the proof and executes the split.
+  const reporterSecretKey = process.env.REPORTER_SECRET_KEY;
+  const contractId = process.env.ZK_CONTRACT_ID;
+  if (reporterSecretKey && contractId) {
+    console.log('\\n7. Submitting slash transaction through the fee sponsor...');
+    const keypair = Keypair.fromSecret(reporterSecretKey);
+    const rpc = new SorobanRpc.Server(
+      process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
+      { allowHttp: true },
+    );
+    const source = await rpc.getAccount(keypair.publicKey());
+    const tx = new TransactionBuilder(source, {
+      fee: '100000',
+      networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || Networks.TESTNET,
+    })
+      .addOperation(
+        new Contract(contractId).call(
+          'slash',
+          nativeToScVal(slashProof, {}),
+          nativeToScVal(slashSignals.map((signal) => BigInt(signal)), {}),
+          nativeToScVal(BigInt(commitment), { type: 'u256' }),
+          new Address(keypair.publicKey()).toScVal(),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+    tx.sign(keypair);
+
+    const slashRes = await fetch(`${GATEWAY_URL}/v1/slash`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ innerTransactionXdr: tx.toEnvelope().toXDR('base64') }),
+    });
+    const slashData = await slashRes.json();
+    console.log(`   Status: ${slashRes.status}`);
+    console.log(`   Fee bump submitted: ${slashData.feeBumpHash ? 'YES' : 'NO'}`);
+    if (!slashRes.ok) throw new Error(`slash submission failed: ${slashData.error || 'unknown'}`);
+  } else {
+    console.log('\\n7. On-chain slash submission skipped (REPORTER_SECRET_KEY/ZK_CONTRACT_ID not configured).');
+  }
+
+  // Step 8: Summary
   console.log('=== Slash Demo Summary ===');
   console.log(`Secret_k extracted: ${slashSignals[0] === skField.toString() ? 'YES' : 'NO'}`);
   console.log(`Nullifier collision detected: ${sameNullifier ? 'YES' : 'NO'}`);
@@ -183,9 +236,10 @@ async function main() {
   console.log('In a production flow:');
   console.log('1. The gateway watches for nullifier collisions');
   console.log('2. It runs the slash circuit to extract secret_k');
-  console.log('3. It submits the slash proof on-chain');
-  console.log('4. The contract slashes the deposit: 50% treasury, 50% reporter');
-  console.log(`5. Contract ID: ${process.env.ZK_CONTRACT_ID || 'not configured'}`);
+  console.log('3. It builds and signs the inner slash() transaction locally');
+  console.log('4. The fee sponsor fee-bumps and submits that exact transaction');
+  console.log('5. The contract slashes the deposit: 50% treasury, 50% reporter');
+  console.log(`6. Contract ID: ${process.env.ZK_CONTRACT_ID || 'not configured'}`);
   console.log('\n=== Demo Complete ===');
 }
 
