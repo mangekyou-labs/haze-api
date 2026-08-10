@@ -15,6 +15,88 @@ import {
 const RPC_URL = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
 const NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK_PASSPHRASE || Networks.TESTNET;
 const CONTRACT_ID = process.env.ZK_CONTRACT_ID || '';
+const BLS12_381_BASE_FIELD_ORDER = BigInt(
+  '0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab',
+);
+
+type SnarkScalar = string | number | bigint;
+
+function fixedFieldBytes(value: unknown, label: string): Buffer {
+  let scalar: bigint;
+  try {
+    scalar = BigInt(value as SnarkScalar);
+  } catch {
+    throw new Error(`${label} is not an integer`);
+  }
+
+  if (scalar < 0n || scalar >= BLS12_381_BASE_FIELD_ORDER) {
+    throw new Error(`${label} is outside the BLS12-381 base field`);
+  }
+
+  const hex = scalar.toString(16).padStart(96, '0');
+  return Buffer.from(hex, 'hex');
+}
+
+function pointCoordinates(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value;
+}
+
+function g1PointToBytes(value: unknown, label: string): Buffer {
+  const point = pointCoordinates(value, label);
+  if (point.length < 3) throw new Error(`${label} must contain x, y, z`);
+  if (BigInt(point[2] as SnarkScalar) !== 1n) {
+    throw new Error(`${label} z must be 1`);
+  }
+
+  return Buffer.concat([
+    fixedFieldBytes(point[0], `${label}.x`),
+    fixedFieldBytes(point[1], `${label}.y`),
+  ]);
+}
+
+function g2PointToBytes(value: unknown, label: string): Buffer {
+  const point = pointCoordinates(value, label);
+  if (point.length < 3) throw new Error(`${label} must contain x, y, z`);
+  const z = pointCoordinates(point[2], `${label}.z`);
+  if (z.length < 2 || BigInt(z[0] as SnarkScalar) !== 1n || BigInt(z[1] as SnarkScalar) !== 0n) {
+    throw new Error(`${label} z must be [1, 0]`);
+  }
+
+  const x = pointCoordinates(point[0], `${label}.x`);
+  const y = pointCoordinates(point[1], `${label}.y`);
+  if (x.length < 2 || y.length < 2) throw new Error(`${label} coordinates must be pairs`);
+
+  // Soroban's Bls12381G2Affine byte layout is imaginary then real for each
+  // Fp2 coordinate. snarkjs exposes the same coordinates as [real, imaginary].
+  return Buffer.concat([
+    fixedFieldBytes(x[1], `${label}.x.im`),
+    fixedFieldBytes(x[0], `${label}.x.re`),
+    fixedFieldBytes(y[1], `${label}.y.im`),
+    fixedFieldBytes(y[0], `${label}.y.re`),
+  ]);
+}
+
+/**
+ * Convert a snarkjs BLS12-381 Groth16 proof to Soroban's positional
+ * Groth16Proof struct: Vec<BytesN<96>, BytesN<192>, BytesN<96>>.
+ *
+ * nativeToScVal(proof) produces a map-like value for the snarkjs object,
+ * while Soroban Rust structs are encoded as positional vectors. The contract
+ * therefore cannot deserialize the raw proof object directly.
+ */
+export function groth16ProofToScVal(proof: object): xdr.ScVal {
+  const candidate = proof as { pi_a?: unknown; pi_b?: unknown; pi_c?: unknown };
+  if (candidate.pi_a === undefined || candidate.pi_b === undefined || candidate.pi_c === undefined) {
+    throw new Error('Groth16 proof must contain pi_a, pi_b, and pi_c');
+  }
+
+  return xdr.ScVal.scvVec([
+    xdr.ScVal.scvBytes(g1PointToBytes(candidate.pi_a, 'G1 proof point')),
+    xdr.ScVal.scvBytes(g2PointToBytes(candidate.pi_b, 'G2 proof point')),
+    xdr.ScVal.scvBytes(g1PointToBytes(candidate.pi_c, 'G1 proof point')),
+  ]);
+}
 
 function getServer(): SorobanRpc.Server {
   return new SorobanRpc.Server(RPC_URL, { allowHttp: true });
@@ -113,7 +195,7 @@ export async function buildSlashEnvelope(
   const keypair = Keypair.fromSecret(reporterSecretKey);
   const source = await server.getAccount(keypair.publicKey());
 
-  const proofVal = nativeToScVal(slashProof, {});
+  const proofVal = groth16ProofToScVal(slashProof);
   const signalsVal = nativeToScVal(pubSignals.map((signal) => BigInt(signal)), {});
   const commitmentVal = nativeToScVal(BigInt(commitment), { type: 'u256' });
   const submitterVal = new Address(submitter).toScVal();
@@ -302,7 +384,7 @@ export async function spend(
   const keypair = Keypair.fromSecret(spenderSecretKey);
   const source = await server.getAccount(keypair.publicKey());
 
-  const proofVal = nativeToScVal(proof, {});
+  const proofVal = groth16ProofToScVal(proof);
   const signalsVal = nativeToScVal(pubSignals.map((s) => BigInt(s)), {});
 
   const tx = new TransactionBuilder(source, {

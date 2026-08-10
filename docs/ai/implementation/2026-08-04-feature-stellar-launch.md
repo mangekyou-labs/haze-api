@@ -166,7 +166,7 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 ## Known Blockers
 - **snarkjs bls12381 Groth16 *setup*** is pathologically slow on this dev machine (~15-18% CPU for hours; both `groth16 setup` and `zkey new` paths) — matters only for the optional fresh trusted-setup regen (would also require a contract redeploy). Proof generation/verification at runtime is fast (~1-2s) and fully verified green. Tests/proofs use the verified-consistent v1 artifact set.
 - **Live Stellar testnet spike (M2.4/2.5/2.6 live submission)** — the fee-relay, withdrawal co-signer, and spend-worker are code-complete and offline-verified, but real testnet fee-bump / withdraw / spend submission is pending **user-funded Stellar testnet keys**.
-- **Hosted deployment (M3.1/3.2/3.3/3.4)** — the Fly trial ended on 2026-08-10. Render now hosts the gateway, fee-sponsor, and shared Postgres replacement; Vercel is connected to the Render gateway. The BLS12-381 Merkle alignment fix requires a fresh Render deployment before the hosted funded-call gate can be rerun; the prior test deposits used the pre-fix BN254 root path and remain legacy test data.
+- **Hosted deployment (M3.1/3.2/3.3/3.4)** — the Fly trial ended on 2026-08-10. Render now hosts the gateway, fee-sponsor, and shared Postgres replacement; Vercel is connected to the Render gateway. The BLS12-381 Merkle alignment fix and the Soroban Groth16 proof serialization fix require a fresh Render deployment before the hosted funded-call settlement gate can be rerun; the prior test deposits used the pre-fix BN254 root path and remain legacy test data.
 - **Local `cargo test` for the contract** — needs Rust ≥1.85 (`edition2024`); local toolchain is Cargo 1.79. CI pins `1.94.0`.
 
 ## Vercel build packaging (2026-08-09)
@@ -206,7 +206,7 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - `GET /v1/status/:commitment` now reports the on-chain amount in USDC base units plus `active`/`unfunded`/`slashed`/`withdrawn` status. The dashboard refreshes after checkout confirmation and polls while the Stripe webhook and Soroban transaction settle.
 - `web/src/app/dashboard/buy-credits-section.tsx` handles `checkout=success` and `checkout=cancelled` explicitly. It does not claim payment is usable until the gateway reports an active deposit.
 - Stripe test-mode webhook configuration was corrected to target the Vercel `/api/webhooks/stripe` route. The route verifies the signature and relays only event id/type/hash, commitment, and amount; no card data or Stripe secret is persisted in gateway billing state. A signed probe now returns `gateway_relay_failed`/502 while Fly is suspended, which is intentional retry behavior.
-- Acceptance evidence: direct OpenRouter HTTP 200; a temporary real-proof gateway acceptance test passed with an actual upstream response and 403 replay rejection; public Stripe checkout returned to the dashboard and showed pending confirmation. Hosted funded-call, slash, withdrawal, and restart evidence remain blocked by the ended Fly trial.
+- Acceptance evidence: direct OpenRouter HTTP 200; a temporary real-proof gateway acceptance test passed with an actual upstream response and 403 replay rejection; public Stripe checkout returned to the dashboard and showed pending confirmation. Hosted funded-call settlement, slash, withdrawal, and restart evidence remain pending the Render migration.
 
 ## BLS12-381 Merkle root alignment (2026-08-10)
 
@@ -214,3 +214,10 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - `ts/merkle.ts` now reads the standard MiMCSponge round constants from circomlibjs and performs the 220-round sponge arithmetic locally modulo BLS12-381 Fr. No BN254 hash result is used.
 - TDD regression: `ts/merkle.test.ts` first failed against a real `deposit_membership` proof, then passed after the field-correct implementation. Full gateway tests and strict typecheck pass after the fix.
 - Existing hosted deposits are legacy test data created with the pre-fix root arithmetic. A fresh Render deployment resets the in-memory tree; the next test-mode checkout will create the first corrected BLS12-381 root for hosted acceptance.
+
+## Soroban Groth16 proof serialization (2026-08-10)
+
+- Hosted funded-call testing showed that the gateway accepted and forwarded a valid RLN proof, but the async spend worker did not settle it on-chain.
+- Root cause: `nativeToScVal()` encoded the snarkjs proof object as a map-like value, while the Soroban contract expects the positional `Groth16Proof` struct as three byte values: G1 96 bytes, G2 192 bytes, G1 96 bytes.
+- `ts/contract.ts` now converts snarkjs BLS12-381 affine coordinates to the contract's byte layout for both `spend()` and `slash()`, including the required imaginary-first G2 ordering and field/range validation.
+- TDD regression: `ts/contract.test.ts` first failed because the converter was absent, then passed with exact 96/192/96 byte assertions and projective-point rejection. The full gateway suite passes; a fresh Render deployment and new funded call are still required for live settlement evidence.
