@@ -78,12 +78,12 @@ function g2PointToBytes(value: unknown, label: string): Buffer {
 }
 
 /**
- * Convert a snarkjs BLS12-381 Groth16 proof to Soroban's positional
- * Groth16Proof struct: Vec<BytesN<96>, BytesN<192>, BytesN<96>>.
+ * Convert a snarkjs BLS12-381 Groth16 proof to Soroban's named
+ * Groth16Proof struct: { a: BytesN<96>, b: BytesN<192>, c: BytesN<96> }.
  *
- * nativeToScVal(proof) produces a map-like value for the snarkjs object,
- * while Soroban Rust structs are encoded as positional vectors. The contract
- * therefore cannot deserialize the raw proof object directly.
+ * nativeToScVal(proof) produces a map with the snarkjs field names (pi_a,
+ * pi_b, pi_c) and nested arrays, while the Soroban struct requires the
+ * contract field names and fixed-width point byte values.
  */
 export function groth16ProofToScVal(proof: object): xdr.ScVal {
   const candidate = proof as { pi_a?: unknown; pi_b?: unknown; pi_c?: unknown };
@@ -91,10 +91,19 @@ export function groth16ProofToScVal(proof: object): xdr.ScVal {
     throw new Error('Groth16 proof must contain pi_a, pi_b, and pi_c');
   }
 
-  return xdr.ScVal.scvVec([
-    xdr.ScVal.scvBytes(g1PointToBytes(candidate.pi_a, 'G1 proof point')),
-    xdr.ScVal.scvBytes(g2PointToBytes(candidate.pi_b, 'G2 proof point')),
-    xdr.ScVal.scvBytes(g1PointToBytes(candidate.pi_c, 'G1 proof point')),
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('a'),
+      val: xdr.ScVal.scvBytes(g1PointToBytes(candidate.pi_a, 'G1 proof point')),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('b'),
+      val: xdr.ScVal.scvBytes(g2PointToBytes(candidate.pi_b, 'G2 proof point')),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol('c'),
+      val: xdr.ScVal.scvBytes(g1PointToBytes(candidate.pi_c, 'G1 proof point')),
+    }),
   ]);
 }
 

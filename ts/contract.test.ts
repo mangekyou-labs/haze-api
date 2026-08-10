@@ -19,16 +19,20 @@ const fixtureProof = {
 };
 
 describe('Groth16 Soroban proof serialization', () => {
-  it('serializes snarkjs BLS points as positional Soroban byte vectors', () => {
-    const native = scValToNative(groth16ProofToScVal(fixtureProof)) as Uint8Array[];
+  it('serializes snarkjs BLS points as a named Soroban struct map', () => {
+    const native = scValToNative(groth16ProofToScVal(fixtureProof)) as {
+      a: Uint8Array;
+      b: Uint8Array;
+      c: Uint8Array;
+    };
 
-    expect(native).toHaveLength(3);
-    expect(native.map((point) => point.length)).toEqual([96, 192, 96]);
-    expect(Buffer.from(native[0]).toString('hex')).toBe(`${'00'.repeat(47)}01${'00'.repeat(47)}02`);
-    expect(Buffer.from(native[1]).toString('hex')).toBe(
+    expect(Object.keys(native).sort()).toEqual(['a', 'b', 'c']);
+    expect([native.a, native.b, native.c].map((point) => point.length)).toEqual([96, 192, 96]);
+    expect(Buffer.from(native.a).toString('hex')).toBe(`${'00'.repeat(47)}01${'00'.repeat(47)}02`);
+    expect(Buffer.from(native.b).toString('hex')).toBe(
       `${'00'.repeat(47)}04${'00'.repeat(47)}03${'00'.repeat(47)}06${'00'.repeat(47)}05`,
     );
-    expect(Buffer.from(native[2]).toString('hex')).toBe(`${'00'.repeat(47)}07${'00'.repeat(47)}08`);
+    expect(Buffer.from(native.c).toString('hex')).toBe(`${'00'.repeat(47)}07${'00'.repeat(47)}08`);
   });
 
   it('rejects projective points that need affine reduction', () => {

@@ -218,7 +218,7 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 ## Soroban Groth16 proof serialization (2026-08-10)
 
 - Hosted funded-call testing showed that the gateway accepted and forwarded a valid RLN proof, but the async spend worker did not settle it on-chain.
-- Root cause: `nativeToScVal()` encoded the snarkjs proof object as a map-like value, while the Soroban contract expects the positional `Groth16Proof` struct as three byte values: G1 96 bytes, G2 192 bytes, G1 96 bytes.
-- `ts/contract.ts` now converts snarkjs BLS12-381 affine coordinates to the contract's byte layout for both `spend()` and `slash()`, including the required imaginary-first G2 ordering and field/range validation.
+- Root cause: `nativeToScVal()` encoded the snarkjs proof object as a map with the wrong field names and nested arrays, while the Soroban contract expects the named `Groth16Proof` struct map `{ a: BytesN<96>, b: BytesN<192>, c: BytesN<96> }`.
+- `ts/contract.ts` now converts snarkjs BLS12-381 affine coordinates to the contract's named map and byte layout for both `spend()` and `slash()`, including the required imaginary-first G2 ordering and field/range validation.
 - `ts/contract.ts` also encodes every RLN public signal as `scvU256`; the default SDK integer encoding was not compatible with Soroban's `Bls12381Fr` values. The `NullifierSpent` event filter now uses the required base64 ScVal XDR topic instead of a plain symbol string.
 - TDD regressions: `ts/contract.test.ts` first failed because each converter/filter was absent, then passed with exact 96/192/96 byte assertions, projective-point rejection, `u256` signal assertions, and XDR topic decoding. A fresh Render deployment and new funded call are still required for live settlement evidence.
