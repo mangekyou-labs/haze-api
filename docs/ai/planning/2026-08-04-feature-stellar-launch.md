@@ -11,9 +11,9 @@ description: Ordered implementation plan derived from the approved requirements,
 
 This is the working plan for `stellar-launch`, a parallel track to `feature-mina-protocol-migration`. The existing Stellar v1 codebase (circuits, Soroban contract, gateway, web) is already built; this plan adds the PRXVT-derived hardening (fee sponsorship, durable storage, type safety, self-verify, isomorphism), resolves the six v1 open questions, and takes the result to a public hosted testnet launch.
 
-Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 IN PROGRESS (3.1 confirmed; 3.2/3.4 deployed; 3.3 Vercel web is next)` -> `M4 todo` -> `Web UI fix & browser verification DONE (W1–W7)`.
+Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 IN PROGRESS (4.1 partial; live fee-relay, withdrawal, restart, OAuth, and tier checks pending)` -> `Web UI fix & browser verification DONE (W1–W7)`.
 
-### Current Status (reconciled 2026-08-09)
+### Current Status (reconciled 2026-08-10)
 
 M1 (Hardening foundation) is **COMPLETE and verified**:
 
@@ -28,34 +28,35 @@ Full gates green: `ts` 63/64 (1 pre-existing skip), shared package 12/12, all ci
 
 M2 (Durable storage + fee sponsorship) is **CODE COMPLETE offline**: 2.1 done (PostgreSQL schemas + migrations + fails-closed config, verified against local Postgres 16); 2.2 done (gateway durable store + server wiring + restart reconstruction + stale-cache on-chain fallback); 2.3 done (billing webhook idempotency); 2.6 done (per-call async `spend()` worker, durable settlement queue); 2.4 done (fee-sponsor service + public fee-relay, method-validation gate, fee-bump + idempotency); 2.5 done (gateway `/v1/withdraw` co-signer → fee-relay handoff; suite 129/139 + DB 36/36 green). **M2 code complete offline** — the only remaining M2 items are the live Stellar testnet spikes (spend worker + fee relay + withdraw) pending user-funded keys.
 
-M3 (Hosted deployment) is **IN PROGRESS**:
+M3 (Hosted deployment) is **COMPLETE for deployment**:
 - **3.5 CI** ✅ DONE 2026-08-05 (final verified run 31026106925 GREEN: all 6 jobs)
-- **3.2 Gateway deployment** ✅ DEPLOYED — deployed to Fly.io at https://zk-credits-gateway.fly.dev with Postgres attached (`zk-credits-api-db`); the trial Postgres machine stopped during hosted verification and was restarted, so a launch deployment needs a durable/non-autostopping database policy
-- **3.4 Fee-sponsor deployment** ✅ DEPLOYED — deployed to Fly.io at https://zk-credits-fee-sponsor.fly.dev; `/health` returned `200` on 2026-08-09, but live fee-bump validation remains pending
-- **3.1 Contract confirm** ✅ VERIFIED 2026-08-09 — after restarting the attached Postgres machine, public HTTPS `/v1/contract-status` returned HTTP 200 with `depositCount: 3`, `currentRoot`, the deployed contract ID, and `stellar:testnet`
-- **3.3 Vercel web** 🔄 BLOCKED ON CONFIGURATION — project `feature-zk-api-credits` is linked and `vercel build --yes` is green after the shared-package packaging fix; Vercel has no environment variables, so GitHub OAuth, Stripe checkout, gateway proxy auth, and production auth cannot be validated or promoted yet
+- **3.2 Gateway deployment** ✅ DONE — Render service `zk-credits-gateway` is live at https://zk-credits-gateway.onrender.com with shared Postgres; health and contract-status checks return 200, and the service runs the corrected `c02891c` revision.
+- **3.4 Fee-sponsor deployment** ✅ DONE — Render service `zk-credits-fee-sponsor` is live at https://zk-credits-fee-sponsor.onrender.com and `/health` returns 200; live fee-bump behavior remains an M4 validation task.
+- **3.1 Contract confirm** ✅ VERIFIED 2026-08-10 — the public Render gateway reports the deployed Soroban contract on `stellar:testnet`; corrected hosted spend calls produced `NullifierSpent` events.
+- **3.3 Vercel web** ✅ DEPLOYED — https://feature-zk-api-credits.vercel.app serves the production web app; hosted dev-account sign-in, API-key issuance, Stripe test checkout, status proxy, and dashboard flow were exercised. GitHub OAuth acceptance remains an M4 external-configuration check.
+- **3.6 Render Blueprint attachment** ⏭ OPTIONAL — `render.yaml` validates and documents the three resources, but the existing Render services are API/Dashboard-managed rather than Blueprint-attached. Attaching the Blueprint is useful for drift control and must not create duplicate resources.
 
-M4 (Launch validation) is **NOT STARTED** — will begin after M3.3 and the live testnet spike.
+M4 (Launch validation) is **IN PROGRESS**: the funded checkout → OpenRouter → replay rejection → on-chain settlement path is verified; slash, withdrawal, restart durability, GitHub OAuth, Stripe retry, OpenRouter tier, and legacy queue cleanup remain open.
 
 Web UI fix track (user-directed 2026-08-06): **DONE** — W1–W7 implemented, committed in `ba47f4c`, and re-verified locally on 2026-08-09.
 
 ### Next Focus
 
-M3 is now **in progress** with the gateway and fee-sponsor deployed; implementation focus advances to **3.3 Vercel web deployment**:
-1. **3.3 Vercel web deployment** — linked locally; user must configure Vercel env vars (`NEXT_PUBLIC_GATEWAY_URL` → `https://zk-credits-gateway.fly.dev`, `GATEWAY_URL`, `GATEWAY_SECRET`, `AUTH_SECRET`/`AUTH_URL`, GitHub OAuth, and Stripe) before `vercel deploy --prod`.
-2. **Fly Postgres continuity** — the trial database stopped during verification and was restarted; provision a durable replacement or disable autostop before treating the hosted gateway as launch-stable.
-3. **Live Stellar testnet spike** — once hosted access is verified and user-funded keys are available, run real `spend()` submissions, fee-bump relay, and co-signed withdrawal through `/v1/withdraw`.
-4. **M4 launch validation** — hosted E2E, slash/withdraw demos, restart durability, honest-caveats README, and OpenRouter tier check.
+M3 deployment is complete and focus advances to M4 launch validation:
+1. **Quarantine legacy spend-queue rows** — stop retrying pre-fix accepted calls that can only produce `RootMismatch`; preserve them as historical evidence and ensure new post-fix calls settle normally.
+2. **Run the live Stellar spike** — submit a real fee-bumped slash, a gateway-mediated fee-bumped withdrawal, and confirm the spend-worker/event-cache behavior with dedicated testnet accounts.
+3. **Run hosted launch validation** — repeat the public flow with GitHub OAuth, exercise Stripe webhook retry/idempotency, restart Render mid-session, and check the OpenRouter key tier before launch sign-off.
+4. **Optional infrastructure hardening** — attach the existing services to the validated Render Blueprint through the Dashboard without provisioning duplicates.
 
-Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); OpenRouter per-key limits (M4.6 pre-check); CI needs circuit artifacts + circom/stellar-cli in Docker (risk table); fresh trusted-setup regen deferred to a capable machine — and if it lands, M3.1 becomes a redeploy again.
+Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); Render free-tier sleep/restart behavior; legacy pre-fix queue rows; GitHub OAuth and Stripe retry configuration; OpenRouter per-key limits (M4.6 pre-check); fresh trusted-setup regen deferred to a capable machine — and if it lands, M3.1 becomes a redeploy again.
 
 ## Milestones
 **What are the major checkpoints?**
 
 - [x] **M1 — Hardening foundation:** TypeScript strict mode, isomorphic shared crypto package, client-side proof self-verification. (PRXVT guardrails first, so later code builds on a clean base.) — DONE (2026-08-04): 1.0–1.3 all complete and verified.
 - [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — CODE COMPLETE (2026-08-04): 2.1–2.6 all done and verified offline (durable store, restart reconstruction, billing idempotency, spend worker, fee-relay, withdraw co-signer). Remaining: live Stellar testnet spike (pending user-funded keys) before M3.
-- [ ] **M3 — Hosted deployment:** Soroban testnet contract, Fly.io gateway, Vercel web, fee-sponsor service, CI pipeline. — **IN PROGRESS**: 3.5 CI DONE 2026-08-05; **3.2 gateway deployed 2026-08-08** (https://zk-credits-gateway.fly.dev) with Postgres attached; free-tier Postgres replacement policy recorded; **3.4 fee-sponsor deployed 2026-08-08** (https://zk-credits-fee-sponsor.fly.dev); 3.1 contract confirm pending; **3.3 Vercel web is next** (`vercel link` + env vars).
-- [ ] **M4 — Launch validation + evidence:** hosted E2E, slash demo, withdraw demo, restart durability, README/landing honest caveats, OpenRouter tier check.
+- [x] **M3 — Hosted deployment:** Soroban testnet contract, Render gateway/Postgres, Vercel web, Render fee-sponsor service, CI pipeline. — DONE 2026-08-10; optional Blueprint attachment remains for infrastructure drift control.
+- [ ] **M4 — Launch validation + evidence:** IN PROGRESS — funded hosted call and settlement verified; slash, withdrawal, restart durability, OAuth, Stripe retry, queue cleanup, README review, and OpenRouter tier check remain.
 
 ## Task Breakdown
 **What specific work needs to be done?**
@@ -142,20 +143,20 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
   - Related testing scenarios: gateway + Soroban integration; hosted E2E.
   - Status: the contract was deployed 2026-07-14 with the real BLS12-381 VK, and M1.0 verified the committed `verification_key_*.json` match both the zkeys and (via the `_soroban` conversions) the deployed contract. Public gateway confirmation passed after the attached Postgres machine was restarted. Redeploy only becomes necessary if the optional fresh trusted-setup regen ships new VKs.
 
-- [x] **3.2 Deploy the gateway to Fly.io with PostgreSQL.** — DEPLOYED; replace a terminated free-tier Postgres machine with a fresh Fly Postgres database when needed
-  - Outcome: Deploy the hardened gateway to Fly.io with a PostgreSQL instance (Fly.io Postgres or external); public URL; environment-separated secrets; `/health` endpoint.
+- [x] **3.2 Deploy the gateway to Render with PostgreSQL.** — DONE 2026-08-10
+  - Outcome: Deploy the hardened gateway to Render with shared PostgreSQL; public URL; environment-separated secrets; `/health` endpoint.
   - Depends on: 2.2, 3.1.
-  - Validation: Public `GET /health` returns 200 from an external network. (Covers testing: public URL accessibility.)
+  - Validation: Public `GET /health` and `/v1/contract-status` return 200 from an external network; both passed on the live `c02891c` revision. (Covers testing: public URL accessibility.)
   - Related testing scenarios: public URL accessibility; restart durability (hosted).
 
-- [ ] **3.3 Deploy the web app to Vercel.**
-  - Outcome: Deploy the Next.js web app to Vercel; configure environment (gateway public URL, Stripe test mode, GitHub OAuth, NEXTAUTH); public URL.
+- [x] **3.3 Deploy the web app to Vercel.** — DEPLOYED 2026-08-10; GitHub OAuth acceptance remains in M4
+  - Outcome: Deploy the Next.js web app to Vercel; configure environment (gateway public URL, Stripe test mode, GitHub OAuth, AUTH_SECRET/AUTH_URL); public URL.
   - Depends on: 3.2 (web proxies to gateway).
-  - Validation: Public sign-in -> buy -> dashboard works end-to-end. (Covers testing: public URL accessibility; hosted E2E.)
+  - Validation: Public Vercel sign-in with the test-only dev account, API-key issuance, Stripe test checkout, dashboard status proxy, and hosted gateway call passed. GitHub OAuth and webhook-retry behavior are not yet acceptance-tested. (Covers testing: public URL accessibility; hosted E2E.)
   - Related testing scenarios: hosted E2E; manual onboarding UX.
 
-- [x] **3.4 Deploy the fee-sponsor service.** — DEPLOYED; live fee-bump validation remains pending
-  - Outcome: Deploy `services/fee-sponsor` (Fly.io or co-hosted with gateway); public fee-relay endpoint; environment-separated sponsor XLM key.
+- [x] **3.4 Deploy the fee-sponsor service.** — DEPLOYED to Render; live fee-bump validation remains pending
+  - Outcome: Deploy `services/fee-sponsor` to Render; public fee-relay endpoint; environment-separated sponsor XLM key.
   - Depends on: 2.4, 3.1.
   - Validation: Fee-relay reachable from an external network; a valid slash/withdraw transaction is fee-bumped. (Covers testing: fee-sponsor + Soroban integration; public URL accessibility.)
   - Related testing scenarios: fee-sponsor + Soroban integration; hosted slash/withdraw demos.
@@ -171,12 +172,24 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
   - Related testing scenarios: test reporting & coverage.
   - Status: `.github/workflows/ci.yml` (6-job matrix, all green) + `.github/workflows/deploy-smoke.yml` (post-deploy health template). **Web test baseline added** (`web/src/lib/crypto.test.ts` vitest 4/4; `web/e2e/smoke.spec.ts` Playwright 2/2). **Discovered gaps fixed:** circuit artifacts (`.wasm`/`*_final.zkey`) un-ignored + committed; gateway/web lockfiles' missing `@emnapi` top-level entries added; consuming jobs build `@zk-credits/shared` before typecheck; `@vitest/coverage-v8` devDep added (coverage step exits 0, 65.58%).
 
+- [ ] **3.6 Attach the existing resources to the Render Blueprint.** — OPTIONAL, NOT LAUNCH-BLOCKING
+  - Outcome: Connect the `feature-stellar-launch` repository and `render.yaml` to the existing Render services/database so future configuration changes are reviewable and synchronized.
+  - Depends on: 3.2, 3.3, 3.4.
+  - Validation: Render Blueprint validation passes; Dashboard sync targets the existing resources rather than provisioning duplicates; secret values remain preserved through sync.
+  - Related testing scenarios: deployment configuration; secret/privacy review.
+
 ### M4 — Launch validation + evidence
 
-- [ ] **4.1 Hosted end-to-end demo.**
+- [ ] **4.0 Quarantine legacy spend-queue rows.** — IN PROGRESS / operational cleanup
+  - Outcome: Prevent pre-fix accepted calls (BN254-root or positional-proof payloads) from being retried indefinitely; retain their hashes and failure reason for audit, while allowing post-`c02891c` calls to settle.
+  - Depends on: 3.2 and the live queue schema.
+  - Validation: No legacy row is retried as a current acceptance fixture; a fresh funded call settles and emits `NullifierSpent`; the worker remains retry-safe for transient failures.
+  - Related testing scenarios: gateway + Soroban integration; restart durability.
+
+- [ ] **4.1 Hosted end-to-end demo.** — IN PROGRESS / core funded path verified
   - Outcome: A public tester visits the Vercel URL, signs in with GitHub, buys $5 test credits (Stripe test), sets `OPENAI_BASE_URL`/`OPENAI_API_KEY`, runs `claude "..."`, and receives a real Claude response via a self-verified ZK-RLN proof.
   - Depends on: 3.2, 3.3, 3.4.
-  - Validation: `scripts/e2e-test.js` passes against the public deployment. (Covers testing: hosted E2E public demo.)
+  - Validation: Core path passed with a hosted test account: Stripe checkout, real OpenRouter response, replay rejection, and two live `NullifierSpent` events. Remaining acceptance: GitHub OAuth, the committed public demo script, and a clean post-fix queue.
   - Related testing scenarios: hosted E2E public demo.
 
 - [ ] **4.2 Hosted slash demo.** — blocked on live testnet (M3/M4 encodes; the fee-relay that makes slash permissionless is code-complete offline, 2.4)
@@ -192,7 +205,7 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
   - Related testing scenarios: hosted withdraw E2E; fee-sponsor + Soroban integration.
 
 - [ ] **4.4 Restart durability test on the hosted gateway.**
-  - Outcome: Restart the Fly.io gateway mid-session; the tester's next call succeeds and no accepted call is lost or duplicated; sustain 100 accepted calls across a restart.
+  - Outcome: Restart the Render gateway mid-session; the tester's next call succeeds and no accepted call is lost or duplicated; sustain 100 accepted calls across a restart.
   - Depends on: 4.1.
   - Validation: `scripts/e2e-test.js` passes immediately after a restart; 100-call sustained run shows no drops/duplicates. (Covers testing: restart durability hosted; performance.)
   - Related testing scenarios: restart durability hosted; performance testing.
@@ -224,7 +237,7 @@ flowchart LR
   D --> G[2.4 Fee-sponsor service]
   E --> G
   E --> H[3.1 Soroban testnet contract]
-  H --> I[3.2 Gateway on Fly.io]
+  H --> I[3.2 Gateway on Render]
   G --> I
   G --> J[3.4 Fee-sponsor deploy]
   H --> J
@@ -242,7 +255,7 @@ flowchart LR
 ```
 
 - **Hard dependencies:** 1.1 -> 1.2 (guardrails build on each other); 1.0 -> 1.3 + test suite (self-verify and the 3 circuit tests need built circuit artifacts); 1.2 -> 1.3 (self-verify uses the shared verifier); 2.1 -> 2.2/2.3/2.4 (storage migrations need schemas); 2.2 -> 2.6 (spend worker drains the durable accepted_calls queue); 2.5 depends on 2.2 + 2.4; 3.x deployments need M2 code complete; 4.x demos need all of M3 deployed (and the M2 live testnet spike).
-- **External dependencies:** Stripe test-mode credentials, GitHub OAuth app, OpenRouter API key (sufficient tier), Stellar testnet funded accounts (gateway, treasury, reporter, user, fee-sponsor), Fly.io + Vercel accounts, a PostgreSQL instance.
+- **External dependencies:** Stripe test-mode credentials, GitHub OAuth app, OpenRouter API key (sufficient tier), Stellar testnet funded accounts (gateway, treasury, reporter, user, fee-sponsor), Render + Vercel accounts, a PostgreSQL instance.
 - **Parallelism:** 2.2, 2.3, 2.4 can proceed in parallel after 2.1. 3.2, 3.3, 3.4 can proceed in parallel after their M2 dependencies. 4.2, 4.3, 4.4, 4.5, 4.6 can proceed in parallel after 4.1.
 
 ## Timeline & Estimates
@@ -254,7 +267,7 @@ No delivery date was supplied. These are relative planning estimates, not commit
 |---|---|---|
 | M1 | Medium | Type-safety cleanup + isomorphic shared package refactor; touches existing v1 code paths. |
 | M2 | Large | PostgreSQL migration (replaces in-memory state) + new fee-sponsor service; security-critical. |
-| M3 | Medium | Hosted deployment (Fly.io + Vercel + Soroban) + CI; ops work, not novel code. |
+| M3 | Medium | Hosted deployment (Render + Vercel + Soroban) + CI; ops work, not novel code. |
 | M4 | Small–Medium | Hosted E2E validation + docs; depends on external services being provisioned. |
 
 The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (which rewrites everything). The fastest path to a public demo is M1 -> M2 -> M3 -> M4 with parallelism inside M2 and M3.
@@ -268,7 +281,7 @@ The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (wh
 | PostgreSQL migration loses or duplicates state. | Transactional writes before upstream forwarding; restart durability tests (PROVEN offline 2026-08-04: 36/36 Postgres integration incl. restart resumption); on-chain event subscription for nullifier invalidation. | Block 2.2 — DONE; hosted restart test at 4.4. |
 | Fee-sponsor authority is abused (sponsors arbitrary transactions). | Method-validation gate (slash/withdraw only, contract-id checked; PROVEN offline 2026-08-04: 9 core tests); fee bump does not alter inner tx effects; contract auth gates all state. | Block 2.4 — DONE; live testnet submission remains. |
 | Stellar fee bump mechanics differ from the assumed SEP-0041-style behavior. | Spike a minimal fee-bump transaction on testnet before the full fee-relay; pin the stellar-sdk version. | **Block 2.4 live spike** — code is offline-complete with `@stellar/stellar-sdk@16` `buildFeeBumpTransaction`; real testnet fee-bump pending user-funded keys. |
-| Hosted deployment exposes secrets or breaks the privacy boundary. | Environment-separated secrets; gateway schema privacy assertions; manual log/schema inspection in M4. | Block 3.2/3.3. |
+| Hosted deployment exposes secrets or breaks the privacy boundary. | Environment-separated secrets; gateway schema privacy assertions; manual log/schema inspection in M4; optional Render Blueprint sync review. | Block M4 launch sign-off. |
 | OpenRouter rate-limits the gateway's key during public load. | Pre-launch tier check (4.6); use a sufficient tier; cap demo load. | Block 4.1. |
 | Public launch overclaims "real ZK" with a dev-only trusted setup. | Honest-caveats README/landing review (4.5); explicit "testnet ZK with dev-only setup" framing. | Block launch sign-off. |
 | CI cannot run Circom/stellar-sdk in GitHub Actions. | Use a Docker action with circom + stellar-cli preinstalled; mark circuit/contract tests as required-gate only after CI passes. | Block 3.5. |
@@ -279,8 +292,8 @@ The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (wh
 
 - Stellar testnet funded accounts: gateway, treasury, reporter, user, fee-sponsor (disposable testnet keys via `stellar keys`).
 - Stripe test-mode credentials + webhook forwarder; GitHub OAuth app (client ID/secret); OpenRouter API key (sufficient tier).
-- Fly.io account (gateway + fee-sponsor + PostgreSQL) and Vercel account (web).
-- PostgreSQL instance (Fly.io Postgres or external) with isolated schemas.
+- Render account (gateway + fee-sponsor + PostgreSQL) and Vercel account (web).
+- PostgreSQL instance (Render Postgres or external) with isolated schemas.
 - CI (GitHub Actions) capable of running TypeScript, Circom, stellar-cli/Rust, and Playwright; secret redaction.
 - Security review capacity for the fee-sponsor authority boundary and the gateway privacy data-flow before public launch.
 
@@ -371,3 +384,26 @@ User reported the web UI "sucks, ugly and didn't work at all" and directed a Pla
 - M3.2 and M3.4 are recorded as deployed. If the attached free-tier Postgres machine is terminated, the recovery action is to provision a fresh Fly Postgres database and reattach/reconfigure the gateway.
 - No additional Fly.io health checks are required in this pass. The next implementation task is **M3.3 Vercel web deployment**: `vercel link`, configure the documented environment variables, and deploy.
 - M3.1 public contract-status verification and the live Stellar testnet spike remain subsequent validation tasks; they are not changed into source-code blockers.
+
+### Reconciliation (Dev-Planning · Phase 6 · 2026-08-10)
+
+**Milestone status:** `M1 DONE` · `M2 CODE-COMPLETE (live spend/fee-bump/withdraw spike pending)` · `M3 DEPLOYMENT DONE (Render/Vercel/CI)` · `M4 IN PROGRESS (4.1 partial)` · **Web UI fix & browser verification DONE (W1–W7)**.
+
+**Completed since the previous plan:**
+- Replaced the stale Fly deployment plan with the live Render topology: gateway, fee-sponsor, and shared Postgres are healthy; the gateway and fee-sponsor run `c02891c`.
+- Confirmed the deployed Soroban contract from Render and observed two `NullifierSpent` events after the corrected BLS Merkle arithmetic, named proof-map serialization, `u256` signal encoding, and XDR event-topic fixes.
+- Deployed and exercised the Vercel web flow with a test-only hosted account: sign-in, API-key issuance, Stripe test checkout, dashboard status proxy, OpenRouter response, replay rejection, and funded settlement.
+- Verified Vercel `/api/dashboard/status` and the direct Render status endpoint return matching values for a fresh identity; the earlier unchanged dashboard state is therefore tracked as asynchronous settlement timing, not a proxy-routing defect.
+- Validated `render.yaml` through the Render Blueprint API. Existing resources are not yet Blueprint-attached; this is optional drift-control work and must not provision duplicates.
+
+**Scope changes:**
+- M3.2 and M3.4 changed from Fly deployment tasks to Render deployment tasks; M3.3 is deployed, with GitHub OAuth acceptance moved to M4.
+- Added optional task 3.6 for Render Blueprint attachment.
+- Added task 4.0 to quarantine legacy queue rows created before the BLS/proof-shape fixes; those rows are historical `RootMismatch` noise, not current protocol failures.
+- M4.1 is now in progress rather than not started: the core funded path is proven, but the committed public demo script, GitHub OAuth, and clean queue acceptance remain open.
+
+**Blockers and risks:** live fee-bumped slash, gateway-mediated withdrawal, and hosted restart durability still require dedicated Stellar testnet validation; Stripe webhook retry, GitHub OAuth, and OpenRouter tier checks remain external configuration/acceptance work. Render free-tier sleep behavior and legacy queue retries must be controlled before launch sign-off.
+
+**Next actions:** (1) quarantine legacy spend rows and verify fresh post-fix settlement; (2) run live slash and withdrawal fee-relay tests plus restart durability; (3) complete GitHub OAuth, Stripe retry, OpenRouter tier, README caveat review, and the public demo-script run. Optional: attach the existing services to the validated Render Blueprint through the Dashboard.
+
+**Summary:** deployment is no longer the active blocker. The protocol's funded request path now works through checkout, OpenRouter, replay protection, and Soroban settlement. The project remains in M4 launch validation until live fee-relay/withdrawal/restart checks and the remaining external configuration and operational cleanup are complete.
