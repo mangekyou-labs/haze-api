@@ -22,7 +22,11 @@ export function DashboardStatus() {
     void loadStatus();
     const refresh = () => void loadStatus();
     window.addEventListener('zk-credits-status-refresh', refresh);
-    return () => window.removeEventListener('zk-credits-status-refresh', refresh);
+    window.addEventListener('zk-credits-identity-ready', refresh);
+    return () => {
+      window.removeEventListener('zk-credits-status-refresh', refresh);
+      window.removeEventListener('zk-credits-identity-ready', refresh);
+    };
   }, []);
 
   async function loadStatus() {

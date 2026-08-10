@@ -42,7 +42,13 @@ export function BuyCreditsSection({
   >('idle');
 
   useEffect(() => {
-    getCommitmentFromDB().then(setCommitment);
+    const loadCommitment = () => {
+      void getCommitmentFromDB().then(setCommitment);
+    };
+    loadCommitment();
+    window.addEventListener('zk-credits-identity-ready', loadCommitment);
+    return () =>
+      window.removeEventListener('zk-credits-identity-ready', loadCommitment);
   }, []);
 
   useEffect(() => {
@@ -94,10 +100,15 @@ export function BuyCreditsSection({
     setError(null);
 
     try {
+      // The API-key panel can create the identity after this component first
+      // mounted. Re-read storage at the payment boundary so Stripe metadata
+      // always carries the commitment that will receive the deposit.
+      const currentCommitment = commitment ?? (await getCommitmentFromDB());
+      if (currentCommitment && !commitment) setCommitment(currentCommitment);
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: tierId, commitment }),
+        body: JSON.stringify({ tier: tierId, commitment: currentCommitment }),
       });
 
       const data = await res.json();

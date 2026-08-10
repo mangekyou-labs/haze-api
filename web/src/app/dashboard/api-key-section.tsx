@@ -94,6 +94,9 @@ export function ApiKeySection({
         setExistingCommitment(commitment);
       }
 
+      // Let the status and checkout panels observe an identity created from
+      // this dashboard session before either panel is used.
+      window.dispatchEvent(new Event('zk-credits-identity-ready'));
       setMnemonic(words);
 
       const res = await fetch('/api/keys', {
