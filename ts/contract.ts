@@ -98,6 +98,17 @@ export function groth16ProofToScVal(proof: object): xdr.ScVal {
   ]);
 }
 
+/**
+ * Encode RLN public signals as Vec<u256>. Soroban's Bls12381Fr maps to the
+ * 256-bit unsigned ScVal type; the SDK otherwise defaults BigInt values to
+ * u64 when no explicit type is supplied.
+ */
+export function groth16PublicSignalsToScVal(pubSignals: string[]): xdr.ScVal {
+  return xdr.ScVal.scvVec(
+    pubSignals.map((signal) => nativeToScVal(BigInt(signal), { type: 'u256' })),
+  );
+}
+
 function getServer(): SorobanRpc.Server {
   return new SorobanRpc.Server(RPC_URL, { allowHttp: true });
 }
@@ -196,7 +207,7 @@ export async function buildSlashEnvelope(
   const source = await server.getAccount(keypair.publicKey());
 
   const proofVal = groth16ProofToScVal(slashProof);
-  const signalsVal = nativeToScVal(pubSignals.map((signal) => BigInt(signal)), {});
+  const signalsVal = groth16PublicSignalsToScVal(pubSignals);
   const commitmentVal = nativeToScVal(BigInt(commitment), { type: 'u256' });
   const submitterVal = new Address(submitter).toScVal();
 
@@ -272,6 +283,14 @@ export interface NullifierSpentEvent {
   ledger: number;
 }
 
+export function nullifierSpentEventFilter(contractId: string) {
+  return {
+    type: 'contract' as const,
+    contractIds: [contractId],
+    topics: [[xdr.ScVal.scvSymbol('NullifierSpent').toXDR('base64')]],
+  };
+}
+
 export async function fetchNullifierSpentEvents(
   startLedger: number,
   endLedger: number,
@@ -283,13 +302,7 @@ export async function fetchNullifierSpentEvents(
   const response = await server.getEvents({
     startLedger,
     endLedger,
-    filters: [
-      {
-        type: 'contract',
-        contractIds: [contractId],
-        topics: [['NullifierSpent']],
-      },
-    ],
+    filters: [nullifierSpentEventFilter(contractId)],
     limit: 200,
   });
 
@@ -385,7 +398,7 @@ export async function spend(
   const source = await server.getAccount(keypair.publicKey());
 
   const proofVal = groth16ProofToScVal(proof);
-  const signalsVal = nativeToScVal(pubSignals.map((s) => BigInt(s)), {});
+  const signalsVal = groth16PublicSignalsToScVal(pubSignals);
 
   const tx = new TransactionBuilder(source, {
     fee: '300000',

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { scValToNative } from '@stellar/stellar-sdk';
-import { groth16ProofToScVal } from './contract.js';
+import { scValToNative, xdr } from '@stellar/stellar-sdk';
+import {
+  groth16ProofToScVal,
+  groth16PublicSignalsToScVal,
+  nullifierSpentEventFilter,
+} from './contract.js';
 
 const fixtureProof = {
   pi_a: ['1', '2', '1'],
@@ -34,5 +38,26 @@ describe('Groth16 Soroban proof serialization', () => {
         pi_a: ['1', '2', '9'],
       }),
     ).toThrow('G1 proof point z must be 1');
+  });
+
+  it('encodes every public signal as a Soroban u256', () => {
+    const signals = groth16PublicSignalsToScVal([
+      '1',
+      '340282366920938463463374607431768211456',
+    ]);
+
+    expect(signals.vec()?.map((value) => value.switch().name)).toEqual(['scvU256', 'scvU256']);
+    expect(scValToNative(signals)).toEqual([
+      1n,
+      340282366920938463463374607431768211456n,
+    ]);
+  });
+
+  it('encodes the NullifierSpent topic as ScVal XDR for RPC event filters', () => {
+    const filter = nullifierSpentEventFilter('C' + 'A'.repeat(55));
+    const topic = filter.topics?.[0]?.[0];
+
+    expect(typeof topic).toBe('string');
+    expect(xdr.ScVal.fromXDR(topic as string, 'base64').sym().toString()).toBe('NullifierSpent');
   });
 });
