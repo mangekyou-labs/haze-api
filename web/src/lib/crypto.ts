@@ -8,7 +8,6 @@ import {
   recoverSecretK,
   deriveMnemonic,
   skToField,
-  computeDepositCommitment,
   generateRlnProofSelfVerified,
   generateMembershipRemovalProofSelfVerified,
   mimcHash,
@@ -17,16 +16,10 @@ import {
   type PublicMembershipSnapshot,
   type RlnProofResult,
   type MembershipRemovalProofResult,
-  type DepositCircuitResources,
 } from '@zk-credits/shared';
 
 const GATEWAY_BASE = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:3001';
 const MEMBERSHIP_SNAPSHOT_MAX_AGE_MS = 60_000;
-
-const browserDepositResources: DepositCircuitResources = {
-  depositWasm: '/circuits/deposit_membership.wasm',
-  depositZkey: '/circuits/deposit_membership_final.zkey',
-};
 
 const browserRlnResources = {
   rlnWasm: '/circuits/rln_nullifier.wasm',
@@ -70,9 +63,11 @@ export { generateSecretK, recoverSecretK, deriveMnemonic };
 // Keep the v1 alias for compatibility.
 export const secretKToField = skToField;
 
-// deposit_membership outputs: [root, commitment] → returns the commitment.
+// The deposit circuit defines commitment = MiMCSponge(secret_k). Derive that
+// public value directly; generating a Groth16 proof here is unnecessary and
+// can strand a browser worker during onboarding or recovery.
 export async function computeCommitment(secretK: Uint8Array): Promise<string> {
-  return computeDepositCommitment(secretK, browserDepositResources);
+  return mimcHash([BigInt(skToField(secretK))]);
 }
 
 export interface ChatProofResult extends RlnProofResult {

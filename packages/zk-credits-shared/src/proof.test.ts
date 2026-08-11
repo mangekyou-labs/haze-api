@@ -53,6 +53,7 @@ describe('computeDepositCommitment', () => {
       const c2 = await computeDepositCommitment(sk2, resources);
 
       expect(c1).toBe(c1again);
+      expect(c1).toBe(await mimcHash([BigInt(skToField(sk1))]));
       expect(c1).not.toBe(c2);
     },
     120_000,
