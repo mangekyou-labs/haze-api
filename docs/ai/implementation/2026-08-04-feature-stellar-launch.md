@@ -475,5 +475,9 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
   CLI 0.147.0 `exec` request then generated and self-verified a local proof,
   received HTTP 200 through `/v1/responses`, consumed local ticket index `2`,
   and returned exactly `ZK Credits Codex works.`.
+- The unavailable `@zk-credits` npm scope was replaced with the available
+  unscoped package name. `zk-credits@0.1.0` is published publicly; end users
+  install it with `npm install --global zk-credits` and do not need a source
+  checkout or manual sidecar process.
 - Existing manual `import-mnemonic`, `serve`, and `env` entry points remain for
   headless or other OpenAI-compatible clients.

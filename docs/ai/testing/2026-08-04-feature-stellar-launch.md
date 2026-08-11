@@ -397,3 +397,8 @@ statement:
   `ZK Credits Codex works.`, and left local ticket index `2` in `consumed`
   state. Failed compatibility probes reserved indices `0` and `1` without
   marking them consumed, preserving the no-reassignment ambiguity rule.
+- [x] Published `zk-credits@0.1.0` to the public npm registry. Its registry
+  integrity matched the locally verified tarball; a clean registry install ran
+  `--help` and reported the configured identity/profile/running sidecar. The
+  globally installed registry binary then stopped and automatically restarted
+  the loopback sidecar without spending a ticket.

@@ -863,3 +863,5 @@ accepts the generated provider profile and catalog. After TDD fixes for
 path-sensitive proof dependencies and Codex-sized gateway bodies, revision
 `73df52b` deployed to Render and a real `zk-credits codex exec` request exited
 0 with the exact requested response; local ticket index `2` is consumed.
+`zk-credits@0.1.0` is published publicly on npm, and both isolated and global
+registry installs pass the CLI/lifecycle acceptance checks.
