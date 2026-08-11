@@ -28,18 +28,37 @@ export interface RlnCircuitResources {
   rlnVk: unknown;
 }
 
+export interface MembershipRemovalCircuitResources {
+  membershipRemovalWasm: string | Uint8Array;
+  membershipRemovalZkey: string | Uint8Array;
+  membershipRemovalVk: unknown;
+}
+
+export interface MembershipRemovalProofInput {
+  secret_k: string;
+  merkle_path_elements: string[];
+  merkle_path_indices: string[];
+}
+
 export interface RlnProofInput {
   secret_k: string;
-  signal_value: string;
-  epoch: string;
+  ticket_index: string;
+  request_digest: string;
   merkle_path_elements: string[];
   merkle_path_indices: string[];
 }
 
 export interface RlnProofResult extends ProofResult {
-  // RLN public signals: [root, nullifier, share_x, share_y, epoch]; the
+  // Indexed-ticket public signals: [root, nullifier, share_x, share_y]; the
   // nullifier is the gateway's replay-protection key (signal index 1).
   nullifier: string;
+}
+
+export interface MembershipRemovalProofResult extends ProofResult {
+  // Membership-removal public outputs: [commitment, current_root, next_root].
+  commitment: string;
+  currentRoot: string;
+  nextRoot: string;
 }
 
 export class ProofSelfVerificationError extends Error {
@@ -95,7 +114,7 @@ export async function verifyGroth16Proof(
 // returning it. A proof that fails local verification throws
 // ProofSelfVerificationError and is never returned — so it can never be
 // attached to an X-ZK-Proof header. The gateway re-verifies as defense in
-// depth and additionally checks nullifier replay + epoch quota.
+// depth and additionally checks request binding and ticket replay.
 export async function generateRlnProofSelfVerified(
   input: RlnProofInput,
   resources: RlnCircuitResources,
@@ -118,4 +137,46 @@ export async function generateRlnProofSelfVerified(
     );
   }
   return { ...result, nullifier: result.publicSignals[1] };
+}
+
+// Withdrawal proof generation mirrors the RLN self-verification rule: a
+// browser never sends a membership-removal proof to the custodial signer until
+// it verifies locally with the statement's own verification key.
+export async function generateMembershipRemovalProofSelfVerified(
+  input: MembershipRemovalProofInput,
+  resources: MembershipRemovalCircuitResources,
+): Promise<MembershipRemovalProofResult> {
+  const result = await proveGroth16(
+    input,
+    resources.membershipRemovalWasm,
+    resources.membershipRemovalZkey,
+  );
+  let valid: boolean;
+  try {
+    valid = await verifyGroth16Proof(
+      resources.membershipRemovalVk,
+      result.publicSignals,
+      result.proof,
+    );
+  } catch (err) {
+    throw new ProofSelfVerificationError(
+      `Local membership-removal verification failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!valid) {
+    throw new ProofSelfVerificationError(
+      'Local membership-removal verification failed; proof not returned',
+    );
+  }
+  if (result.publicSignals.length !== 3) {
+    throw new ProofSelfVerificationError(
+      `Membership-removal statement has ${result.publicSignals.length} public signals; expected 3`,
+    );
+  }
+  return {
+    ...result,
+    commitment: result.publicSignals[0],
+    currentRoot: result.publicSignals[1],
+    nextRoot: result.publicSignals[2],
+  };
 }

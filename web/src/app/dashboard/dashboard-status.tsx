@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatUsdc } from '@/lib/format';
+import { STARTER_TICKET_COUNT, TicketLedger } from '@/lib/ticket-ledger';
 
 interface StatusData {
   commitment: string;
@@ -54,8 +55,16 @@ export function DashboardStatus() {
           setLoading(false);
           return;
         }
-        const data = await res.json();
-        setStatus(data);
+        const data = (await res.json()) as StatusData;
+        const ticketState = await new TicketLedger().getState();
+        const used = ticketState.consumed.length + ticketState.skipped.length;
+        const reserved = ticketState.reserved.length;
+        setStatus({
+          ...data,
+          callsThisEpoch: used,
+          epochQuota: STARTER_TICKET_COUNT,
+          remainingCalls: Math.max(0, STARTER_TICKET_COUNT - used - reserved),
+        });
         setLoading(false);
       };
       dbReq.onerror = () => {
@@ -100,11 +109,11 @@ export function DashboardStatus() {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-xl bg-blue-500/10 p-4">
-          <p className="text-sm font-medium text-blue-300">Calls Today</p>
+          <p className="text-sm font-medium text-blue-300">Tickets Used</p>
           <p className="text-2xl font-bold text-blue-100">
             {status.callsThisEpoch}
           </p>
-          <p className="text-xs text-blue-400/80">of {status.epochQuota} (limit)</p>
+          <p className="text-xs text-blue-400/80">of {status.epochQuota} Starter tickets</p>
         </div>
 
         <div className="rounded-xl bg-green-500/10 p-4">
@@ -112,7 +121,7 @@ export function DashboardStatus() {
           <p className="text-2xl font-bold text-green-100">
             {status.remainingCalls}
           </p>
-          <p className="text-xs text-green-400/80">calls this epoch</p>
+          <p className="text-xs text-green-400/80">fixed tickets remaining</p>
         </div>
 
         <div className="rounded-xl bg-purple-500/10 p-4">
@@ -124,9 +133,9 @@ export function DashboardStatus() {
         </div>
 
         <div className="rounded-xl bg-zinc-500/10 p-4">
-          <p className="text-sm font-medium text-zinc-300">Active Keys</p>
-          <p className="text-2xl font-bold text-zinc-100">{status.activeKeys}</p>
-          <p className="text-xs text-zinc-400">API keys for this account</p>
+          <p className="text-sm font-medium text-zinc-300">Proof Authorization</p>
+          <p className="text-2xl font-bold text-zinc-100">ZK</p>
+          <p className="text-xs text-zinc-400">shared bearer + per-call proof</p>
         </div>
       </div>
 

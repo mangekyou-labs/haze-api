@@ -8,6 +8,7 @@ const fs = require('fs');
 const {
   computeDepositCommitment,
   generateRlnProofSelfVerified,
+  requestDigestToField,
   skToField,
 } = require('@zk-credits/shared');
 
@@ -63,15 +64,19 @@ async function main() {
 
   // Step 5: Generate RLN proof (client self-verifies locally before submit)
   console.log('5. Generating RLN proof (self-verified before submit)...');
-  const epoch = Math.floor(Date.now() / 86400000).toString();
-  const signalValue = crypto.randomBytes(16).toString('hex');
+  const requestBody = {
+    model: 'anthropic/claude-sonnet-4',
+    messages: [{ role: 'user', content: 'Say "ZK proofs work!" in exactly 3 words.' }],
+    max_tokens: 50,
+  };
+  const requestDigest = await requestDigestToField(requestBody);
 
   const startProve = Date.now();
   const rln = await generateRlnProofSelfVerified(
     {
       secret_k: skField,
-      signal_value: BigInt('0x' + signalValue).toString(),
-      epoch,
+      ticket_index: '0',
+      request_digest: requestDigest.field,
       merkle_path_elements: ['0', '0', '0'],
       merkle_path_indices: ['0', '0', '0'],
     },
@@ -99,9 +104,7 @@ async function main() {
       'X-ZK-Proof': proofHeader,
     },
     body: JSON.stringify({
-      model: 'anthropic/claude-sonnet-4',
-      messages: [{ role: 'user', content: 'Say "ZK proofs work!" in exactly 3 words.' }],
-      max_tokens: 50,
+      ...requestBody,
     }),
   });
   const callTime = Date.now() - startCall;
@@ -116,8 +119,8 @@ async function main() {
   }
   console.log();
 
-  // Step 7: Replay same nullifier (should fail)
-  console.log('7. Replaying same nullifier (should fail)...');
+  // Step 7: Replay the exact tuple (idempotent retry)
+  console.log('7. Replaying the exact tuple (should return the stored response)...');
   const replayRes = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -126,13 +129,12 @@ async function main() {
       'X-ZK-Proof': proofHeader,
     },
     body: JSON.stringify({
-      model: 'anthropic/claude-opus-4',
-      messages: [{ role: 'user', content: 'This should fail' }],
+      ...requestBody,
     }),
   });
   const replayData = await replayRes.json();
-  console.log(`   Status: ${replayRes.status} (expected 403)`);
-  console.log(`   Error: ${replayData.error}\n`);
+  console.log(`   Status: ${replayRes.status} (expected 200)`);
+  console.log(`   Response: ${replayData.choices?.[0]?.message?.content?.slice(0, 100) || replayData.error}\n`);
 
   // Step 8: Check status
   console.log('8. Checking user status...');

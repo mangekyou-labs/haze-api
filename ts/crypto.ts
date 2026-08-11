@@ -12,7 +12,7 @@ import {
   type DepositCircuitResources,
 } from '@zk-credits/shared';
 
-const CIRCUITS_DIR = process.env.CIRCUITS_DIR || resolve(import.meta.dirname!, '..', '..', 'circuits');
+const CIRCUITS_DIR = process.env.CIRCUITS_DIR || resolve(import.meta.dirname!, '..', 'circuits');
 
 function nodeDepositResources(): DepositCircuitResources {
   return {

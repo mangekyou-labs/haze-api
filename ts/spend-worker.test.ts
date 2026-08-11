@@ -19,7 +19,7 @@ function sampleCall(over: Partial<AcceptedCall> = {}): AcceptedCall {
     nonceHash: 'nh-1',
     acceptedAt: new Date('2026-08-04T10:00:00Z'),
     proof: { a: '1' },
-    pubSignals: ['root', 'n-1', 'x', 'y', '20260804'],
+    pubSignals: ['root', 'n-1', 'x', 'y'],
     ...over,
   };
 }
@@ -37,7 +37,7 @@ describe('drainSpendQueue', () => {
     await store.recordAcceptedCall(sampleCall(), 'comm-1');
     const settled = await drainSpendQueue({ store, secretKey: 'sk', submitSpend });
     expect(settled).toBe(1);
-    expect(submitSpend).toHaveBeenCalledWith('sk', { a: '1' }, ['root', 'n-1', 'x', 'y', '20260804']);
+    expect(submitSpend).toHaveBeenCalledWith('sk', { a: '1' }, ['root', 'n-1', 'x', 'y']);
 
     const [call] = await store.listAcceptedCalls();
     expect(call.onChainSpendTx).toBe('tx-hash-1');
@@ -75,7 +75,7 @@ describe('drainSpendQueue', () => {
     expect(submitSpend).not.toHaveBeenCalled();
   });
 
-  it('skips rows without a persisted proof (pre-M2.6) without blocking', async () => {
+  it('quarantines legacy rows without a persisted proof without blocking', async () => {
     await store.recordAcceptedCall(
       sampleCall({ proofHash: 'ph-noproof', nullifier: 'n-noproof', proof: null, pubSignals: null }),
       'comm-1',
@@ -83,6 +83,31 @@ describe('drainSpendQueue', () => {
     const settled = await drainSpendQueue({ store, secretKey: 'sk', submitSpend });
     expect(settled).toBe(0);
     expect(submitSpend).not.toHaveBeenCalled();
+    const [call] = await store.listAcceptedCalls();
+    expect(call).toMatchObject({
+      settlementStatus: 'quarantined',
+      settlementError: 'legacy settlement row is missing proof or public signals',
+    });
+    expect(await store.listAcceptedCalls({ onlyPendingSpend: true })).toHaveLength(0);
+  });
+
+  it('quarantines pre-indexed five-signal rows without submitting them', async () => {
+    await store.recordAcceptedCall(
+      sampleCall({
+        proofHash: 'ph-legacy-signals',
+        nullifier: 'n-legacy-signals',
+        pubSignals: ['root', 'n-legacy-signals', 'x', 'y', '20260804'],
+      }),
+      'comm-1',
+    );
+    const settled = await drainSpendQueue({ store, secretKey: 'sk', submitSpend });
+    expect(settled).toBe(0);
+    expect(submitSpend).not.toHaveBeenCalled();
+    const [call] = await store.listAcceptedCalls();
+    expect(call).toMatchObject({
+      settlementStatus: 'quarantined',
+      settlementError: 'legacy settlement row has non-indexed public signals',
+    });
   });
 });
 

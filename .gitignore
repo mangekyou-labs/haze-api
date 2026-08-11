@@ -37,6 +37,9 @@ target/
 !circuits/slash_final.zkey
 !web/public/circuits/deposit_membership.wasm
 !web/public/circuits/deposit_membership_final.zkey
+!web/public/circuits/rln_nullifier.wasm
+!web/public/circuits/rln_nullifier_final.zkey
+!web/public/circuits/verification_key_rln.json
 
 # OS
 .DS_Store
@@ -44,3 +47,4 @@ target/
 # IDE
 .vscode/
 .idea/
+.vercel

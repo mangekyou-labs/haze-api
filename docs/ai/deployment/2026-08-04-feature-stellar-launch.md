@@ -20,7 +20,49 @@ description: Hosted testnet deployment — Render (gateway + fee-sponsor), Verce
 
 Environment separation: **testnet only** for this launch. No staging/production split — all deployments are testnet (USDC is testnet faucet, Stellar is testnet, Stripe is test mode).
 
-Current deployment evidence (2026-08-10): the Fly trial ended and both public Fly services are suspended/resetting. The Render Blueprint is now checked into this worktree as `render.yaml`; both Docker images build successfully locally. Render service creation still requires the branch to be pushed/connected to a Render account. The Vercel project `feature-zk-api-credits` is linked and its local `vercel build --yes` is green. Render free web services sleep after inactivity and free Postgres is suitable only for disposable testnet/demo data.
+Current deployment evidence (2026-08-11): the Fly trial ended and both public Fly services are suspended/resetting. The Render Blueprint is now checked into this worktree as `render.yaml`; both Docker images build successfully locally. Render service creation still requires the branch to be pushed/connected to a Render account. The linked Vercel project is ready for preview deployments; Render free web services sleep after inactivity and free Postgres is suitable only for disposable testnet/demo data.
+
+### Preview deployment verification (2026-08-11)
+
+- The first isolated Vercel preview failed because the materialized shared
+  package imported `circomlibjs` without a direct `web/` dependency.
+- `circomlibjs` is now declared directly in `web/package.json`, guarded by a
+  build regression test. The corrected preview reached `Ready`:
+  https://feature-zk-api-credits-o84arsd1w-gadillacers-projects.vercel.app
+- This was a preview deployment only; no production promotion or repository
+  push was performed. Local production build and Playwright both pass.
+
+### Fresh ZK artifact release gate (complete locally)
+
+The current indexed-ticket, slash/root-removal, and membership-removal source
+statements now have a new BLS12-381 power-15 artifact set. The exact R1CS was
+used for each setup; every zkey received a separate random contribution and
+public beacon, then passed `snarkjs zkey verify`. Matching browser RLN and
+withdrawal artifacts were copied to `web/public/circuits/`, and
+`node scripts/vk-convert.js` exported the Soroban encodings.
+
+Local release evidence: circuit prove/verify passes, shared proof tests pass
+`19/19`, contract tests pass `24/24` with generated fixtures, gateway tests
+pass `141` with `11` opt-in skips, and web unit/build/Playwright gates pass.
+
+The remaining deployment actions require external testnet credentials and
+service configuration:
+
+1. build and deploy a **new** Soroban contract. `scripts/deploy-contract.js`
+   installs the spend, slash, and membership keys in its one allowed
+   post-constructor call;
+2. update Render gateway/fee-sponsor configuration with the new contract ID
+   and artifact bundle; and
+3. create or update a Vercel **preview** for browser validation. Production
+   promotion remains an explicit release decision.
+
+### Live operational check (2026-08-11)
+
+- `zk-credits-fee-sponsor.onrender.com/health` returned HTTP 200 in 0.18s.
+- `zk-credits-gateway.onrender.com/health` timed out without headers after
+  three bounded probes (20s, 50s wake attempt, 20s). Treat the gateway as
+  unavailable for current M4 validation until the Render service is recovered;
+  older hosted acceptance evidence cannot substitute for a current health check.
 
 ## Prerequisites: Credentials & Accounts
 
@@ -181,10 +223,26 @@ All six packages are built and tested in CI (`.github/workflows/ci.yml`, M3.5 DO
 
 ### 3.1 — Confirm ZkCreditsContract on Soroban testnet
 
+Live testnet deployment (verified 2026-08-11):
+
+- `ZK_CONTRACT_ID=CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`
+- deployment transaction: `36c9afaa74652afc75f3480f9765af685c6bd528853718363a74bdfc5e5de18b`
+- dedicated statement-key transaction: `8827579d85248854281ec9ffc769a4c0170a438351981281f269bd7934c7ed92` (ledger `4081560`)
+- post-deploy reads: `get_deposit_count = 0`, `get_current_root = 0`; a second key-installation simulation returns `AlreadyInitialized`, preserving the installed statement keys.
+
+Configure this exact `ZK_CONTRACT_ID` in both Render services before pointing hosted traffic at the contract.
+
+Render API deployment verification (2026-08-11): the gateway and fee-sponsor
+were updated with this ID and redeployed as `dep-d9tcin2d0e5s738rki1g` and
+`dep-d9tcitbncjis738va740`, respectively. Both deployments reached `live`;
+the public gateway status endpoint then returned this contract ID with
+`depositCount: 0` and `currentRoot: 0`, and both `/health` endpoints returned
+HTTP 200.
+
 ```bash
-# Confirm the already-deployed contract VKs match the committed verification keys
+# Confirm the deployed contract is reachable
 stellar contract invoke \
-  --id $ZK_CONTRACT_ID \
+  --id CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT \
   --source gateway \
   --network testnet \
   -- get_deposit_count
@@ -258,3 +316,9 @@ For local dev: `docker compose up -d postgres` then run the gateway (it auto-mig
 - **Contract:** immutable (Soroban); a redeploy requires a new contract ID
 
 Rollback triggers: health check failure ≥3 consecutive intervals, E2E smoke failure, or manual decision.
+
+## Render source-revision reconciliation (2026-08-11)
+
+- The Render gateway service tracks the `feature-stellar-launch` branch and its latest live deployment is `dep-d9tcin2d0e5s738rki1g` at committed revision `42ef3d1`.
+- That revision still expects the legacy five-signal epoch proof, whereas the configured live contract and current source use the four-signal indexed-ticket statement. A locally self-verified current proof reached the gateway and was correctly diagnosed as rejected by the legacy parser (`Expected 5 public signals, got 4`).
+- The source and current artifacts must be committed and pushed to that branch, then the Render API can create a new deployment. Do not treat a configuration-only redeploy of `42ef3d1` as an indexed-ticket launch deployment.

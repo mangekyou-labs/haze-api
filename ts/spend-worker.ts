@@ -1,7 +1,7 @@
 // Per-call async on-chain spend() worker (M2.6).
 //
 // Drains the durable settlement queue (accepted calls pending on-chain spend)
-// and submits each RLN proof to the contract's spend(). Idempotent across
+// and submits each indexed-ticket RLN proof to the contract's spend(). Idempotent across
 // restarts: the queue lives in `gateway.accepted_calls` (proof + pub signals
 // persisted), so a crash between submissions resumes from durable rows. When
 // the contract reports NullifierAlreadySpent (e.g. a prior submission landed
@@ -40,7 +40,8 @@ export function isNullifierAlreadySpent(err: unknown): boolean {
 /**
  * Drain the pending settlement queue once. Returns the number of calls
  * settled. Failure to submit a call (network error, etc.) leaves it pending
- * for the next pass; only a definitive NullifierAlreadySpent marks it spent.
+ * for the next pass. Malformed or pre-indexed rows are quarantined with an
+ * audit reason; only a definitive NullifierAlreadySpent marks them settled.
  */
 export async function drainSpendQueue(deps: SpendWorkerDeps): Promise<number> {
   const pending = await deps.store.listAcceptedCalls({ onlyPendingSpend: true });
@@ -48,9 +49,15 @@ export async function drainSpendQueue(deps: SpendWorkerDeps): Promise<number> {
 
   for (const call of pending) {
     if (!call.proof || !call.pubSignals) {
-      // No proof data persisted (e.g. a pre-M2.6 row) — cannot submit on-chain.
-      // Leave it pending but log; do not block the queue.
-      console.warn(`[spend] accepted call ${call.proofHash} has no persisted proof; skipping`);
+      const reason = 'legacy settlement row is missing proof or public signals';
+      await deps.store.quarantineSpend(call.proofHash, reason);
+      console.warn(`[spend] quarantined ${call.proofHash}: ${reason}`);
+      continue;
+    }
+    if (call.pubSignals.length !== 4) {
+      const reason = 'legacy settlement row has non-indexed public signals';
+      await deps.store.quarantineSpend(call.proofHash, reason);
+      console.warn(`[spend] quarantined ${call.proofHash}: ${reason}`);
       continue;
     }
     try {

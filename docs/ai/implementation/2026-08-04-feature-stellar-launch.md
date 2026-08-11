@@ -7,6 +7,87 @@ description: Technical implementation notes for the Stellar testnet public launc
 
 # Implementation Guide
 
+## Indexed-ticket implementation (2026-08-11)
+
+The launch path now follows the paper's fixed-cost construction instead of
+using a public epoch signal. The Starter package is modeled as exactly 100
+private ticket indices (`0..99`), with each request binding its own canonical
+request digest into the RLN share:
+
+- `circuits/rln_nullifier.circom` proves `i < 100`, derives `a = MiMC(k, i)`,
+  publishes `[root, nullifier, x, y]`, and binds `x` to the request digest.
+- `packages/zk-credits-shared/src/crypto.ts` is the shared MiMC/request-digest
+  derivation used by the Node and browser paths.
+- `web/src/lib/ticket-ledger.ts` reserves ticket indices atomically in
+  IndexedDB, marks successful calls consumed, and marks failed attempts
+  skipped so a browser retry cannot reuse a private ticket.
+- `ts/server.ts` accepts only four public signals, accepts the shared bearer as
+  transport compatibility, persists the indexed tuple before forwarding, and
+  returns the stored upstream response for an exact retry. A reused nullifier
+  with a different request point returns `409 fork_detected` with evidence for
+  permissionless slash construction.
+- `zk-credits-contract/contracts/zk-credits-contract/src/lib.rs` verifies the
+  four-signal spend statement and stores spend/slash/membership VKs under
+  separate keys while keeping the existing constructor ABI. The admin setter
+  lets a deployment install the dedicated statement keys exactly once; later
+  replacement attempts fail. Slash consumes a
+  nine-signal proof whose public statement includes the current and
+  post-removal roots; it updates the root and clears grace history atomically.
+- `circuits/membership_removal.circom` proves secret ownership of a commitment
+  and produces `[commitment, current_root, next_root]`. `withdraw()` verifies
+  this three-signal proof under the dedicated membership VK before accepting
+  the gateway depositor co-signature, then performs the same atomic root
+  revocation. The shared package and browser crypto wrapper self-verify this
+  proof before a withdrawal request is sent.
+
+The old epoch artifacts and five-signal fixtures are migration evidence only;
+they are not accepted by the new gateway parser or served by the new browser
+playground. The circuit setup is intentionally generated and verified as a
+new artifact set because a VK from the epoch circuit cannot verify this
+statement.
+
+## Browser and build reliability follow-up (2026-08-11)
+
+- Removed `next/font/google` from `web/src/app/layout.tsx` so production builds
+  do not require an outbound Google Fonts request. Typography now uses the
+  system sans/monospace stacks declared in `globals.css`, keeping isolated CI
+  and local Playwright builds deterministic while retaining the dark UI design.
+- Added the offline-safe typography regression to
+  `web/src/lib/vercel-build.test.ts` before the layout change; the focused test
+  and full web unit suite pass.
+- Updated `web/e2e/dashboard.spec.ts` to assert the intentional
+  `Shared API Compatibility Key` heading. The previous `API Key` assertion was
+  stale after the privacy-preserving shared-bearer UI was introduced.
+- Production-build Playwright verification passes all 13 tests. The run was
+  executed serially after an initial concurrent typecheck/E2E attempt exposed
+  a materializer race in the test harness; no product code relies on concurrent
+  `prepare-shared-package.mjs` execution.
+
+## Vercel isolated-dependency follow-up (2026-08-11)
+
+- The first preview deployment failed because Vercel installs `web/` in
+  isolation and the materialized shared browser bundle imports `circomlibjs`,
+  which was only available transitively in the monorepo.
+- Added `circomlibjs` as a direct `web` runtime dependency and added a focused
+  Vercel-build regression requiring the dependency to be declared by the web
+  package. The regression was red before the package change and green after it.
+- Local web typecheck, unit tests (`16/16`), and production build pass. The
+  corrected preview deployment is Ready at
+  `https://feature-zk-api-credits-o84arsd1w-gadillacers-projects.vercel.app`.
+
+## Settlement queue quarantine follow-up (2026-08-11)
+
+- Added `settlement_status`, `settlement_error`, and `quarantined_at` to the
+  durable accepted-call record in migration `0007`. The migration immediately
+  quarantines rows with no proof/public signals or a non-four-signal payload.
+- `MemoryGatewayStore` and `PostgresGatewayStore` now expose the same
+  `quarantineSpend` behavior. The spend worker quarantines malformed or
+  pre-indexed rows with explicit reasons and excludes them from retry polling;
+  valid indexed rows and transient network failures retain their prior paths.
+- TDD coverage is green: missing-payload and five-signal rows are quarantined,
+  while valid four-signal rows still submit and settle. The opt-in PostgreSQL
+  integration confirms the status and reason survive a new store instance.
+
 ## Development Setup
 **How do we get started?**
 
@@ -15,7 +96,7 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - `cd ts && npm install && npm run typecheck && npm test` - gateway deps, type gate, unit tests.
 - `cd web && npm install && npm run typecheck` - web deps + type gate (Next.js).
 - `cd circuits && node scripts/test.js` - off-chain prove/verify (needs built `.wasm`/`.zkey` artifacts; see Known blockers).
-- `cd zk-credits-contract && RUSTUP_TOOLCHAIN=1.94 stellar contract build` - Soroban contract (v1, unchanged for launch).
+- `cd zk-credits-contract && cargo +1.92.0 test` (or the pinned CI Rust toolchain) - Soroban contract tests, including the indexed four-signal spend path.
 - Environment: copy the repo `.env.example`; set Stellar testnet keys, Stripe test keys, GitHub OAuth, OpenRouter key, PostgreSQL URL, fee-sponsor XLM key.
 
 **Lockfile note:** the Linux-sensitive `@emnapi` lockfile entries are committed and `npm ci` is the CI path. The web production build also rebuilds the local `@zk-credits/shared` package before running Next.js.
@@ -26,8 +107,12 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - `ts/` - gateway (Node.js + Express + TypeScript): `server.ts` (OpenAI-compatible API), `crypto.ts`/`prover.ts` (ZK proof gen/verify), `merkle.ts` (off-chain Merkle), `contract.ts` (Soroban client), `providerAdapter.ts` (OpenRouter), `sessionToken.ts`, `storage.ts` (browser IndexedDB), `vitest.config.ts`. New: `tsconfig.json` (strict type gate), `circomlibjs.d.ts` (typed module decl).
 - `web/` - Next.js app (GitHub OAuth, Stripe test checkout, dashboard, onboarding). `src/lib/crypto.ts` (browser witness calc). NOTE: `src/lib/stellar.ts` (stale Soroban read stub) was **removed** in M1.1 - all contract reads go through the gateway proxy (`/v1/contract-status`).
 - `services/fee-sponsor/` - **(new, M2.4)** public fee-relay endpoint, fee bumps, PostgreSQL `fee-sponsor` schema.
-- `zk-credits-contract/` - Soroban `ZkCreditsContract` (unchanged for launch; its `withdraw()` requires `deposit.depositor.require_auth()` - gateway-mediated withdrawal).
-- `circuits/` - Circom circuits (deposit_membership, rln_nullifier, slash) + verification keys + `scripts/{debug,prove,test}.js`.
+- `zk-credits-contract/` - Soroban `ZkCreditsContract`; `withdraw()` remains
+  gateway-mediated for testnet but also requires a browser-secret
+  membership-removal proof. Spend/slash/membership verification keys are
+  stored separately for the indexed-ticket statements.
+- `circuits/` - Circom circuits (`deposit_membership`, `rln_nullifier`,
+  `slash`, `membership_removal`) + verification keys + test scripts.
 
 ## Implementation Notes
 **Key technical details to remember:**
@@ -57,6 +142,26 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - Boundary: the gateway *stale-root* rejection (a proof that verifies cryptographically but references an old tree root) is defense-in-depth beyond the local self-verify scope; it is exercised by the hosted E2E (M3.3/M4.1), not implemented as a separate gateway check in M1.
 
 ### Circuit artifacts (M1.0 - done)
+
+#### Current launch artifacts (2026-08-11)
+
+- Recompiled the current BLS12-381 statements and completed a fresh power-15
+  transcript, random contribution, public beacon, and `snarkjs zkey verify`
+  for indexed RLN, nine-signal slash/root removal, and three-signal
+  membership removal.
+- The final RLN circuit has 10,580 constraints / 10,587 wires; slash has
+  16,511 / 16,520; membership removal has 15,846 / 15,854. Each VK was
+  exported in snarkjs and Soroban form. The browser copies of the RLN and
+  membership artifacts match their circuit copies byte-for-byte.
+- `circuits/scripts/generate-contract-fixtures.js` self-verifies real RLN,
+  slash, and membership-removal proofs before writing the Soroban test
+  fixtures. The circuit suite passes; shared proof tests pass `19/19`; the
+  Soroban verifier and root-transition tests pass `24/24`.
+- The testnet deployment currently uses a legacy artifact/ABI set and must be
+  redeployed with these VKs before any hosted launch claim.
+
+#### Historical artifact record (superseded for the launch)
+
 - Shipped via the **verified-consistent v1 artifact set** (the fresh-setup alternative is pathologically slow on this machine — see note below):
   - Freshly-compiled `.wasm`/`.r1cs` (Aug 4) are byte-identical to the committed circuit source (r1cs sizes: deposit 1508732, rln 1856960, slash 348704 — matching the main tree's Jul 6/14 artifacts exactly).
   - v1 `*_final.zkey` (from the repo main tree) verified to match the committed `verification_key_*.json` — `snarkjs zkey export verificationkey` + diff: deposit/rln/slash all MATCH. So zkey ↔ VK ↔ wasm are mutually consistent.
@@ -160,7 +265,12 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - Type safety enforced (strict `tsc` gate, no `@ts-nocheck`/`any`) - prevents the PRXVT anti-pattern.
 - `secret_k` never leaves the browser (WebCrypto non-extractable); gateway sees proofs + nullifiers, no key-to-commitment mapping.
 - Fee-sponsor: fee-only authority (fee bump does not alter inner tx effects; contract auth gates state; method-validation gate rejects non-slash/withdraw txs).
-- **Custodial trust boundary (honest caveat):** the gateway is the on-chain depositor for all deposits and CAN call `withdraw()` on any deposit. Accepted for testnet (no real value); ZK-proof-authorized withdrawal is a future contract upgrade.
+- **Custodial availability boundary (honest caveat):** the gateway remains the
+  on-chain depositor/co-signer, so it can block a withdrawal by disappearing or
+  refusing to sign. It cannot unilaterally redirect funds in the launch
+  contract because `withdraw()` also verifies the browser-secret
+  membership-removal proof. Fully permissionless submission is a future UX
+  upgrade.
 - Environment-separated, non-production secrets; missing testnet config fails closed.
 
 ## Known Blockers
@@ -174,6 +284,15 @@ Work in the `feature-stellar-launch` worktree (`/Users/kyler/repos/feature-zk-ap
 - `web/src/lib/vercel-build.test.ts` was added first and failed against the empty build configuration, establishing a regression guard for the deployment path.
 - `web/package.json` now builds the isomorphic shared package and runs `scripts/prepare-shared-package.mjs` before Next. The script replaces the workspace symlink with a self-contained copy of the built `@zk-credits/shared` package in `web/node_modules`; this is required because Vercel’s isolated install did not preserve the `file:../packages/...` link.
 - Verification: the regression test and web strict typecheck pass; `vercel build --yes` completes successfully through Next compilation, serverless-function tracing, and static-file collection. No production deployment was promoted because the linked Vercel project has no environment variables.
+
+## Browser LLM playground (2026-08-10)
+
+- Added `web/src/app/dashboard/llm-playground.tsx`, a visible dashboard flow for selecting an OpenRouter model, entering a prompt, generating an RLN proof locally, submitting the proof-backed OpenAI-compatible request, and rendering the assistant response.
+- Added `generateChatProof` and `randomSignalValue` to `web/src/lib/crypto.ts`. The browser loads the RLN WASM, zkey, and verification key from `/circuits/*` and uses `generateRlnProofSelfVerified` before attaching `X-ZK-Proof`; `secret_k` remains in IndexedDB and the API key is passed between dashboard islands in memory only.
+- Added the RLN browser artifacts to `web/public/circuits/` and un-ignored them in `.gitignore`. Added `web/.vercelignore` so local `.next`/`node_modules` output is not sent in preview deploy contexts.
+- `ApiKeySection` dispatches `zk-credits-api-key-ready` after issuance; the playground listens for that event and emits `zk-credits-status-refresh` after an accepted request. The success card links to OpenRouter activity for provider-side inspection.
+- A preview deployment was created at `https://feature-zk-api-credits-quucj2zod-gadillacers-projects.vercel.app`; it renders the new UI but has no server-side gateway/Stripe environment variables, so those actions remain correctly disabled there. The existing canonical deployment retains its configured Stripe/gateway environment.
+- Live Playwright verification against a production web build with `NEXT_PUBLIC_GATEWAY_URL=https://zk-credits-gateway.onrender.com` and a fresh funded test identity: button click entered `Sending to OpenRouter…`; response rendered `ZK API Credits works.`; the card reported `self-verified proof`; usage refreshed from `0/100` to `1/100` and remaining calls from `100` to `99`; console errors were 0.
 
 ## Web UI fix & browser verification (2026-08-06; W7 verified 2026-08-09)
 
@@ -222,3 +341,9 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - `ts/contract.ts` now converts snarkjs BLS12-381 affine coordinates to the contract's named map and byte layout for both `spend()` and `slash()`, including the required imaginary-first G2 ordering and field/range validation.
 - `ts/contract.ts` also encodes every RLN public signal as `scvU256`; the default SDK integer encoding was not compatible with Soroban's `Bls12381Fr` values. The `NullifierSpent` event filter now uses the required base64 ScVal XDR topic instead of a plain symbol string.
 - TDD regressions: `ts/contract.test.ts` first failed because each converter/filter was absent, then passed with exact 96/192/96 byte assertions, projective-point rejection, `u256` signal assertions, and XDR topic decoding. Render is live on `c02891c`; a hosted call reached the corrected `spend()` path and two `NullifierSpent` events were observed on Soroban. Legacy pre-fix queue rows remain expected `RootMismatch` noise.
+
+## Transactional hosted-deposit state (2026-08-11)
+
+- A live duplicate-deposit attempt was rejected on-chain with `DuplicateCommitment`, but exposed that the gateway had already mutated its process-local Merkle tree before awaiting the contract transaction. A later deposit would therefore propose a root that did not represent the contract state.
+- `ts/server.ts` now stages each deposit against a cloned tree, submits the contract transaction, and replaces the live tree only after success. A small in-process queue serializes those stage/commit operations so two concurrent requests cannot derive competing roots.
+- `ts/merkle.ts` supplies defensive clone/replace operations. The behavior is covered at the HTTP boundary: the new test first failed because a rejected contract call increased the leaf count, then passes with both root and leaf count unchanged.

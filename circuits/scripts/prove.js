@@ -18,10 +18,11 @@ async function proveDeposit(secret_k, merkle_path_elements, merkle_path_indices)
   return { proof, publicSignals };
 }
 
-async function proveRlnNullifier(secret_k, signal_value, merkle_path_elements, merkle_path_indices) {
+async function proveRlnNullifier(secret_k, ticket_index, request_digest, merkle_path_elements, merkle_path_indices) {
   const input = {
     secret_k,
-    signal_value,
+    ticket_index,
+    request_digest,
     merkle_path_elements,
     merkle_path_indices,
   };
@@ -33,13 +34,34 @@ async function proveRlnNullifier(secret_k, signal_value, merkle_path_elements, m
   return { proof, publicSignals };
 }
 
-async function proveSlash(share1_x, share1_y, share2_x, share2_y, epoch) {
+async function proveMembershipRemoval(secret_k, merkle_path_elements, merkle_path_indices) {
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    {
+      secret_k,
+      merkle_path_elements,
+      merkle_path_indices,
+    },
+    path.join(CIRCUITS_DIR, "membership_removal.wasm"),
+    path.join(CIRCUITS_DIR, "membership_removal_final.zkey")
+  );
+  return { proof, publicSignals };
+}
+
+async function proveSlash(
+  share1_x,
+  share1_y,
+  share2_x,
+  share2_y,
+  merkle_path_elements,
+  merkle_path_indices
+) {
   const input = {
     share1_x,
     share1_y,
     share2_x,
     share2_y,
-    epoch,
+    merkle_path_elements,
+    merkle_path_indices,
   };
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(
     input,
@@ -65,4 +87,10 @@ if (require.main === module) {
   console.log("Use: const { proof, publicSignals } = await proveDeposit(sk, path, indices);");
 }
 
-module.exports = { proveDeposit, proveRlnNullifier, proveSlash, verify };
+module.exports = {
+  proveDeposit,
+  proveRlnNullifier,
+  proveMembershipRemoval,
+  proveSlash,
+  verify,
+};

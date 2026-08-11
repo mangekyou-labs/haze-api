@@ -104,11 +104,11 @@ describe('ProofCache', () => {
   });
 
   it('caches based on JSON-stable key', () => {
-    const key1 = cache.getKey({ secret_k: '0x1', epoch: '100' });
-    const key2 = cache.getKey({ secret_k: '0x1', epoch: '100' });
+    const key1 = cache.getKey({ secret_k: '0x1', ticket_index: '7', request_digest: '100' });
+    const key2 = cache.getKey({ secret_k: '0x1', ticket_index: '7', request_digest: '100' });
     expect(key1).toBe(key2);
     expect(key1).toContain('secret_k');
-    expect(key1).toContain('epoch');
+    expect(key1).toContain('ticket_index');
   });
 
   it('clear removes all entries', async () => {

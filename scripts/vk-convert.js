@@ -105,31 +105,34 @@ function convertVk(vkPath) {
   };
 }
 
-// Main
-const circuitsDir = path.join(__dirname, '..', 'circuits');
-const vks = ['deposit', 'rln', 'slash'];
+if (require.main === module) {
+  const circuitsDir = path.join(__dirname, '..', 'circuits');
+  const vks = ['deposit', 'rln', 'slash', 'membership_removal'];
 
-for (const name of vks) {
-  const inputPath = path.join(circuitsDir, `verification_key_${name}.json`);
-  const outputPath = path.join(circuitsDir, `verification_key_${name}_soroban.json`);
+  for (const name of vks) {
+    const inputPath = path.join(circuitsDir, `verification_key_${name}.json`);
+    const outputPath = path.join(circuitsDir, `verification_key_${name}_soroban.json`);
 
-  if (!fs.existsSync(inputPath)) {
-    console.warn(`⚠ ${inputPath} not found, skipping`);
-    continue;
+    if (!fs.existsSync(inputPath)) {
+      console.warn(`⚠ ${inputPath} not found, skipping`);
+      continue;
+    }
+
+    try {
+      const result = convertVk(inputPath);
+      fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
+      console.log(`✓ ${name}: ${result.ic.length} IC points → ${outputPath}`);
+      console.log(`  alpha: ${result.alpha.slice(0, 18)}…`);
+      console.log(`  beta:  ${result.beta.slice(0, 18)}…`);
+      console.log(`  gamma: ${result.gamma.slice(0, 18)}…`);
+      console.log(`  delta: ${result.delta.slice(0, 18)}…`);
+    } catch (e) {
+      console.error(`✗ ${name}: ${e.message}`);
+      process.exit(1);
+    }
   }
 
-  try {
-    const result = convertVk(inputPath);
-    fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
-    console.log(`✓ ${name}: ${result.ic.length} IC points → ${outputPath}`);
-    console.log(`  alpha: ${result.alpha.slice(0, 18)}…`);
-    console.log(`  beta:  ${result.beta.slice(0, 18)}…`);
-    console.log(`  gamma: ${result.gamma.slice(0, 18)}…`);
-    console.log(`  delta: ${result.delta.slice(0, 18)}…`);
-  } catch (e) {
-    console.error(`✗ ${name}: ${e.message}`);
-    process.exit(1);
-  }
+  console.log('\nDone. Use these hex values in Rust test fixtures with Bls12381G1Affine::from_bytes.');
 }
 
-console.log('\nDone. Use these hex values in Rust test fixtures with Bls12381G1Affine::from_bytes.');
+module.exports = { convertVk, g1ToHex, g2ToHex };

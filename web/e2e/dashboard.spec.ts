@@ -16,9 +16,17 @@ test('dev login reaches the dashboard and renders all sections', async ({
     page.getByRole('heading', { name: 'Dashboard' })
   ).toBeVisible();
   await expect(page.getByText('dev@zkcredits.test')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'API Key' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Shared API Compatibility Key' }),
+  ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Buy Credits' })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'LLM Playground' })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('textbox', { name: 'Prompt' })
   ).toBeVisible();
   // No commitment in a fresh browser profile -> placeholder, not a crash.
   await expect(

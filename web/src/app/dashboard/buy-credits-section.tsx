@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 const TIERS = [
-  { id: 'starter', label: 'Starter', amount: '$5', calls: '~5,000 calls' },
-  { id: 'pro', label: 'Pro', amount: '$20', calls: '~25,000 calls' },
-  { id: 'enterprise', label: 'Enterprise', amount: '$50', calls: '~75,000 calls' },
+  { id: 'starter', label: 'Starter', amount: '$5', calls: '100 private tickets', available: true },
+  { id: 'pro', label: 'Pro', amount: '$20', calls: 'Future package', available: false },
+  { id: 'enterprise', label: 'Enterprise', amount: '$50', calls: 'Future package', available: false },
 ];
 
 function getCommitmentFromDB(): Promise<string | null> {
@@ -96,6 +96,7 @@ export function BuyCreditsSection({
   }, [commitment, searchParams]);
 
   const handleCheckout = async (tierId: string) => {
+    if (tierId !== 'starter') return;
     setLoading(tierId);
     setError(null);
 
@@ -131,7 +132,9 @@ export function BuyCreditsSection({
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
       <h2 className="mb-2 text-lg font-semibold text-zinc-100">Buy Credits</h2>
       <p className="mb-4 text-sm text-zinc-400">
-        Purchase credits to use with your API key. Each call costs $0.001.
+        Purchase the fixed Starter package. It issues exactly 100 one-time
+        private tickets; each request spends one ticket regardless of prompt
+        length.
       </p>
 
       {error && (
@@ -191,12 +194,13 @@ export function BuyCreditsSection({
               disabled={
                 loading !== null ||
                 !stripeConfigured ||
+                !t.available ||
                 checkoutState === 'pending' ||
                 checkoutState === 'gateway-unavailable'
               }
               className="mt-3 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading === t.id ? 'Redirecting...' : 'Buy Now'}
+              {loading === t.id ? 'Redirecting...' : t.available ? 'Buy Now' : 'Coming later'}
             </button>
           </div>
         ))}

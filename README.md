@@ -180,17 +180,20 @@ node scripts/slash-demo.js
 
 ## Contract
 
-**Testnet:** `CCJG427D5B2KCLQC4GNSUXLZU7T3455T763EEIX44DNLCUMLXYKGEE4R`
+**Existing testnet deployment (legacy artifact set; not launch acceptance):** `CCJG427D5B2KCLQC4GNSUXLZU7T3455T763EEIX44DNLCUMLXYKGEE4R`
+
+The launch contract must be redeployed after the fresh BLS12-381 ceremony so
+its dedicated verification keys match the current circuits.
 
 Functions:
 - `deposit(depositor, commitment, new_root, amount)` — Register commitment + transfer USDC
 - `spend(proof, pub_signals)` — Verify RLN proof + record nullifier
-- `slash(slash_proof, pub_signals, commitment, submitter)` — Extract secret_k + split USDC
-- `withdraw(commitment, recipient)` — Withdraw unused credits
+- `slash(slash_proof, pub_signals, commitment, submitter)` — Verify a nine-signal fork/removal proof, revoke membership, and split USDC
+- `withdraw(withdrawal_proof, pub_signals, commitment, recipient)` — Verify a three-signal browser-secret removal proof, revoke membership, and withdraw unused credits
 
 ## Honest Caveats
 
-1. **Custodial v1:** Gateway holds USDC; user holds `secret_k`. Gateway cannot spend without user's proof (contract enforces), but if gateway disappears, user needs independent withdrawal path.
+1. **Custodial testnet flow:** Gateway co-signs the fee-sponsored withdrawal, so a disappearing gateway can still block withdrawal. It cannot unilaterally withdraw after the launch redeploy: the contract also requires the browser-secret membership-removal proof.
 2. **Testnet only:** No real money. USDC is testnet faucet. Trusted setup is single-contributor dev-only.
 3. **Single gateway:** Cross-gateway unlinkability is v2. v1 has one gateway — it can't link cryptographically, but could log timing patterns.
 4. **Browser proving:** ~1.5s first call per session, cached after. Acceptable for demo, needs optimization for production.

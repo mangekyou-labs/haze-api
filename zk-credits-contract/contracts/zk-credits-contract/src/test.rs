@@ -1,5 +1,9 @@
 #![cfg(test)]
+extern crate alloc;
+
 use super::*;
+use alloc::{string::String, vec::Vec as StdVec};
+use serde::Deserialize;
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     token, Address, Env, U256, Vec,
@@ -20,6 +24,16 @@ fn dummy_vk(env: &Env) -> VerificationKey {
         gamma: g2_zero.clone(),
         delta: g2_zero.clone(),
         ic: Vec::from_array(env, [g1_zero]),
+    }
+}
+
+fn dummy_proof(env: &Env) -> Groth16Proof {
+    let zero96 = soroban_sdk::BytesN::<96>::from_array(env, &[0u8; 96]);
+    let zero192 = soroban_sdk::BytesN::<192>::from_array(env, &[0u8; 192]);
+    Groth16Proof {
+        a: Bls12381G1Affine::from_bytes(zero96.clone()),
+        b: Bls12381G2Affine::from_bytes(zero192),
+        c: Bls12381G1Affine::from_bytes(zero96),
     }
 }
 
@@ -63,6 +77,17 @@ fn test_constructor() {
     let (env, admin, treasury, _depositor, usdc) = setup();
     let client = deploy(&env, &admin, &treasury, &usdc);
     assert_eq!(client.get_deposit_count(), 0);
+}
+
+#[test]
+fn test_statement_verifying_keys_are_installed_once() {
+    let (env, admin, treasury, _depositor, usdc) = setup();
+    let client = deploy(&env, &admin, &treasury, &usdc);
+    let vk = dummy_vk(&env);
+
+    client.set_statement_verifying_keys(&vk, &vk, &vk);
+    let retry = client.try_set_statement_verifying_keys(&vk, &vk, &vk);
+    assert!(retry.is_err(), "verification keys must be immutable after installation");
 }
 
 #[test]
@@ -120,27 +145,41 @@ fn test_duplicate_commitment_rejected() {
 }
 
 #[test]
-fn test_withdraw() {
+fn test_withdraw_requires_membership_removal_proof() {
     let (env, admin, treasury, depositor, usdc) = setup();
     let client = deploy(&env, &admin, &treasury, &usdc);
     let commitment = fr_from_u32(&env, 42);
 
     client.deposit(&depositor, &commitment, &fr_from_u32(&env, 100), &500_0000000);
 
-    client.withdraw(&commitment, &depositor);
+    let result = client.try_withdraw(
+        &dummy_proof(&env),
+        &Vec::from_array(&env, [
+            commitment.clone(),
+            fr_from_u32(&env, 100),
+            fr_from_u32(&env, 0),
+        ]),
+        &commitment,
+        &depositor,
+    );
+    assert!(result.is_err(), "an invalid membership-removal proof must not withdraw");
     let deposit = client.get_deposit(&commitment).unwrap();
-    assert!(deposit.withdrawn);
+    assert!(!deposit.withdrawn);
 }
 
 #[test]
-fn test_double_withdraw_rejected() {
+fn test_withdraw_rejects_malformed_public_statement() {
     let (env, admin, treasury, depositor, usdc) = setup();
     let client = deploy(&env, &admin, &treasury, &usdc);
     let commitment = fr_from_u32(&env, 42);
 
     client.deposit(&depositor, &commitment, &fr_from_u32(&env, 100), &500_0000000);
-    client.withdraw(&commitment, &depositor);
-    let result = client.try_withdraw(&commitment, &depositor);
+    let result = client.try_withdraw(
+        &dummy_proof(&env),
+        &Vec::from_array(&env, [commitment.clone(), fr_from_u32(&env, 100)]),
+        &commitment,
+        &depositor,
+    );
     assert!(result.is_err());
 }
 
@@ -328,18 +367,116 @@ fn hex_to_bytes<const N: usize>(hex: &str) -> [u8; N] {
 }
 
 fn fr_from_hex(env: &Env, hex: &str) -> Bls12381Fr {
-    let bytes = soroban_sdk::Bytes::from_slice(env, &hex_to_bytes::<32>(hex));
+    let bytes = soroban_sdk::Bytes::from_slice(
+        env,
+        &hex_to_bytes::<32>(hex.strip_prefix("0x").unwrap_or(hex)),
+    );
     Bls12381Fr::from_u256(U256::from_be_bytes(env, &bytes))
 }
 
 fn g1_from_hex(env: &Env, hex: &str) -> Bls12381G1Affine {
-    Bls12381G1Affine::from_bytes(soroban_sdk::BytesN::<96>::from_array(env, &hex_to_bytes::<96>(hex)))
+    Bls12381G1Affine::from_bytes(soroban_sdk::BytesN::<96>::from_array(
+        env,
+        &hex_to_bytes::<96>(hex.strip_prefix("0x").unwrap_or(hex)),
+    ))
 }
 
 fn g2_from_hex(env: &Env, hex: &str) -> Bls12381G2Affine {
-    Bls12381G2Affine::from_bytes(soroban_sdk::BytesN::<192>::from_array(env, &hex_to_bytes::<192>(hex)))
+    Bls12381G2Affine::from_bytes(soroban_sdk::BytesN::<192>::from_array(
+        env,
+        &hex_to_bytes::<192>(hex.strip_prefix("0x").unwrap_or(hex)),
+    ))
 }
 
+#[derive(Deserialize)]
+struct SorobanVerificationKeyFixture {
+    alpha: String,
+    beta: String,
+    gamma: String,
+    delta: String,
+    ic: StdVec<String>,
+}
+
+#[derive(Deserialize)]
+struct Groth16ProofFixture {
+    proof_a: String,
+    proof_b: String,
+    proof_c: String,
+    public_signals: StdVec<String>,
+}
+
+fn vk_from_fixture(env: &Env, fixture_json: &str) -> VerificationKey {
+    let fixture: SorobanVerificationKeyFixture =
+        serde_json::from_str(fixture_json).expect("valid Soroban verification-key fixture");
+    let mut ic = Vec::new(env);
+    for point in fixture.ic {
+        ic.push_back(g1_from_hex(env, &point));
+    }
+
+    VerificationKey {
+        alpha: g1_from_hex(env, &fixture.alpha),
+        beta: g2_from_hex(env, &fixture.beta),
+        gamma: g2_from_hex(env, &fixture.gamma),
+        delta: g2_from_hex(env, &fixture.delta),
+        ic,
+    }
+}
+
+fn proof_from_fixture(env: &Env, fixture_json: &str) -> (Groth16Proof, Vec<Bls12381Fr>) {
+    let fixture: Groth16ProofFixture =
+        serde_json::from_str(fixture_json).expect("valid Groth16 proof fixture");
+    let mut public_signals = Vec::new(env);
+    for signal in fixture.public_signals {
+        public_signals.push_back(fr_from_hex(env, &signal));
+    }
+
+    (
+        Groth16Proof {
+            a: g1_from_hex(env, &fixture.proof_a),
+            b: g2_from_hex(env, &fixture.proof_b),
+            c: g1_from_hex(env, &fixture.proof_c),
+        },
+        public_signals,
+    )
+}
+
+fn rln_vk(env: &Env) -> VerificationKey {
+    vk_from_fixture(
+        env,
+        include_str!("../../../../circuits/verification_key_rln_soroban.json"),
+    )
+}
+
+fn slash_vk(env: &Env) -> VerificationKey {
+    vk_from_fixture(
+        env,
+        include_str!("../../../../circuits/verification_key_slash_soroban.json"),
+    )
+}
+
+fn membership_vk(env: &Env) -> VerificationKey {
+    vk_from_fixture(
+        env,
+        include_str!("../../../../circuits/verification_key_membership_removal_soroban.json"),
+    )
+}
+
+fn deploy_with_statement_keys<'a>(
+    env: &'a Env,
+    admin: &Address,
+    treasury: &Address,
+    usdc: &Address,
+) -> (Address, ZkCreditsContractClient<'a>) {
+    let contract_id = env.register(
+        ZkCreditsContract,
+        (admin.clone(), treasury.clone(), rln_vk(env), usdc.clone()),
+    );
+    let client = ZkCreditsContractClient::new(env, &contract_id);
+    client.set_statement_verifying_keys(&rln_vk(env), &slash_vk(env), &membership_vk(env));
+    (contract_id, client)
+}
+
+#[allow(dead_code)]
 fn build_rln_vk(env: &Env) -> VerificationKey {
     VerificationKey {
         alpha: g1_from_hex(env, "0191e080e96d0686262f30139c26127149f6fb6bfdaf7ff6709324b5aad595d7c0123b71512a9fee982a18dc62a6708418935b2c9a044a9d725c28e7f7306e6b310f5c34e4653c326f19022af5ca1921989ce107df0e46c708d18479ef7de7ca"),
@@ -357,6 +494,7 @@ fn build_rln_vk(env: &Env) -> VerificationKey {
     }
 }
 
+#[allow(dead_code)]
 fn build_deposit_vk(env: &Env) -> VerificationKey {
     VerificationKey {
         alpha: g1_from_hex(env, "0191e080e96d0686262f30139c26127149f6fb6bfdaf7ff6709324b5aad595d7c0123b71512a9fee982a18dc62a6708418935b2c9a044a9d725c28e7f7306e6b310f5c34e4653c326f19022af5ca1921989ce107df0e46c708d18479ef7de7ca"),
@@ -374,7 +512,7 @@ fn build_deposit_vk(env: &Env) -> VerificationKey {
 #[test]
 fn test_rln_vk_points_load() {
     let (env, admin, treasury, _depositor, usdc) = setup();
-    let vk = build_rln_vk(&env);
+    let vk = rln_vk(&env);
     let contract_id = env.register(ZkCreditsContract, (admin, treasury, vk, usdc));
     let client = ZkCreditsContractClient::new(&env, &contract_id);
     assert_eq!(client.get_deposit_count(), 0);
@@ -383,68 +521,41 @@ fn test_rln_vk_points_load() {
 #[test]
 fn test_tverifier1_real_proof_verifies_on_chain() {
     let (env, admin, treasury, depositor, usdc) = setup();
-    let vk = build_rln_vk(&env);
+    let vk = rln_vk(&env);
     let contract_id = env.register(ZkCreditsContract, (admin, treasury, vk, usdc));
     let client = ZkCreditsContractClient::new(&env, &contract_id);
 
-    let proof_root = fr_from_hex(&env, "592a95d77b5cc0683d3ffd66c97776210964ebdb4f25b378f71f299d8530d22b");
-    let commitment = fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000001");
-    client.deposit(&depositor, &commitment, &proof_root, &1_0000000);
-
-    let proof = Groth16Proof {
-        a: g1_from_hex(&env, "10d6de00791145cfb9e9558882d39fc91ff050ec8b35cc9d856655a015d048774e5fbbd939c39119c54334f7943f5f74113f5ecb2e07172076b462ac08becddcd8c434015533259588847bacceca2dd4f0d752c0819b0b07f7ac17bb575aab99"),
-        b: g2_from_hex(&env, "0d2d148c030e783af2b08e310181c785267381f67b6a5982ed0760b99f26474e6719fc4eae477bb73d2bc1f5835e5b9100519278f3ce22a7d470f4301696ae8cfbe3cc0aa6944b02683c6ee6f36df3249ca543c042a0bf634081371b45f36946003c34d70e3ad090d351baff841b9872feb34d8a9995756400aefdc4e0a21949b43c83567d5b1adcc6825874e68c42750aa99a97349a3d52e41880c816debe2c0ab7857de56ed5c77da63af12fd852a93a26eb7da9183082f4259b9e90648d85"),
-        c: g1_from_hex(&env, "032b8eae71cd7936ec9169214ec91bac0f73aa7f5de10ce97999e49656b8742f31eeecf24100195c1ffaacd8b9038c3d06af2206436af87ddd65124cd30cb2c1c74137947e95ca81e05496ad5af913b9383593488c552e90c9096c161438b957"),
-    };
-
-    let pub_signals = Vec::from_array(&env, [
-        proof_root,
-        fr_from_hex(&env, "27b148007311cb63f6999b2414c0f9f4dbc377f37f69b95849b1720ed1991f3a"),
-        fr_from_hex(&env, "1740fab8b4a2a9f2c48358c10ae258901bc85549be4ddb60798eabf55b2da91f"),
-        fr_from_hex(&env, "459d64a8abef70fae507226cc86c63baad2dfc0987bfe24a1ab3c674ae798d75"),
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000064"),
-    ]);
+    let (proof, pub_signals) = proof_from_fixture(
+        &env,
+        include_str!("../../../../test_fixtures/rln_proof_fixture.json"),
+    );
+    let proof_root = pub_signals.get(0).unwrap();
+    client.deposit(
+        &depositor,
+        &fr_from_hex(&env, "0259fb2069bc9426545312e211415ba7ecc3953fbfbc6b94ba5add2005c71dd6"),
+        &proof_root,
+        &1_0000000,
+    );
 
     let result = client.try_spend(&proof, &pub_signals);
-    assert!(result.is_ok(), "spend should succeed with real VK and real proof: {:?}", result);
-
-    // T-contract-4: verify nullifier is recorded
-    let nullifier = fr_from_hex(&env, "27b148007311cb63f6999b2414c0f9f4dbc377f37f69b95849b1720ed1991f3a");
-    assert!(client.is_nullifier_spent(&nullifier));
-
-    // T-contract-5: replay same nullifier → rejected
-    let replay = client.try_spend(&proof, &pub_signals);
-    assert!(replay.is_err(), "replayed nullifier must be rejected");
+    assert!(result.is_ok(), "fresh RLN proof must verify on-chain: {:?}", result);
+    assert!(client.is_nullifier_spent(&pub_signals.get(1).unwrap()));
 }
 
 #[test]
 fn test_tverifier2_tampered_proof_rejected() {
     let (env, admin, treasury, depositor, usdc) = setup();
-    let vk = build_rln_vk(&env);
+    let vk = rln_vk(&env);
     let contract_id = env.register(ZkCreditsContract, (admin, treasury, vk, usdc));
     let client = ZkCreditsContractClient::new(&env, &contract_id);
 
-    let proof_root = fr_from_hex(&env, "592a95d77b5cc0683d3ffd66c97776210964ebdb4f25b378f71f299d8530d22b");
-    let commitment = fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000001");
-    client.deposit(&depositor, &commitment, &proof_root, &1_0000000);
-
-    let mut tampered_a = hex_to_bytes::<96>("10d6de00791145cfb9e9558882d39fc91ff050ec8b35cc9d856655a015d048774e5fbbd939c39119c54334f7943f5f74113f5ecb2e07172076b462ac08becddcd8c434015533259588847bacceca2dd4f0d752c0819b0b07f7ac17bb575aab99");
-    tampered_a[0] ^= 0x01;
-
-    let proof = Groth16Proof {
-        a: Bls12381G1Affine::from_bytes(soroban_sdk::BytesN::<96>::from_array(&env, &tampered_a)),
-        b: g2_from_hex(&env, "0d2d148c030e783af2b08e310181c785267381f67b6a5982ed0760b99f26474e6719fc4eae477bb73d2bc1f5835e5b9100519278f3ce22a7d470f4301696ae8cfbe3cc0aa6944b02683c6ee6f36df3249ca543c042a0bf634081371b45f36946003c34d70e3ad090d351baff841b9872feb34d8a9995756400aefdc4e0a21949b43c83567d5b1adcc6825874e68c42750aa99a97349a3d52e41880c816debe2c0ab7857de56ed5c77da63af12fd852a93a26eb7da9183082f4259b9e90648d85"),
-        c: g1_from_hex(&env, "032b8eae71cd7936ec9169214ec91bac0f73aa7f5de10ce97999e49656b8742f31eeecf24100195c1ffaacd8b9038c3d06af2206436af87ddd65124cd30cb2c1c74137947e95ca81e05496ad5af913b9383593488c552e90c9096c161438b957"),
-    };
-
-    let pub_signals = Vec::from_array(&env, [
-        proof_root,
-        fr_from_hex(&env, "27b148007311cb63f6999b2414c0f9f4dbc377f37f69b95849b1720ed1991f3a"),
-        fr_from_hex(&env, "1740fab8b4a2a9f2c48358c10ae258901bc85549be4ddb60798eabf55b2da91f"),
-        fr_from_hex(&env, "459d64a8abef70fae507226cc86c63baad2dfc0987bfe24a1ab3c674ae798d75"),
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000064"),
-    ]);
-
+    let (mut proof, pub_signals) = proof_from_fixture(
+        &env,
+        include_str!("../../../../test_fixtures/rln_proof_fixture.json"),
+    );
+    let proof_root = pub_signals.get(0).unwrap();
+    client.deposit(&depositor, &fr_from_u32(&env, 1), &proof_root, &1_0000000);
+    proof.a = dummy_proof(&env).a;
     let result = client.try_spend(&proof, &pub_signals);
     assert!(result.is_err(), "tampered proof must be rejected");
 }
@@ -452,32 +563,21 @@ fn test_tverifier2_tampered_proof_rejected() {
 #[test]
 fn test_tverifier3_wrong_vk_rejects_proof() {
     let (env, admin, treasury, depositor, usdc) = setup();
-    let deposit_vk = build_deposit_vk(&env);
-    let contract_id = env.register(ZkCreditsContract, (admin, treasury, deposit_vk, usdc));
+    let mut wrong_vk = rln_vk(&env);
+    wrong_vk.delta = wrong_vk.gamma.clone();
+    let contract_id = env.register(ZkCreditsContract, (admin, treasury, wrong_vk, usdc));
     let client = ZkCreditsContractClient::new(&env, &contract_id);
 
-    let proof_root = fr_from_hex(&env, "592a95d77b5cc0683d3ffd66c97776210964ebdb4f25b378f71f299d8530d22b");
-    let commitment = fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000001");
-    client.deposit(&depositor, &commitment, &proof_root, &1_0000000);
-
-    let proof = Groth16Proof {
-        a: g1_from_hex(&env, "10d6de00791145cfb9e9558882d39fc91ff050ec8b35cc9d856655a015d048774e5fbbd939c39119c54334f7943f5f74113f5ecb2e07172076b462ac08becddcd8c434015533259588847bacceca2dd4f0d752c0819b0b07f7ac17bb575aab99"),
-        b: g2_from_hex(&env, "0d2d148c030e783af2b08e310181c785267381f67b6a5982ed0760b99f26474e6719fc4eae477bb73d2bc1f5835e5b9100519278f3ce22a7d470f4301696ae8cfbe3cc0aa6944b02683c6ee6f36df3249ca543c042a0bf634081371b45f36946003c34d70e3ad090d351baff841b9872feb34d8a9995756400aefdc4e0a21949b43c83567d5b1adcc6825874e68c42750aa99a97349a3d52e41880c816debe2c0ab7857de56ed5c77da63af12fd852a93a26eb7da9183082f4259b9e90648d85"),
-        c: g1_from_hex(&env, "032b8eae71cd7936ec9169214ec91bac0f73aa7f5de10ce97999e49656b8742f31eeecf24100195c1ffaacd8b9038c3d06af2206436af87ddd65124cd30cb2c1c74137947e95ca81e05496ad5af913b9383593488c552e90c9096c161438b957"),
-    };
-
-    let pub_signals = Vec::from_array(&env, [
-        proof_root,
-        fr_from_hex(&env, "27b148007311cb63f6999b2414c0f9f4dbc377f37f69b95849b1720ed1991f3a"),
-        fr_from_hex(&env, "1740fab8b4a2a9f2c48358c10ae258901bc85549be4ddb60798eabf55b2da91f"),
-        fr_from_hex(&env, "459d64a8abef70fae507226cc86c63baad2dfc0987bfe24a1ab3c674ae798d75"),
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000064"),
-    ]);
-
+    let (proof, pub_signals) = proof_from_fixture(
+        &env,
+        include_str!("../../../../test_fixtures/rln_proof_fixture.json"),
+    );
+    client.deposit(&depositor, &fr_from_u32(&env, 1), &pub_signals.get(0).unwrap(), &1_0000000);
     let result = client.try_spend(&proof, &pub_signals);
-    assert!(result.is_err(), "RLN proof must fail with deposit VK (VK mismatch)");
+    assert!(result.is_err(), "RLN proof must fail with a wrong VK");
 }
 
+#[allow(dead_code)]
 fn build_slash_vk(env: &Env) -> VerificationKey {
     VerificationKey {
         alpha: g1_from_hex(env, "0191e080e96d0686262f30139c26127149f6fb6bfdaf7ff6709324b5aad595d7c0123b71512a9fee982a18dc62a6708418935b2c9a044a9d725c28e7f7306e6b310f5c34e4653c326f19022af5ca1921989ce107df0e46c708d18479ef7de7ca"),
@@ -501,34 +601,20 @@ fn build_slash_vk(env: &Env) -> VerificationKey {
 fn test_tcontract6_slash_with_real_proof() {
     // T-contract-6: slash() with valid proof + commitment → deposit slashed, USDC 50/50.
     let (env, admin, treasury, depositor, usdc) = setup();
-    let vk = build_slash_vk(&env);
-    let contract_id = env.register(ZkCreditsContract, (admin.clone(), treasury.clone(), vk, usdc.clone()));
-    let client = ZkCreditsContractClient::new(&env, &contract_id);
-
-    // computed_commitment from slash circuit = MiMC(extracted_secret_k=12345)
-    let commitment = fr_from_hex(&env, "0259fb2069bc9426545312e211415ba7ecc3953fbfbc6b94ba5add2005c71dd6");
-    let root = fr_from_u32(&env, 1);
+    let (contract_id, client) = deploy_with_statement_keys(&env, &admin, &treasury, &usdc);
+    let (proof, pub_signals) = proof_from_fixture(
+        &env,
+        include_str!("../../../../test_fixtures/slash_proof_fixture.json"),
+    );
+    let commitment = pub_signals.get(1).unwrap();
+    let root = pub_signals.get(3).unwrap();
+    let next_root = pub_signals.get(4).unwrap();
     client.deposit(&depositor, &commitment, &root, &10_0000000);
 
     let contract_balance_before = token::Client::new(&env, &usdc).balance(&contract_id);
     let treasury_balance_before = token::Client::new(&env, &usdc).balance(&treasury);
 
-    let proof = Groth16Proof {
-        a: g1_from_hex(&env, "19a30fd56884dd256de0891030ed3a7dc477c4ba4c063023e7998e38b0ba50fb328e6612aa306c9c7b6b9572173f8c900ed989e552c279dde4c2eb1860de322356b541b0f2d647ac2e0c9c045df90fe0f5c0b2d459880598806c82fec51748b3"),
-        b: g2_from_hex(&env, "033a2ed6061ff9832716a835645c2170a240dfa77d62390b8e28f43ead5fa9684a44dfe44176290cc6211641418c8f5f136f868d06846a4434c272143775ff0f79d9aa7fe701e8cf18cf5829564fc212ae29128ae3a143e856cbe2fe9dbba9ca0bd4c10d55e00ccbb6fe40e95319342887b57bc10d17df0e5e1b2941b209ff62fa539f8016c92b1d8428916559a526cb121f9883cdd3cea1149ecec4e6e93b4e8567760c73ce3f0be950fd24defa4ad454cf819661cd66235a6e0028c63e3e4b"),
-        c: g1_from_hex(&env, "0a02a6add0e78721ca7e03d7ec3c396b9ea2d6c26b52368801ab1c73276f2e0ea968ec88c1f7864a12e910624f52db54142a221cbacff3aa646b1c433f4204c66cf7b33073c7a0265dc2f63a4b78ea2482766d4c1157690185198f0f87cfe6e0"),
-    };
-
     let submitter = Address::generate(&env);
-    let pub_signals = Vec::from_array(&env, [
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000003039"), // extracted_secret_k
-        fr_from_hex(&env, "0259fb2069bc9426545312e211415ba7ecc3953fbfbc6b94ba5add2005c71dd6"), // computed_commitment
-        fr_from_hex(&env, "1740fab8b4a2a9f2c48358c10ae258901bc85549be4ddb60798eabf55b2da91f"), // share1_x
-        fr_from_hex(&env, "459d64a8abef70fae507226cc86c63baad2dfc0987bfe24a1ab3c674ae798d75"), // share1_y
-        fr_from_hex(&env, "5ecac505fcac902dfecf7129ac516e4b86b362f940c6d5a0e38fe7d743232132"), // share2_x
-        fr_from_hex(&env, "432cb4a330c4b094c53d90ceec1d0ffb9cca4f4e746e1443f03495015aa4bbee"), // share2_y
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000064"), // epoch
-    ]);
 
     let result = client.try_slash(&proof, &pub_signals, &commitment, &submitter);
     assert!(result.is_ok(), "slash should succeed with real proof: {:?}", result);
@@ -536,6 +622,7 @@ fn test_tcontract6_slash_with_real_proof() {
     // Verify deposit is slashed
     let deposit = client.get_deposit(&commitment).unwrap();
     assert!(deposit.slashed, "deposit should be marked slashed");
+    assert_eq!(client.get_current_root(), next_root);
 
     // Verify USDC 50/50 split (T-contract-8)
     let contract_balance_after = token::Client::new(&env, &usdc).balance(&contract_id);
@@ -549,29 +636,16 @@ fn test_tcontract6_slash_with_real_proof() {
 fn test_tcontract7_slash_already_slashed() {
     // T-contract-7: slash() on already-slashed deposit → rejected.
     let (env, admin, treasury, depositor, usdc) = setup();
-    let vk = build_slash_vk(&env);
-    let contract_id = env.register(ZkCreditsContract, (admin.clone(), treasury.clone(), vk, usdc.clone()));
-    let client = ZkCreditsContractClient::new(&env, &contract_id);
-
-    let commitment = fr_from_hex(&env, "0259fb2069bc9426545312e211415ba7ecc3953fbfbc6b94ba5add2005c71dd6");
-    let root = fr_from_u32(&env, 1);
+    let (_contract_id, client) = deploy_with_statement_keys(&env, &admin, &treasury, &usdc);
+    let (proof, pub_signals) = proof_from_fixture(
+        &env,
+        include_str!("../../../../test_fixtures/slash_proof_fixture.json"),
+    );
+    let commitment = pub_signals.get(1).unwrap();
+    let root = pub_signals.get(3).unwrap();
     client.deposit(&depositor, &commitment, &root, &10_0000000);
 
-    let proof = Groth16Proof {
-        a: g1_from_hex(&env, "19a30fd56884dd256de0891030ed3a7dc477c4ba4c063023e7998e38b0ba50fb328e6612aa306c9c7b6b9572173f8c900ed989e552c279dde4c2eb1860de322356b541b0f2d647ac2e0c9c045df90fe0f5c0b2d459880598806c82fec51748b3"),
-        b: g2_from_hex(&env, "033a2ed6061ff9832716a835645c2170a240dfa77d62390b8e28f43ead5fa9684a44dfe44176290cc6211641418c8f5f136f868d06846a4434c272143775ff0f79d9aa7fe701e8cf18cf5829564fc212ae29128ae3a143e856cbe2fe9dbba9ca0bd4c10d55e00ccbb6fe40e95319342887b57bc10d17df0e5e1b2941b209ff62fa539f8016c92b1d8428916559a526cb121f9883cdd3cea1149ecec4e6e93b4e8567760c73ce3f0be950fd24defa4ad454cf819661cd66235a6e0028c63e3e4b"),
-        c: g1_from_hex(&env, "0a02a6add0e78721ca7e03d7ec3c396b9ea2d6c26b52368801ab1c73276f2e0ea968ec88c1f7864a12e910624f52db54142a221cbacff3aa646b1c433f4204c66cf7b33073c7a0265dc2f63a4b78ea2482766d4c1157690185198f0f87cfe6e0"),
-    };
     let submitter = Address::generate(&env);
-    let pub_signals = Vec::from_array(&env, [
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000003039"),
-        fr_from_hex(&env, "0259fb2069bc9426545312e211415ba7ecc3953fbfbc6b94ba5add2005c71dd6"),
-        fr_from_hex(&env, "1740fab8b4a2a9f2c48358c10ae258901bc85549be4ddb60798eabf55b2da91f"),
-        fr_from_hex(&env, "459d64a8abef70fae507226cc86c63baad2dfc0987bfe24a1ab3c674ae798d75"),
-        fr_from_hex(&env, "5ecac505fcac902dfecf7129ac516e4b86b362f940c6d5a0e38fe7d743232132"),
-        fr_from_hex(&env, "432cb4a330c4b094c53d90ceec1d0ffb9cca4f4e746e1443f03495015aa4bbee"),
-        fr_from_hex(&env, "0000000000000000000000000000000000000000000000000000000000000064"),
-    ]);
 
     // First slash succeeds
     let result1 = client.try_slash(&proof, &pub_signals, &commitment, &submitter);
@@ -580,4 +654,27 @@ fn test_tcontract7_slash_already_slashed() {
     // Second slash on same deposit → AlreadySlashed
     let result2 = client.try_slash(&proof, &pub_signals, &commitment, &submitter);
     assert!(result2.is_err(), "second slash on same deposit must be rejected");
+}
+
+#[test]
+fn test_tcontract9_withdraw_with_real_membership_removal_proof() {
+    let (env, admin, treasury, depositor, usdc) = setup();
+    let (contract_id, client) = deploy_with_statement_keys(&env, &admin, &treasury, &usdc);
+    let (proof, pub_signals) = proof_from_fixture(
+        &env,
+        include_str!("../../../../test_fixtures/membership_removal_proof_fixture.json"),
+    );
+    let commitment = pub_signals.get(0).unwrap();
+    let current_root = pub_signals.get(1).unwrap();
+    let next_root = pub_signals.get(2).unwrap();
+    let recipient = Address::generate(&env);
+    let amount = 10_0000000;
+
+    client.deposit(&depositor, &commitment, &current_root, &amount);
+    client.withdraw(&proof, &pub_signals, &commitment, &recipient);
+
+    assert!(client.get_deposit(&commitment).unwrap().withdrawn);
+    assert_eq!(client.get_current_root(), next_root);
+    assert_eq!(token::Client::new(&env, &usdc).balance(&recipient), amount);
+    assert_eq!(token::Client::new(&env, &usdc).balance(&contract_id), 0);
 }

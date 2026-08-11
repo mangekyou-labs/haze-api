@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@scure/bip39": "^2.2.0",
+    "circomlibjs": "^0.1.7",
     "snarkjs": "^0.7.6"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   app,
+  merkleTree,
   resetGatewayStoreForTests,
   getGatewayStore,
   extractNullifier,
@@ -8,6 +9,7 @@ import {
   proofHashOf,
   hashApiKey,
 } from './server.js';
+import { requestDigestToField } from '@zk-credits/shared';
 import { MemoryGatewayStore } from './db/index.js';
 import request from 'supertest';
 
@@ -30,7 +32,8 @@ const contractMock = vi.hoisted(() => ({
   spend: vi.fn().mockResolvedValue('mock-spend-tx-hash'),
 }));
 
-vi.mock('@zk-credits/shared', () => ({
+vi.mock('@zk-credits/shared', async () => ({
+  ...(await vi.importActual<typeof import('@zk-credits/shared')>('@zk-credits/shared')),
   verifyGroth16Proof: sharedVerify.verify,
 }));
 
@@ -46,6 +49,7 @@ vi.mock('./contract.js', () => contractMock);
 beforeEach(async () => {
   await resetGatewayStoreForTests();
   process.env.GATEWAY_SECRET = 'test-secret';
+  delete process.env.ZK_CONTRACT_ID;
   sharedVerify.verify.mockReset();
   sharedVerify.verify.mockResolvedValue(false);
   contractMock.getDeposit.mockReset();
@@ -56,13 +60,24 @@ beforeEach(async () => {
     withdrawn: false,
   });
   adapterMock.forward.mockReset();
-  adapterMock.forward.mockResolvedValue(
-    new Response(JSON.stringify({ id: 'mock-response', choices: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  );
+  adapterMock.forward.mockImplementation(async () => new Response(
+    JSON.stringify({ id: 'mock-response', choices: [] }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  ));
 });
+
+async function proofHeaderFor(
+  body: object,
+  nullifier = 'nullifier-test',
+  signalY = '2',
+  proof: object = { a: '1', b: '2', c: '3' },
+): Promise<string> {
+  const digest = await requestDigestToField(body);
+  return Buffer.from(JSON.stringify({
+    proof,
+    pubSignals: ['0', nullifier, digest.field, signalY],
+  })).toString('base64');
+}
 
 describe('gateway server', () => {
   describe('GET /health', () => {
@@ -91,12 +106,13 @@ describe('gateway server', () => {
       expect(res.status).toBe(401);
     });
 
-    it('rejects missing commitment', async () => {
+    it('returns the shared compatibility bearer without a commitment lookup', async () => {
       const res = await request(app)
         .post('/v1/api-keys')
         .set('Authorization', 'Bearer test-secret')
         .send({ label: 'test' });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+      expect(res.body.apiKey).toBe('sk-zk-local-demo');
     });
   });
 
@@ -168,6 +184,27 @@ describe('gateway server', () => {
       expect(chatRes.body.error).toBe('invalid_proof_header');
     });
 
+    it('rejects the legacy five-signal epoch statement', async () => {
+      const keyRes = await request(app)
+        .post('/v1/api-keys')
+        .set('Authorization', 'Bearer test-secret')
+        .send({});
+      const body = { model: 'test', messages: [] };
+      const digest = await requestDigestToField(body);
+      const proofHeader = Buffer.from(JSON.stringify({
+        proof: { a: '1', b: '2', c: '3' },
+        pubSignals: ['0', 'legacy-nullifier', digest.field, '2', '20260804'],
+      })).toString('base64');
+
+      const chatRes = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', `Bearer ${keyRes.body.apiKey}`)
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+      expect(chatRes.status).toBe(400);
+      expect(chatRes.body.error).toBe('invalid_proof_header');
+    });
+
     it('rejects invalid proof (verification fails)', async () => {
       const keyRes = await request(app)
         .post('/v1/api-keys')
@@ -175,21 +212,19 @@ describe('gateway server', () => {
         .send({ commitment: '0xbeef', label: 'test' });
       const key = keyRes.body.apiKey;
 
-      const proofHeader = Buffer.from(JSON.stringify({
-        proof: { a: '1', b: '2', c: '3' },
-        pubSignals: ['0', '1', '2', '3', '4'],
-      })).toString('base64');
+      const body = { model: 'test', messages: [] };
+      const proofHeader = await proofHeaderFor(body);
 
       const chatRes = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
         .set('X-ZK-Proof', proofHeader)
-        .send({ model: 'test', messages: [] });
+        .send(body);
       // Proof verification should fail for dummy proof
       expect(chatRes.status).toBe(403);
     });
 
-    it('does not forward a valid proof for an unfunded commitment', async () => {
+    it('does not join proof acceptance to a commitment lookup', async () => {
       sharedVerify.verify.mockResolvedValue(true);
       contractMock.getDeposit.mockResolvedValueOnce(null);
 
@@ -199,21 +234,19 @@ describe('gateway server', () => {
         .send({ commitment: '0xunfunded', label: 'test' });
       const key = keyRes.body.apiKey;
 
-      const proofHeader = Buffer.from(JSON.stringify({
-        proof: { a: '1', b: '2', c: '3' },
-        pubSignals: ['root', 'nullifier-unfunded', 'x', 'y', '20260804'],
-      })).toString('base64');
+      const body = { model: 'test', messages: [] };
+      const proofHeader = await proofHeaderFor(body, 'nullifier-unfunded');
 
       const chatRes = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
         .set('X-ZK-Proof', proofHeader)
-        .send({ model: 'test', messages: [] });
+        .send(body);
 
-      expect(chatRes.status).toBe(402);
-      expect(chatRes.body.error).toBe('credits_required');
-      expect(adapterMock.forward).not.toHaveBeenCalled();
-      expect(await (getGatewayStore() as MemoryGatewayStore).listAcceptedCalls()).toHaveLength(0);
+      expect(chatRes.status).toBe(200);
+      expect(chatRes.body.id).toBe('mock-response');
+      expect(adapterMock.forward).toHaveBeenCalledOnce();
+      expect(await (getGatewayStore() as MemoryGatewayStore).listAcceptedCalls()).toHaveLength(1);
     });
 
     it('rejects proof with missing proof object fields', async () => {
@@ -223,16 +256,14 @@ describe('gateway server', () => {
         .send({ commitment: '0xcafe', label: 'test' });
       const key = keyRes.body.apiKey;
 
-      const proofHeader = Buffer.from(JSON.stringify({
-        proof: { missing: 'fields' },
-        pubSignals: ['0', '1', '2', '3', '4'],
-      })).toString('base64');
+      const body = { model: 'test', messages: [] };
+      const proofHeader = await proofHeaderFor(body, '1', '3', { missing: 'fields' });
 
       const chatRes = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
         .set('X-ZK-Proof', proofHeader)
-        .send({ model: 'test', messages: [] });
+        .send(body);
       // Verification should still fail gracefully
       expect(chatRes.status).toBe(403);
     });
@@ -245,16 +276,14 @@ describe('gateway server', () => {
         .send({ commitment: '0xdurable', label: 'test' });
       const key = keyRes.body.apiKey;
 
-      const proofHeader = Buffer.from(JSON.stringify({
-        proof: { a: '1', b: '2', c: '3' },
-        pubSignals: ['root', 'nullifier-abc', 'x', 'y', '20260804'],
-      })).toString('base64');
+      const body = { model: 'test', messages: [] };
+      const proofHeader = await proofHeaderFor(body, 'nullifier-abc', '4');
 
       const chatRes = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
         .set('X-ZK-Proof', proofHeader)
-        .send({ model: 'test', messages: [] });
+        .send(body);
       expect(chatRes.status).toBe(200);
 
       // Persist-before-forward: the accepted call + nullifier + count + full
@@ -265,9 +294,9 @@ describe('gateway server', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0].nullifier).toBe('nullifier-abc');
       expect(calls[0].proof).toEqual({ a: '1', b: '2', c: '3' });
-      expect(calls[0].pubSignals).toEqual(['root', 'nullifier-abc', 'x', 'y', '20260804']);
+      expect(calls[0].pubSignals).toEqual(['0', 'nullifier-abc', expect.any(String), '4']);
       expect(await store.getNullifier('nullifier-abc')).not.toBeNull();
-      expect(await store.getCallCount('0xdurable')).toBe(1);
+      expect(await store.getCallCount('0xdurable')).toBe(0);
     });
 
     it('rejects a replayed nullifier (durable replay protection)', async () => {
@@ -281,27 +310,30 @@ describe('gateway server', () => {
       const header = () =>
         Buffer.from(JSON.stringify({
           proof: { a: '1', b: '2', c: '3' },
-          pubSignals: ['root', 'nullifier-replay1', 'x', 'y', '20260804'],
+          pubSignals: ['0', 'nullifier-replay1', '0', '2'],
         })).toString('base64');
 
+      const body = { model: 'test', messages: [] };
       const first = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
-        .set('X-ZK-Proof', header())
-        .send({ model: 'test', messages: [] });
+        .set('X-ZK-Proof', await proofHeaderFor(body, 'nullifier-replay1', '2'))
+        .send(body);
       expect(first.status).toBe(200);
 
       const second = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
-        .set('X-ZK-Proof', header())
-        .send({ model: 'test', messages: [] });
-      expect(second.status).toBe(403);
-      expect(second.body.error).toBe('nullifier_spent');
+        .set('X-ZK-Proof', await proofHeaderFor(body, 'nullifier-replay1', '2'))
+        .send(body);
+      expect(second.status).toBe(200);
+      expect(second.body).toEqual({ id: 'mock-response', choices: [] });
+      expect(adapterMock.forward).toHaveBeenCalledTimes(1);
     });
 
     it('falls back to an on-chain read when the local cache misses (stale cache)', async () => {
       sharedVerify.verify.mockResolvedValue(true);
+      process.env.ZK_CONTRACT_ID = 'test-contract';
       const { isNullifierSpent } = await import('./contract.js');
       (isNullifierSpent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
 
@@ -311,16 +343,14 @@ describe('gateway server', () => {
         .send({ commitment: '0xstale', label: 'test' });
       const key = keyRes.body.apiKey;
 
-      const proofHeader = Buffer.from(JSON.stringify({
-        proof: { a: '1', b: '2', c: '3' },
-        pubSignals: ['root', 'nullifier-fresh', 'x', 'y', '20260804'],
-      })).toString('base64');
+      const body = { model: 'test', messages: [] };
+      const proofHeader = await proofHeaderFor(body, 'nullifier-fresh', '8');
 
       const chatRes = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
         .set('X-ZK-Proof', proofHeader)
-        .send({ model: 'test', messages: [] });
+        .send(body);
       expect(chatRes.status).toBe(403);
       expect(chatRes.body.error).toBe('nullifier_spent');
 
@@ -329,7 +359,7 @@ describe('gateway server', () => {
       expect(rec?.spentOnChain).toBe(true);
     });
 
-    it('rejects over-quota calls against the durable call counter', async () => {
+    it('accepts distinct indexed tickets without a commitment-linked counter', async () => {
       sharedVerify.verify.mockResolvedValue(true);
       const keyRes = await request(app)
         .post('/v1/api-keys')
@@ -337,24 +367,48 @@ describe('gateway server', () => {
         .send({ commitment: '0xquota', label: 'test' });
       const key = keyRes.body.apiKey;
 
-      // Seed the commitment's durable call count to the quota boundary.
-      const store = getGatewayStore() as MemoryGatewayStore;
-      for (let i = 0; i < 100; i++) {
-        await store.incrementCallCount('0xquota', 20260804);
-      }
-
-      const proofHeader = Buffer.from(JSON.stringify({
-        proof: { a: '1', b: '2', c: '3' },
-        pubSignals: ['root', 'nullifier-q1', 'x', 'y', '20260804'],
-      })).toString('base64');
-
-      const res = await request(app)
+      const body = { model: 'test', messages: [{ role: 'user', content: 'ticket one' }] };
+      const first = await request(app)
         .post('/v1/chat/completions')
         .set('Authorization', `Bearer ${key}`)
-        .set('X-ZK-Proof', proofHeader)
-        .send({ model: 'test', messages: [] });
-      expect(res.status).toBe(403);
-      expect(res.body.error).toBe('over_quota');
+        .set('X-ZK-Proof', await proofHeaderFor(body, 'nullifier-q1', '9'))
+        .send(body);
+      expect(first.status).toBe(200);
+
+      const secondBody = { model: 'test', messages: [{ role: 'user', content: 'ticket two' }] };
+      const second = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', `Bearer ${key}`)
+        .set('X-ZK-Proof', await proofHeaderFor(secondBody, 'nullifier-q2', '10'))
+        .send(secondBody);
+      expect(second.status).toBe(200);
+      expect(await (getGatewayStore() as MemoryGatewayStore).listAcceptedCalls()).toHaveLength(2);
+    });
+
+    it('returns slash evidence when one ticket is forked across request bodies', async () => {
+      sharedVerify.verify.mockResolvedValue(true);
+      const body = { model: 'test', messages: [{ role: 'user', content: 'original' }] };
+      const forkBody = { model: 'test', messages: [{ role: 'user', content: 'fork' }] };
+
+      const first = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', await proofHeaderFor(body, 'nullifier-fork', '11'))
+        .send(body);
+      expect(first.status).toBe(200);
+
+      const second = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', await proofHeaderFor(forkBody, 'nullifier-fork', '12'))
+        .send(forkBody);
+      expect(second.status).toBe(409);
+      expect(second.body.error).toBe('fork_detected');
+      expect(second.body.slashEvidence).toMatchObject({
+        nullifier: 'nullifier-fork',
+        firstY: '11',
+        secondY: '12',
+      });
     });
 
 
@@ -433,6 +487,7 @@ describe('gateway server', () => {
     });
 
     it('reflects calls made', async () => {
+      process.env.ZK_CONTRACT_ID = 'test-contract';
       const keyRes = await request(app)
         .post('/v1/api-keys')
         .set('Authorization', 'Bearer test-secret')
@@ -440,7 +495,7 @@ describe('gateway server', () => {
 
       const res = await request(app).get('/v1/status/0xstatus-test');
       expect(res.status).toBe(200);
-      expect(res.body.activeKeys).toBe(1);
+      expect(res.body.activeKeys).toBe(0);
       expect(res.body.commitment).toBe('0xstatus-test');
       expect(res.body.balanceUsdc).toBe('5000000');
       expect(res.body.depositStatus).toBe('active');
@@ -519,6 +574,23 @@ describe('gateway server', () => {
       expect(res.body.amount).toBe('5000000');
       expect(res.body.newRoot).toBeDefined();
       expect(res.body.leafIndex).toBe(0);
+    });
+
+    it('preserves Merkle state when the on-chain deposit is rejected', async () => {
+      process.env.GATEWAY_SECRET_KEY = 'test-stellar-key';
+      const leafCountBefore = merkleTree.getLeafCount();
+      const rootBefore = merkleTree.root();
+      contractMock.deposit.mockRejectedValueOnce(new Error('duplicate commitment'));
+
+      const res = await request(app)
+        .post('/v1/deposits')
+        .set('Authorization', 'Bearer test-secret')
+        .send({ commitment: '987654321', amount: '50000000' });
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('deposit_failed');
+      expect(merkleTree.getLeafCount()).toBe(leafCountBefore);
+      expect(merkleTree.root()).toBe(rootBefore);
     });
   });
 
@@ -615,6 +687,9 @@ describe('gateway server', () => {
   });
 
   describe('POST /v1/withdraw (gateway co-signer → fee relay)', () => {
+    const withdrawalProof = { pi_a: ['1', '2', '1'] };
+    const withdrawalSignals = ['123', '456', '789'];
+
     beforeEach(() => {
       process.env.GATEWAY_SECRET_KEY = 'test-stellar-key';
       process.env.FEE_SPONSOR_URL = 'http://fee-sponsor.test';
@@ -630,12 +705,24 @@ describe('gateway server', () => {
       const res = await request(app)
         .post('/v1/withdraw')
         .set('Authorization', 'Bearer test-secret')
-        .send({ commitment: '123', recipient: 'G-RECIPIENT' });
+        .send({
+          withdrawalProof,
+          pubSignals: withdrawalSignals,
+          commitment: '123',
+          recipient: 'G-RECIPIENT',
+        });
 
       expect(res.status).toBe(200);
       expect(res.body.withdrawn).toBe(true);
       expect(res.body.feeBumpHash).toBe('fee-bump-1');
       expect(res.body.duplicate).toBe(false);
+      expect(contractMock.buildWithdrawEnvelope).toHaveBeenCalledWith(
+        'test-stellar-key',
+        withdrawalProof,
+        withdrawalSignals,
+        '123',
+        'G-RECIPIENT',
+      );
       expect(global.fetch).toHaveBeenCalledWith(
         'http://fee-sponsor.test/v1/fee-relay',
         expect.objectContaining({
@@ -648,7 +735,7 @@ describe('gateway server', () => {
     it('rejects missing auth', async () => {
       const res = await request(app)
         .post('/v1/withdraw')
-        .send({ commitment: '123', recipient: 'G-RECIPIENT' });
+        .send({ withdrawalProof, pubSignals: withdrawalSignals, commitment: '123', recipient: 'G-RECIPIENT' });
       expect(res.status).toBe(401);
     });
 
@@ -656,7 +743,7 @@ describe('gateway server', () => {
       const res = await request(app)
         .post('/v1/withdraw')
         .set('Authorization', 'Bearer test-secret')
-        .send({ commitment: '123' });
+        .send({ commitment: '123', withdrawalProof });
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('missing_fields');
     });
@@ -672,18 +759,22 @@ describe('gateway server', () => {
       const res = await request(app)
         .post('/v1/withdraw')
         .set('Authorization', 'Bearer test-secret')
-        .send({ commitment: '123', recipient: 'G-RECIPIENT' });
+        .send({
+          withdrawalProof,
+          pubSignals: withdrawalSignals,
+          commitment: '123',
+          recipient: 'G-RECIPIENT',
+        });
       expect(res.status).toBe(502);
       expect(res.body.error).toBe('fee_relay_rejected');
     });
   });
 
   describe('extractNullifier (RLN public signal layout)', () => {
-    // The RLN circuit declares outputs first, then the public epoch input:
-    // [root, nullifier, share_x, share_y, epoch]. The nullifier is index 1,
-    // NOT index 2 (which would be share_x and silently break replay protection).
-    it('returns the nullifier from a 5-signal RLN proof', () => {
-      const pubSignals = ['root', 'nullifier', 'share_x', 'share_y', 'epoch'];
+    // Indexed-ticket public signals are [root, nullifier, share_x, share_y].
+    // The nullifier remains index 1, never share_x at index 2.
+    it('returns the nullifier from a four-signal RLN proof', () => {
+      const pubSignals = ['root', 'nullifier', 'share_x', 'share_y'];
       expect(extractNullifier(pubSignals)).toBe('nullifier');
     });
     it('returns the nullifier independent of epoch position', () => {

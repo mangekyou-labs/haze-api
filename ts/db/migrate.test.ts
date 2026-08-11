@@ -60,6 +60,16 @@ describe('migrations (offline, static)', () => {
     expect(sql).toMatch(/inner_tx_hash\s+text PRIMARY KEY/i);
     expect(sql).toMatch(/status\s+text/i);
   });
+
+  it('settlement quarantine migration (0007) records legacy-row status and reason', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0007_settlement_quarantine.sql'), 'utf8');
+    expect(sql).toMatch(/ALTER TABLE gateway\.accepted_calls/i);
+    expect(sql).toMatch(/settlement_status\s+text/i);
+    expect(sql).toMatch(/settlement_error\s+text/i);
+    expect(sql).toMatch(/quarantined_at\s+timestamptz/i);
+    expect(sql).toMatch(/UPDATE gateway\.accepted_calls/i);
+    expect(sql).toMatch(/jsonb_array_length\(pub_signals\)\s+<>\s+4/i);
+  });
 });
 
 describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', () => {

@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sharedCandidates = [
-  path.resolve(webRoot, '../packages/zk-credits-shared'),
   path.resolve(webRoot, 'vendor/zk-credits-shared'),
+  path.resolve(webRoot, '../packages/zk-credits-shared'),
 ];
 const target = path.resolve(webRoot, 'node_modules/@zk-credits/shared');
 

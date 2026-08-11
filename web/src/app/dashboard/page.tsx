@@ -5,6 +5,7 @@ import { SiteFooter } from '@/components/site-footer';
 import { ApiKeySection } from './api-key-section';
 import { BuyCreditsSection } from './buy-credits-section';
 import { DashboardStatus } from './dashboard-status';
+import { LlmPlayground } from './llm-playground';
 import { isGatewayConfigured, isStripeConfigured } from '@/lib/runtime-config';
 
 export default async function DashboardPage() {
@@ -44,6 +45,11 @@ export default async function DashboardPage() {
           <DashboardStatus />
           <ApiKeySection
             userId={session.user?.id ?? ''}
+            gatewayConfigured={isGatewayConfigured({
+              GATEWAY_SECRET: process.env.GATEWAY_SECRET,
+            })}
+          />
+          <LlmPlayground
             gatewayConfigured={isGatewayConfigured({
               GATEWAY_SECRET: process.env.GATEWAY_SECRET,
             })}

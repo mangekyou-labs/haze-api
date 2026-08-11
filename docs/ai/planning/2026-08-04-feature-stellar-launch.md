@@ -11,22 +11,26 @@ description: Ordered implementation plan derived from the approved requirements,
 
 This is the working plan for `stellar-launch`, a parallel track to `feature-mina-protocol-migration`. The existing Stellar v1 codebase (circuits, Soroban contract, gateway, web) is already built; this plan adds the PRXVT-derived hardening (fee sponsorship, durable storage, type safety, self-verify, isomorphism), resolves the six v1 open questions, and takes the result to a public hosted testnet launch.
 
-Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 IN PROGRESS (4.1 partial; live fee-relay, withdrawal, restart, OAuth, and tier checks pending)` -> `Web UI fix & browser verification DONE (W1–W7)`.
+Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 IN PROGRESS (indexed-ticket launch gate)` -> `Web UI fix & browser verification DONE (W1–W7)`.
 
-### Current Status (reconciled 2026-08-10)
+### Current Status (reconciled 2026-08-11)
 
 M1 (Hardening foundation) is **COMPLETE and verified**:
 
 | Task | Status | Evidence |
 |---|---|---|
-| 1.0 Circuit artifacts | done | verified-consistent v1 artifact set (zkey↔VK diff-match: deposit/rln/slash); `ts` 63/64, shared 12/12, `node scripts/test.js` all pass |
+| 1.0 Circuit artifacts | done | fresh BLS12-381 power-15 setup, contribution, beacon, zkey verification, and Soroban VK export completed for indexed RLN, slash/root-removal, and membership-removal statements |
 | 1.1 Type safety | done | strict typechecks exit 0 in `ts/`+`web/`; escape-scan 0 |
 | 1.2 Isomorphic shared crypto | done | `@zk-credits/shared` built+tested; wired into `ts/`+`web/` |
 | 1.3 Client-side self-verify | done (local scope) | `generateRlnProofSelfVerified` + `ProofSelfVerificationError`; nullifier-index bug fixed with regression tests |
 
-Full gates green: `ts` 63/64 (1 pre-existing skip), shared package 12/12, all circuit tests pass, both typechecks exit 0, escape-scan 0.
+The former artifact mismatch is closed. The release artifacts are source-matched:
+RLN has 10,580 constraints / 10,587 wires, slash has 16,511 / 16,520,
+and membership removal has 15,846 / 15,854. Each final zkey was
+contributed, beaconed, and verified against the fresh power-15 transcript;
+the browser copies match the circuit copies byte-for-byte.
 
-M2 (Durable storage + fee sponsorship) is **CODE COMPLETE offline**: 2.1 done (PostgreSQL schemas + migrations + fails-closed config, verified against local Postgres 16); 2.2 done (gateway durable store + server wiring + restart reconstruction + stale-cache on-chain fallback); 2.3 done (billing webhook idempotency); 2.6 done (per-call async `spend()` worker, durable settlement queue); 2.4 done (fee-sponsor service + public fee-relay, method-validation gate, fee-bump + idempotency); 2.5 done (gateway `/v1/withdraw` co-signer → fee-relay handoff; suite 129/139 + DB 36/36 green). **M2 code complete offline** — the only remaining M2 items are the live Stellar testnet spikes (spend worker + fee relay + withdraw) pending user-funded keys.
+M2 (Durable storage + fee sponsorship) is **CODE COMPLETE offline**: 2.1 done (PostgreSQL schemas + migrations + fails-closed config, verified against local Postgres 16); 2.2 done (gateway durable store + server wiring + restart reconstruction + stale-cache on-chain fallback); 2.3 done (billing webhook idempotency); 2.6 done (per-call async `spend()` worker, durable settlement queue); 2.4 done (fee-sponsor service + public fee-relay, method-validation gate, fee-bump + idempotency); 2.5 now requires a browser-generated membership-removal proof in addition to the gateway co-signature. **M2 code complete offline** — live transaction validation waits for fresh artifacts, a redeployed contract, and funded testnet accounts.
 
 M3 (Hosted deployment) is **COMPLETE for deployment**:
 - **3.5 CI** ✅ DONE 2026-08-05 (final verified run 31026106925 GREEN: all 6 jobs)
@@ -36,19 +40,93 @@ M3 (Hosted deployment) is **COMPLETE for deployment**:
 - **3.3 Vercel web** ✅ DEPLOYED — https://feature-zk-api-credits.vercel.app serves the production web app; hosted dev-account sign-in, API-key issuance, Stripe test checkout, status proxy, and dashboard flow were exercised. GitHub OAuth acceptance remains an M4 external-configuration check.
 - **3.6 Render Blueprint attachment** ⏭ OPTIONAL — `render.yaml` validates and documents the three resources, but the existing Render services are API/Dashboard-managed rather than Blueprint-attached. Attaching the Blueprint is useful for drift control and must not create duplicate resources.
 
-M4 (Launch validation) is **IN PROGRESS**: the funded checkout → OpenRouter → replay rejection → on-chain settlement path is verified; slash, withdrawal, restart durability, GitHub OAuth, Stripe retry, OpenRouter tier, and legacy queue cleanup remain open.
+M4 (Launch validation) is **IN PROGRESS**. The previous hosted epoch-flow evidence is retained as historical evidence only; it does not satisfy the revised indexed-ticket launch gate. The indexed-ticket source, fresh proving artifacts, and fresh on-chain fixtures are complete. The remaining gate is live deployment plus browser-to-gateway/OpenRouter acceptance.
 
 Web UI fix track (user-directed 2026-08-06): **DONE** — W1–W7 implemented, committed in `ba47f4c`, and re-verified locally on 2026-08-09.
+
+### Indexed-ticket launch reconciliation (2026-08-11)
+
+The revised launch statement replaces the public epoch signal with a fixed-cost
+Starter package of exactly 100 private ticket indices (`0..99`). Each ticket
+binds one canonical request digest into the RLN share and publishes exactly
+`[root, nullifier, x, y]`. Legacy five-signal epoch proofs and their zkeys are
+kept only as migration evidence and must not be served or accepted by the new
+launch path.
+
+#### Completed implementation work
+
+- **Done:** Circom RLN statement, BLS12-381 MiMC/request-digest derivation, and
+  shared Node/browser proof input shape.
+- **Done:** Atomic browser ticket reservation/consume/skip ledger for the 100
+  Starter tickets.
+- **Done:** Gateway four-signal parsing, shared bearer compatibility auth,
+  request-body binding, durable tuple persistence before provider forwarding,
+  exact-retry response replay, fork detection with slash evidence, and local
+  status accounting.
+- **Done:** Soroban spend/slash/membership VK separation and strict indexed
+  signal counts, while preserving the constructor ABI. Slash now accepts the
+  nine-signal root-removal statement and atomically clears root grace history.
+  The post-constructor statement-key installation is admin-authorized once,
+  then immutable.
+- **Done:** `membership_removal.circom` proves browser-secret ownership and
+  a three-signal `[commitment, current_root, next_root]` withdrawal transition;
+  `withdraw()` verifies that dedicated VK and clears root grace history too.
+- **Done:** Dashboard LLM playground, OpenRouter generation metadata/log link,
+  fixed Starter pricing copy, and usage display wiring.
+- **Done:** Offline-safe web typography and production-build Playwright
+  verification; the full browser suite passes 13/13 with the shared-bearer
+  dashboard heading and test-only disabled-integration states.
+- **Done:** Vercel isolated-build packaging now declares `circomlibjs` directly;
+  the corrected preview is Ready after the first deployment exposed the
+  transitive-dependency gap.
+- **Done:** Durable settlement quarantine now records an explicit status,
+  reason, and timestamp for legacy/malformed accepted-call rows; migration
+  `0007` backfills non-indexed payloads and the spend worker excludes them from
+  retry polling. TDD evidence covers missing payloads and five-signal rows.
+- **Done:** Fresh artifact verification: `node circuits/scripts/test.js` proves
+  and self-verifies deposit, indexed RLN, invalid ticket bound, withdrawal
+  removal, and slash removal; shared proof tests pass `19/19`; Soroban tests
+  pass `24/24` with fresh RLN, slash, and membership fixtures; gateway tests
+  pass `141` with `11` opt-in skips; web unit and production Playwright gates
+  pass `16/16` and `13/13`.
+
+#### In progress / blocked
+
+- **Done locally:** Fresh RLN, slash/root-removal, and membership-removal
+  Groth16 setup used a verified power-15 transcript, separate random
+  contributions, deterministic public beacons, matching browser copies, and
+  generated Soroban proof fixtures.
+- **Done locally:** Real indexed spend, nine-signal slash, and three-signal
+  membership-removal fixtures are accepted by the dedicated contract VKs.
+- **Next local gate:** Run the manual Chrome Playwright flow against the built
+  app to observe landing, onboarding/recovery, sign-in, and dashboard states.
+- **Blocked operationally:** Current Render gateway health probes time out,
+  while the fee-sponsor health endpoint returns 200. Recover the gateway before
+  treating historical hosted acceptance evidence as current M4 validation.
+- **Open after local proof:** Update hosted circuit artifacts/deployment and
+  repeat the public indexed-ticket demo, exact retry, and ticket-fork checks.
+
+The earlier manual Playwright run is recorded as a blocker, not acceptance
+evidence: it reached the playground but failed before any gateway/OpenRouter
+request with the expected stale-artifact error (`Signal ticket_index is not an
+input of the circuit` / witness mismatch). This confirms the old artifact set
+is incompatible rather than demonstrating a protocol failure.
 
 ### Next Focus
 
 M3 deployment is complete and focus advances to M4 launch validation:
-1. **Quarantine legacy spend-queue rows** — stop retrying pre-fix accepted calls that can only produce `RootMismatch`; preserve them as historical evidence and ensure new post-fix calls settle normally.
-2. **Run the live Stellar spike** — submit a real fee-bumped slash, a gateway-mediated fee-bumped withdrawal, and confirm the spend-worker/event-cache behavior with dedicated testnet accounts.
-3. **Run hosted launch validation** — repeat the public flow with GitHub OAuth, exercise Stripe webhook retry/idempotency, restart Render mid-session, and check the OpenRouter key tier before launch sign-off.
-4. **Optional infrastructure hardening** — attach the existing services to the validated Render Blueprint through the Dashboard without provisioning duplicates.
+1. **Run the local manual Playwright acceptance flow** — observe landing,
+   onboarding/recovery, sign-in, and dashboard states in Chrome. A real
+   OpenRouter answer, self-verified proof state, and ticket decrement still
+   require the recovered gateway and configured live integrations.
+2. **Complete indexed-ticket launch validation** — deploy the newly compiled
+   contract with its fresh VKs, then repeat hosted two-ticket, exact-retry,
+   fork/slash, restart, Stripe/OAuth, and OpenRouter-tier checks.
+3. **After the indexed gate passes:** run the live fee-bumped slash/withdraw
+   spike and optionally attach the
+   existing Render services to the validated Blueprint without duplicates.
 
-Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); Render free-tier sleep/restart behavior; legacy pre-fix queue rows; GitHub OAuth and Stripe retry configuration; OpenRouter per-key limits (M4.6 pre-check); fresh trusted-setup regen deferred to a capable machine — and if it lands, M3.1 becomes a redeploy again.
+Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); the multi-hour local fresh trusted setup; accidental serving of legacy five-signal artifacts; Render free-tier sleep/restart behavior; legacy pre-fix queue rows; GitHub OAuth and Stripe retry configuration; and OpenRouter per-key limits.
 
 ## Milestones
 **What are the major checkpoints?**
@@ -56,7 +134,7 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
 - [x] **M1 — Hardening foundation:** TypeScript strict mode, isomorphic shared crypto package, client-side proof self-verification. (PRXVT guardrails first, so later code builds on a clean base.) — DONE (2026-08-04): 1.0–1.3 all complete and verified.
 - [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — CODE COMPLETE (2026-08-04): 2.1–2.6 all done and verified offline (durable store, restart reconstruction, billing idempotency, spend worker, fee-relay, withdraw co-signer). Remaining: live Stellar testnet spike (pending user-funded keys) before M3.
 - [x] **M3 — Hosted deployment:** Soroban testnet contract, Render gateway/Postgres, Vercel web, Render fee-sponsor service, CI pipeline. — DONE 2026-08-10; optional Blueprint attachment remains for infrastructure drift control.
-- [ ] **M4 — Launch validation + evidence:** IN PROGRESS — funded hosted call and settlement verified; slash, withdrawal, restart durability, OAuth, Stripe retry, queue cleanup, README review, and OpenRouter tier check remain.
+- [ ] **M4 — Launch validation + evidence:** IN PROGRESS — indexed-ticket source path and legacy queue-cleanup migration are implemented; fresh artifacts, real browser/OpenRouter acceptance, fresh contract fixtures, slash/withdrawal, restart durability, OAuth, Stripe retry, README review, and OpenRouter tier checks remain.
 
 ## Task Breakdown
 **What specific work needs to be done?**
@@ -125,7 +203,7 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
   - Depends on: 2.2 (gateway durable state), 2.4 (fee-relay).
   - Validation: Gateway withdraw endpoint test (valid WithdrawalProof -> co-signed + fee-bumped + broadcast; invalid proof rejected; slashed/withdrawn deposit rejected); confirms the user never needs XLM. (Covers testing: fee-sponsor + Soroban integration; hosted withdraw E2E.)
   - Related testing scenarios: fee-sponsor + Soroban integration; hosted withdraw E2E.
-  - Status: `ts/contract.ts` `buildWithdrawEnvelope` (builds + co-signs as depositor, returns envelope XDR), `ts/withdraw.ts` `requestWithdrawal` (injects builder + relay seams), gateway `POST /v1/withdraw` (GATEWAY_SECRET-gated; builds co-signed envelope → POSTs to `FEE_SPONSOR_URL/v1/fee-relay` → returns fee-bump hash). Verified: 5 withdraw + 4 server endpoint tests. **Scope deviation:** the endpoint is GATEWAY_SECRET-gated (proof validation is deferred to the web-app session + contract deposit auth) rather than accepting a standalone WithdrawalProof — recorded for the hosted E2E.
+  - Status: `ts/contract.ts` `buildWithdrawEnvelope` now carries the browser-generated removal proof and three public signals; `ts/withdraw.ts` validates their presence before it invokes the signer; gateway `POST /v1/withdraw` requires the proof, co-signs, then posts to `FEE_SPONSOR_URL/v1/fee-relay`. Targeted gateway tests cover proof presence, exact envelope arguments, and relay failure paths. Final cryptographic proof validation awaits the fresh membership VK and contract fixture.
 
 - [x] **2.6 Per-call async on-chain `spend()` worker + durable settlement queue.** — ADDED 2026-08-04 (new scope from M2.2); DONE
   - Outcome: The v1 gateway never submitted per-call on-chain `spend()` txs; the settlement queue was durable but had no worker. Add a worker that drains accepted calls pending on-chain spend, submitting each RLN proof to the contract's `spend()`; idempotent across restarts (proof + pub signals persisted); self-heals on `NullifierAlreadySpent`.
@@ -180,10 +258,10 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
 
 ### M4 — Launch validation + evidence
 
-- [ ] **4.0 Quarantine legacy spend-queue rows.** — IN PROGRESS / operational cleanup
+- [x] **4.0 Quarantine legacy spend-queue rows.** — CODE COMPLETE / deployment migration pending
   - Outcome: Prevent pre-fix accepted calls (BN254-root or positional-proof payloads) from being retried indefinitely; retain their hashes and failure reason for audit, while allowing post-`c02891c` calls to settle.
   - Depends on: 3.2 and the live queue schema.
-  - Validation: No legacy row is retried as a current acceptance fixture; a fresh funded call settles and emits `NullifierSpent`; the worker remains retry-safe for transient failures.
+  - Validation: Memory TDD and local PostgreSQL integration prove legacy rows are durably quarantined and excluded from retries; deployment must apply `0007` before the fresh funded hosted call can close the operational part.
   - Related testing scenarios: gateway + Soroban integration; restart durability.
 
 - [ ] **4.1 Hosted end-to-end demo.** — IN PROGRESS / core funded path verified
@@ -404,6 +482,101 @@ User reported the web UI "sucks, ugly and didn't work at all" and directed a Pla
 
 **Blockers and risks:** live fee-bumped slash, gateway-mediated withdrawal, and hosted restart durability still require dedicated Stellar testnet validation; Stripe webhook retry, GitHub OAuth, and OpenRouter tier checks remain external configuration/acceptance work. Render free-tier sleep behavior and legacy queue retries must be controlled before launch sign-off.
 
-**Next actions:** (1) quarantine legacy spend rows and verify fresh post-fix settlement; (2) run live slash and withdrawal fee-relay tests plus restart durability; (3) complete GitHub OAuth, Stripe retry, OpenRouter tier, README caveat review, and the public demo-script run. Optional: attach the existing services to the validated Render Blueprint through the Dashboard.
+**Next actions:** (1) apply the completed queue-quarantine migration with the fresh artifacts and verify post-fix settlement; (2) run live slash and withdrawal fee-relay tests plus restart durability; (3) complete GitHub OAuth, Stripe retry, OpenRouter tier, README caveat review, and the public demo-script run. Optional: attach the existing services to the validated Render Blueprint through the Dashboard.
 
 **Summary:** deployment is no longer the active blocker. The protocol's funded request path now works through checkout, OpenRouter, replay protection, and Soroban settlement. The project remains in M4 launch validation until live fee-relay/withdrawal/restart checks and the remaining external configuration and operational cleanup are complete.
+
+### Reconciliation (Dev-Planning · Phase 6 · reconciled 2026-08-11)
+
+**Milestone status:** `M1 DONE` · `M2 CODE-COMPLETE (live spend/fee-bump/withdraw spike pending)` · `M3 DEPLOYMENT DONE (Render/Vercel/CI)` · `M4 INDEXED-TICKET LAUNCH VALIDATION IN PROGRESS`.
+
+**Completed in this implementation continuation:**
+
+- Replaced the public epoch RLN statement with the paper-aligned fixed-cost
+  indexed-ticket statement: 100 private indices, four public signals, request
+  digest binding, and per-ticket nullifier/slope derivation.
+- Added the shared BLS12-381 MiMC/request-digest implementation, browser
+  IndexedDB ticket ledger, gateway durable tuple/retry/fork handling, contract
+  VK separation, and dashboard LLM playground/usage/provider evidence wiring.
+- Added regression coverage for canonical requests, digest binding, ticket
+  uniqueness/index bounds, four-signal parsing, exact retry, fork evidence,
+  local status, ticket-ledger transitions, and web pricing/playground behavior.
+- Fresh source-level evidence: gateway `140 passed / 11 skipped` plus
+  typecheck; web `14 passed`, typecheck, and production build; Soroban
+  contract `22/22` on Rust `1.92`; feature lint and `git diff --check` pass.
+
+**Scope changes:** the old five-signal epoch artifacts are now migration-only;
+the launch gateway rejects them, and the browser playground uses only the new
+four-signal statement. The shared compatibility bearer is intentionally not
+commitment-linked; each request is authorized by its own ZK ticket proof.
+
+**Blocker:** the compiled current `.wasm`/`.r1cs` no longer match the tracked
+legacy zkeys. Fresh RLN and slash Groth16 setup jobs are running locally, but
+snarkjs BLS12-381 setup is multi-hour on this machine. The shared proof tests
+and `circuits/scripts/test.js` therefore still fail at the old artifact boundary
+with `Invalid witness length` rather than proving the new statement. The old
+keys must not be substituted because that would make the browser demonstrate a
+different protocol.
+
+**Playwright status:** manual browser interaction reached the local dashboard,
+dev sign-in, API-key issuance, usage panel, and LLM playground. With the stale
+artifact set, clicking Generate response failed before any gateway/OpenRouter
+request with the expected `ticket_index`/witness mismatch; this is recorded as
+blocker evidence, not LLM acceptance evidence. The real answer/usage flow is
+still pending fresh artifact installation.
+
+**Next 2–3 actionable tasks:** (1) self-prove and self-verify one indexed ticket
+with the fresh RLN zkey, install/export all matching artifacts and regenerate
+Soroban VK JSON; (2) rerun the proof/circuit suites, restart local services, and
+perform the manual Playwright OpenRouter flow while observing response,
+generation ID, and `0 -> 1 -> 2` ticket usage; (3) add the fresh indexed
+contract fixture and complete hosted two-ticket, exact-retry, fork/slash,
+restart, Stripe/OAuth, and OpenRouter-tier validation.
+
+**Summary:** the indexed-ticket implementation is source-complete and its
+application/gateway/contract unit gates are green, but the launch gate remains
+open until compatible Groth16 artifacts and a real browser-to-OpenRouter
+interaction are verified. Legacy epoch acceptance evidence remains historical
+and cannot close this revised plan.
+
+### Reconciliation (Dev-Implementation · launch-plan completion · 2026-08-11)
+
+**Completed:** fresh BLS12-381 Groth16 artifacts were generated and verified for
+the RLN, slash, and membership-removal statements; the circuit suite, shared
+package tests, gateway tests/typecheck, web tests/typecheck/production build,
+and Soroban contract suite pass with those artifacts. The web preview is Ready
+at `https://feature-zk-api-credits-i2kc260jj-gadillacers-projects.vercel.app`.
+
+**Live testnet contract:** deployed and verified
+`CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`. Its constructor
+transaction is `36c9afaa74652afc75f3480f9765af685c6bd528853718363a74bdfc5e5de18b`;
+the dedicated verification keys were installed in transaction
+`8827579d85248854281ec9ffc769a4c0170a438351981281f269bd7934c7ed92` (ledger
+`4081560`). Read-only verification returned a zero deposit count and root; a
+second key-installation simulation returns `AlreadyInitialized`.
+
+**Browser validation:** Chrome/Playwright exercised landing → Get Started →
+test-only dev sign-in → dashboard → Guided setup on the running production-mode
+local server. The rendered page contained the expected setup controls and the
+browser reported zero console errors.
+
+**Render configuration completed:** the Render API updated `ZK_CONTRACT_ID` on
+the gateway and fee-sponsor and triggered deploy-only releases
+`dep-d9tcin2d0e5s738rki1g` and `dep-d9tcitbncjis738va740`. Both reached `live`.
+The public gateway now reports the new contract ID with `depositCount: 0` and
+`currentRoot: 0`; gateway and fee-sponsor health endpoints both returned HTTP
+200. The remaining M4 work is hosted spend/slash/withdraw/restart validation
+and third-party Stripe/OAuth/OpenRouter acceptance, rather than deployment
+configuration.
+
+### Reconciliation (Dev-Implementation · source rollout gate · 2026-08-11)
+
+The current contract, circuits, and source use the four-signal indexed-ticket
+statement, but Render is still deployed from the last committed branch revision
+(`42ef3d1`), which parses the retired five-signal statement. A locally
+self-verified proof for the live funded root reached that parser and was
+rejected before provider forwarding. The next mandatory action is therefore to
+commit/push the validated indexed-ticket source and artifacts, redeploy both
+Render services from that commit, and re-run M4.1–M4.4. The deposit path also
+now stages and commits Merkle state only after the on-chain transaction
+succeeds; this regression must be included in that rollout.

@@ -6,23 +6,38 @@
 // the v1 privacy boundary: a call is recorded with its nullifier only — never
 // with the commitment/deposit it belongs to (ZK unlinkability).
 
+export type SettlementStatus = 'pending' | 'settled' | 'quarantined';
+
 export interface AcceptedCall {
   proofHash: string;
   nullifier: string;
+  signalX?: string;
+  signalY?: string;
+  requestDigest?: string;
   epoch: number;
   slot: number;
   nonceHash: string;
   acceptedAt: Date;
   onChainSpendTx?: string | null;
   spentOnChain?: boolean;
+  /** Durable settlement lifecycle; legacy rows can be quarantined safely. */
+  settlementStatus?: SettlementStatus;
+  settlementError?: string | null;
   /** Full RLN Groth16 proof (durable — needed by the async spend worker). */
   proof?: object | null;
-  /** RLN public signals [root, nullifier, share_x, share_y, epoch]. */
+  /** Indexed-ticket public signals [root, nullifier, share_x, share_y]. */
   pubSignals?: string[] | null;
+  responseStatus?: number | null;
+  responseBody?: unknown | null;
+  providerGenerationId?: string | null;
 }
 
 export interface NullifierRecord {
   nullifier: string;
+  signalX?: string;
+  signalY?: string;
+  requestDigest?: string;
+  firstProofHash?: string;
   epoch: number;
   slot: number;
   firstSeenAt: Date;
@@ -54,14 +69,33 @@ export interface GatewayStore {
    * no accepted call is lost on a crash/restart.
    */
   recordAcceptedCall(call: AcceptedCall, commitment: string): Promise<void>;
+  findAcceptedCall(criteria: {
+    nullifier: string;
+    signalX: string;
+    signalY: string;
+    requestDigest: string;
+  }): Promise<AcceptedCall | null>;
+  recordProviderResponse(
+    proofHash: string,
+    responseStatus: number,
+    responseBody: unknown,
+    providerGenerationId?: string,
+  ): Promise<void>;
   listAcceptedCalls(opts?: { onlyPendingSpend?: boolean }): Promise<AcceptedCall[]>;
   countAcceptedCallsEpoch(epoch: number): Promise<number>;
   /** Mark an accepted call as settled on-chain (called by the spend worker). */
   markSpendResult(proofHash: string, onChainSpendTx: string): Promise<void>;
+  /** Remove a malformed/legacy call from the retry queue with an audit reason. */
+  quarantineSpend(proofHash: string, reason: string): Promise<void>;
 
   // ── Nullifier records ─────────────────────────────────────────
   getNullifier(nullifier: string): Promise<NullifierRecord | null>;
-  markNullifierSeen(nullifier: string, epoch: number, slot: number): Promise<void>;
+  markNullifierSeen(
+    nullifier: string,
+    epoch: number,
+    slot: number,
+    metadata?: { signalX?: string; signalY?: string; requestDigest?: string; proofHash?: string },
+  ): Promise<void>;
   markNullifierSpentOnChain(nullifier: string): Promise<void>;
   listNullifiers(): Promise<NullifierRecord[]>;
 
@@ -94,15 +128,49 @@ export class MemoryGatewayStore implements GatewayStore {
       ...call,
       onChainSpendTx: call.onChainSpendTx ?? null,
       spentOnChain: call.spentOnChain ?? false,
+      settlementStatus: call.settlementStatus ?? (call.spentOnChain ? 'settled' : 'pending'),
+      settlementError: call.settlementError ?? null,
     });
-    await this.markNullifierSeen(call.nullifier, call.epoch, call.slot);
-    await this.incrementCallCount(commitment, call.epoch);
+    await this.markNullifierSeen(call.nullifier, call.epoch, call.slot, {
+      signalX: call.signalX,
+      signalY: call.signalY,
+      requestDigest: call.requestDigest,
+      proofHash: call.proofHash,
+    });
+    if (commitment) await this.incrementCallCount(commitment, call.epoch);
+  }
+
+  async findAcceptedCall(criteria: {
+    nullifier: string;
+    signalX: string;
+    signalY: string;
+    requestDigest: string;
+  }): Promise<AcceptedCall | null> {
+    return [...this.calls.values()].find((call) =>
+      call.nullifier === criteria.nullifier &&
+      call.signalX === criteria.signalX &&
+      call.signalY === criteria.signalY &&
+      call.requestDigest === criteria.requestDigest,
+    ) ?? null;
+  }
+
+  async recordProviderResponse(
+    proofHash: string,
+    responseStatus: number,
+    responseBody: unknown,
+    providerGenerationId?: string,
+  ): Promise<void> {
+    const call = this.calls.get(proofHash);
+    if (!call) throw new Error(`unknown accepted call: ${proofHash}`);
+    call.responseStatus = responseStatus;
+    call.responseBody = responseBody;
+    call.providerGenerationId = providerGenerationId ?? null;
   }
 
   async listAcceptedCalls(opts: { onlyPendingSpend?: boolean } = {}): Promise<AcceptedCall[]> {
     let rows = [...this.calls.values()];
     if (opts.onlyPendingSpend) {
-      rows = rows.filter((c) => !c.spentOnChain);
+      rows = rows.filter((c) => !c.spentOnChain && c.settlementStatus !== 'quarantined');
     }
     return rows;
   }
@@ -116,18 +184,37 @@ export class MemoryGatewayStore implements GatewayStore {
     if (!call) throw new Error(`unknown accepted call: ${proofHash}`);
     call.onChainSpendTx = onChainSpendTx;
     call.spentOnChain = true;
+    call.settlementStatus = 'settled';
+    call.settlementError = null;
     await this.markNullifierSpentOnChain(call.nullifier);
+  }
+
+  async quarantineSpend(proofHash: string, reason: string): Promise<void> {
+    const call = this.calls.get(proofHash);
+    if (!call) throw new Error(`unknown accepted call: ${proofHash}`);
+    if (call.spentOnChain || call.settlementStatus === 'settled') return;
+    call.settlementStatus = 'quarantined';
+    call.settlementError = reason;
   }
 
   async getNullifier(nullifier: string): Promise<NullifierRecord | null> {
     return this.nullifiers.get(nullifier) ?? null;
   }
 
-  async markNullifierSeen(nullifier: string, epoch: number, slot: number): Promise<void> {
+  async markNullifierSeen(
+    nullifier: string,
+    epoch: number,
+    slot: number,
+    metadata: { signalX?: string; signalY?: string; requestDigest?: string; proofHash?: string } = {},
+  ): Promise<void> {
     const existing = this.nullifiers.get(nullifier);
     if (existing) return;
     this.nullifiers.set(nullifier, {
       nullifier,
+      signalX: metadata.signalX,
+      signalY: metadata.signalY,
+      requestDigest: metadata.requestDigest,
+      firstProofHash: metadata.proofHash,
       epoch,
       slot,
       firstSeenAt: new Date(),
@@ -214,6 +301,7 @@ const C = {
 } as const;
 
 function rowToAcceptedCall(r: Record<string, unknown>): AcceptedCall {
+  const spentOnChain = r.spent_on_chain as boolean;
   return {
     proofHash: r.proof_hash as string,
     nullifier: r.nullifier as string,
@@ -222,15 +310,27 @@ function rowToAcceptedCall(r: Record<string, unknown>): AcceptedCall {
     nonceHash: r.nonce_hash as string,
     acceptedAt: r.accepted_at as Date,
     onChainSpendTx: (r.on_chain_spend_tx as string) ?? null,
-    spentOnChain: r.spent_on_chain as boolean,
+    spentOnChain,
+    settlementStatus: (r.settlement_status as SettlementStatus) ?? (spentOnChain ? 'settled' : 'pending'),
+    settlementError: (r.settlement_error as string) ?? null,
     proof: r.proof_json ? (JSON.parse(r.proof_json as string) as object) : null,
     pubSignals: r.pub_signals ? (r.pub_signals as string[]) : null,
+    signalX: (r.signal_x as string) ?? undefined,
+    signalY: (r.signal_y as string) ?? undefined,
+    requestDigest: (r.request_digest as string) ?? undefined,
+    responseStatus: r.response_status === null || r.response_status === undefined ? null : Number(r.response_status),
+    responseBody: r.response_json ? JSON.parse(r.response_json as string) : null,
+    providerGenerationId: (r.provider_generation_id as string) ?? null,
   };
 }
 
 function rowToNullifier(r: Record<string, unknown>): NullifierRecord {
   return {
     nullifier: r.nullifier as string,
+    signalX: (r.signal_x as string) ?? undefined,
+    signalY: (r.signal_y as string) ?? undefined,
+    requestDigest: (r.request_digest as string) ?? undefined,
+    firstProofHash: (r.first_proof_hash as string) ?? undefined,
     epoch: Number(r.epoch),
     slot: Number(r.slot),
     firstSeenAt: r.first_seen_at as Date,
@@ -258,11 +358,14 @@ export class PostgresGatewayStore implements GatewayStore {
       await client.query('BEGIN');
       await client.query(
         `INSERT INTO ${C.calls}
-           (proof_hash, nullifier, epoch, slot, nonce_hash, accepted_at, on_chain_spend_tx, spent_on_chain, proof_json, pub_signals)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           (proof_hash, nullifier, signal_x, signal_y, request_digest, epoch, slot, nonce_hash, accepted_at, on_chain_spend_tx, spent_on_chain, proof_json, pub_signals, response_status, response_json, provider_generation_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [
           call.proofHash,
           call.nullifier,
+          call.signalX ?? null,
+          call.signalY ?? null,
+          call.requestDigest ?? null,
           call.epoch,
           call.slot,
           call.nonceHash,
@@ -271,15 +374,18 @@ export class PostgresGatewayStore implements GatewayStore {
           call.spentOnChain ?? false,
           call.proof ? JSON.stringify(call.proof) : null,
           call.pubSignals ? (JSON.stringify(call.pubSignals) as string) : null,
+          call.responseStatus ?? null,
+          call.responseBody === undefined || call.responseBody === null ? null : JSON.stringify(call.responseBody),
+          call.providerGenerationId ?? null,
         ],
       );
       await client.query(
-        `INSERT INTO ${C.nullifiers} (nullifier, epoch, slot)
-         VALUES ($1, $2, $3)
+        `INSERT INTO ${C.nullifiers} (nullifier, signal_x, signal_y, request_digest, first_proof_hash, epoch, slot)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (nullifier) DO NOTHING`,
-        [call.nullifier, call.epoch, call.slot],
+        [call.nullifier, call.signalX ?? null, call.signalY ?? null, call.requestDigest ?? null, call.proofHash, call.epoch, call.slot],
       );
-      await client.query(
+      if (commitment) await client.query(
         `INSERT INTO ${C.counts} (commitment, epoch, call_count)
          VALUES ($1, $2, 1)
          ON CONFLICT (commitment, epoch) DO UPDATE
@@ -295,12 +401,41 @@ export class PostgresGatewayStore implements GatewayStore {
     }
   }
 
+  async findAcceptedCall(criteria: {
+    nullifier: string;
+    signalX: string;
+    signalY: string;
+    requestDigest: string;
+  }): Promise<AcceptedCall | null> {
+    const result = await this.pool.query(
+      `SELECT * FROM ${C.calls}
+       WHERE nullifier = $1 AND signal_x = $2 AND signal_y = $3 AND request_digest = $4
+       ORDER BY accepted_at ASC LIMIT 1`,
+      [criteria.nullifier, criteria.signalX, criteria.signalY, criteria.requestDigest],
+    );
+    return result.rows.length > 0 ? rowToAcceptedCall(result.rows[0] as Record<string, unknown>) : null;
+  }
+
+  async recordProviderResponse(
+    proofHash: string,
+    responseStatus: number,
+    responseBody: unknown,
+    providerGenerationId?: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE ${C.calls}
+       SET response_status = $2, response_json = $3, provider_generation_id = $4
+       WHERE proof_hash = $1`,
+      [proofHash, responseStatus, JSON.stringify(responseBody), providerGenerationId ?? null],
+    );
+  }
+
   async listAcceptedCalls(opts: { onlyPendingSpend?: boolean } = {}): Promise<AcceptedCall[]> {
     const where = opts.onlyPendingSpend
-      ? 'WHERE spent_on_chain = false AND on_chain_spend_tx IS NULL'
+      ? "WHERE spent_on_chain = false AND on_chain_spend_tx IS NULL AND settlement_status <> 'quarantined'"
       : '';
     const res = await this.pool.query(
-      `SELECT proof_hash, nullifier, epoch, slot, nonce_hash, accepted_at, on_chain_spend_tx, spent_on_chain, proof_json, pub_signals
+      `SELECT proof_hash, nullifier, signal_x, signal_y, request_digest, epoch, slot, nonce_hash, accepted_at, on_chain_spend_tx, spent_on_chain, settlement_status, settlement_error, proof_json, pub_signals, response_status, response_json, provider_generation_id
        FROM ${C.calls} ${where} ORDER BY accepted_at ASC`,
     );
     return res.rows.map((r) => rowToAcceptedCall(r as Record<string, unknown>));
@@ -320,7 +455,7 @@ export class PostgresGatewayStore implements GatewayStore {
       await client.query('BEGIN');
       const res = await client.query(
         `UPDATE ${C.calls}
-         SET on_chain_spend_tx = $2, spent_on_chain = true
+         SET on_chain_spend_tx = $2, spent_on_chain = true, settlement_status = 'settled', settlement_error = NULL
          WHERE proof_hash = $1
          RETURNING nullifier`,
         [proofHash, onChainSpendTx],
@@ -344,9 +479,26 @@ export class PostgresGatewayStore implements GatewayStore {
     }
   }
 
+  async quarantineSpend(proofHash: string, reason: string): Promise<void> {
+    const res = await this.pool.query(
+      `UPDATE ${C.calls}
+       SET settlement_status = 'quarantined', settlement_error = $2, quarantined_at = now()
+       WHERE proof_hash = $1 AND spent_on_chain = false AND on_chain_spend_tx IS NULL
+       RETURNING proof_hash`,
+      [proofHash, reason],
+    );
+    if (res.rows.length === 0) {
+      const existing = await this.pool.query(
+        `SELECT proof_hash FROM ${C.calls} WHERE proof_hash = $1`,
+        [proofHash],
+      );
+      if (existing.rows.length === 0) throw new Error(`unknown accepted call: ${proofHash}`);
+    }
+  }
+
   async getNullifier(nullifier: string): Promise<NullifierRecord | null> {
     const res = await this.pool.query(
-      `SELECT nullifier, epoch, slot, first_seen_at, spent_on_chain, spent_at
+      `SELECT nullifier, signal_x, signal_y, request_digest, first_proof_hash, epoch, slot, first_seen_at, spent_on_chain, spent_at
        FROM ${C.nullifiers} WHERE nullifier = $1`,
       [nullifier],
     );
@@ -354,12 +506,17 @@ export class PostgresGatewayStore implements GatewayStore {
     return rowToNullifier(res.rows[0] as Record<string, unknown>);
   }
 
-  async markNullifierSeen(nullifier: string, epoch: number, slot: number): Promise<void> {
+  async markNullifierSeen(
+    nullifier: string,
+    epoch: number,
+    slot: number,
+    metadata: { signalX?: string; signalY?: string; requestDigest?: string; proofHash?: string } = {},
+  ): Promise<void> {
     await this.pool.query(
-      `INSERT INTO ${C.nullifiers} (nullifier, epoch, slot)
-       VALUES ($1, $2, $3)
+      `INSERT INTO ${C.nullifiers} (nullifier, signal_x, signal_y, request_digest, first_proof_hash, epoch, slot)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (nullifier) DO NOTHING`,
-      [nullifier, epoch, slot],
+      [nullifier, metadata.signalX ?? null, metadata.signalY ?? null, metadata.requestDigest ?? null, metadata.proofHash ?? null, epoch, slot],
     );
   }
 
@@ -374,7 +531,7 @@ export class PostgresGatewayStore implements GatewayStore {
 
   async listNullifiers(): Promise<NullifierRecord[]> {
     const res = await this.pool.query(
-      `SELECT nullifier, epoch, slot, first_seen_at, spent_on_chain, spent_at
+      `SELECT nullifier, signal_x, signal_y, request_digest, first_proof_hash, epoch, slot, first_seen_at, spent_on_chain, spent_at
        FROM ${C.nullifiers}`,
     );
     return res.rows.map((r) => rowToNullifier(r as Record<string, unknown>));
@@ -462,4 +619,3 @@ export async function reconstructGatewayState(store: GatewayStore): Promise<Reco
   }
   return { nullifiers, callCounts: await store.getAllCallCounts() };
 }
-

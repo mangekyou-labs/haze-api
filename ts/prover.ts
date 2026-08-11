@@ -5,12 +5,12 @@
 import { resolve } from 'path';
 import { proveGroth16, type ProofResult } from '@zk-credits/shared';
 
-const CIRCUITS_DIR = process.env.CIRCUITS_DIR || resolve(import.meta.dirname!, '..', '..', 'circuits');
+const CIRCUITS_DIR = process.env.CIRCUITS_DIR || resolve(import.meta.dirname!, '..', 'circuits');
 
 export interface ZkInput {
   secret_k: string;
-  signal_value: string;
-  epoch: string;
+  ticket_index: string;
+  request_digest: string;
   merkle_path_elements: string[];
   merkle_path_indices: string[];
 }

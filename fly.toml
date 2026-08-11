@@ -1,0 +1,40 @@
+# ─── Gateway Fly.io config (stellar-launch M3.2) ─────────────────
+# Deploy from repo root:  fly launch  (reads this fly.toml)
+# Secrets: fly secrets set GATEWAY_SECRET_KEY=... etc.
+# Postgres: fly pg create  then  fly pg attach
+
+app = "zk-credits-gateway"
+primary_region = "iad"
+
+[build]
+  dockerfile = "ts/Dockerfile"
+
+[env]
+  PORT = "3001"
+  NODE_ENV = "production"
+  STELLAR_NETWORK = "testnet"
+  STELLAR_RPC_URL = "https://soroban-testnet.stellar.org"
+  DEFAULT_EPOCH_QUOTA = "100"
+  PRICE_PER_CALL_USDC = "1000"
+  SPEND_WORKER_INTERVAL_MS = "10000"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3001
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    force_https = false
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "get"
+    path = "/health"

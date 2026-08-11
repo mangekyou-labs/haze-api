@@ -1896,6 +1896,8 @@ dependencies = [
 name = "zk-credits-contract"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "soroban-sdk",
 ]
 

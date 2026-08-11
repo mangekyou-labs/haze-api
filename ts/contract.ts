@@ -170,13 +170,14 @@ export async function getCurrentRoot(): Promise<string> {
 }
 
 // ─── Withdrawal (M2.5) ────────────────────────────────────────────
-// Gateway-mediated: the contract's withdraw() requires
-// `deposit.depositor.require_auth()` and the gateway is the depositor for all
-// v1 deposits, so the gateway co-signs the inner tx. The user never needs
-// XLM — the fee-sponsor relay fee-bumps the returned envelope.
+// Gateway-mediated: the contract's withdraw() requires both the gateway's
+// depositor auth and a browser-generated membership-removal proof. The user
+// never needs XLM — the fee-sponsor relay fee-bumps the returned envelope.
 
 export async function buildWithdrawEnvelope(
   depositorSecretKey: string,
+  withdrawalProof: object,
+  pubSignals: string[],
   commitment: string,
   recipient: string,
 ): Promise<string> {
@@ -185,6 +186,8 @@ export async function buildWithdrawEnvelope(
   const keypair = Keypair.fromSecret(depositorSecretKey);
   const source = await server.getAccount(keypair.publicKey());
 
+  const proofVal = groth16ProofToScVal(withdrawalProof);
+  const signalsVal = groth16PublicSignalsToScVal(pubSignals);
   const commitmentVal = nativeToScVal(BigInt(commitment), { type: 'u256' });
   const recipientVal = new Address(recipient).toScVal();
 
@@ -192,7 +195,7 @@ export async function buildWithdrawEnvelope(
     fee: '100000',
     networkPassphrase: NETWORK_PASSPHRASE,
   })
-    .addOperation(contract.call('withdraw', commitmentVal, recipientVal))
+    .addOperation(contract.call('withdraw', proofVal, signalsVal, commitmentVal, recipientVal))
     .setTimeout(30)
     .build();
 

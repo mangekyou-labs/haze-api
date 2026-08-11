@@ -37,9 +37,9 @@ export async function POST(req: NextRequest) {
   }
 
   const priceInfo = PRICE_MAP[tier];
-  if (!priceInfo) {
+  if (!priceInfo || tier !== 'starter') {
     return NextResponse.json(
-      { error: 'invalid_tier', valid: Object.keys(PRICE_MAP) },
+      { error: 'invalid_tier', valid: ['starter'] },
       { status: 400 },
     );
   }

@@ -102,7 +102,7 @@ export function ApiKeySection({
       const res = await fetch('/api/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commitment }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -110,6 +110,11 @@ export function ApiKeySection({
         return;
       }
       setApiKey(data.apiKey);
+      window.dispatchEvent(
+        new CustomEvent('zk-credits-api-key-ready', {
+          detail: { apiKey: data.apiKey },
+        }),
+      );
     } catch (e) {
       console.error('Failed to generate key:', e);
       setError('Failed to generate key. See console for details.');
@@ -128,13 +133,13 @@ export function ApiKeySection({
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-      <h2 className="mb-2 text-lg font-semibold text-zinc-100">API Key</h2>
+      <h2 className="mb-2 text-lg font-semibold text-zinc-100">Shared API Compatibility Key</h2>
       <p className="mb-4 text-sm text-zinc-400">
-        Use this key as your{' '}
+        Use this shared transport key as your{' '}
         <code className="rounded bg-zinc-800 px-1 font-mono text-zinc-200">
           OPENAI_API_KEY
         </code>{' '}
-        when calling the gateway.
+        when calling the gateway. Each request still requires its own ZK ticket proof; this key is not linked to your deposit.
       </p>
 
       {error && (

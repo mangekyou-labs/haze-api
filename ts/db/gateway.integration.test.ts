@@ -84,7 +84,7 @@ describe.skipIf(!dbTestsEnabled)('PostgresGatewayStore (integration, requires Po
         nonceHash: 'int-nh-queue',
         acceptedAt: new Date(),
         proof: { a: 'A1', b: 'B1', c: 'C1' },
-        pubSignals: ['root', 'int-n-queue', 'x', 'y', '20260804'],
+        pubSignals: ['root', 'int-n-queue', 'x', 'y'],
       },
       'int-comm-queue',
     );
@@ -96,7 +96,7 @@ describe.skipIf(!dbTestsEnabled)('PostgresGatewayStore (integration, requires Po
     const queued = pending.find((c) => c.proofHash === 'int-ph-queue');
     expect(queued).toBeDefined();
     expect(queued?.proof).toEqual({ a: 'A1', b: 'B1', c: 'C1' });
-    expect(queued?.pubSignals).toEqual(['root', 'int-n-queue', 'x', 'y', '20260804']);
+    expect(queued?.pubSignals).toEqual(['root', 'int-n-queue', 'x', 'y']);
 
     // Worker settles: markSpendResult sets the tx hash + spent flag + durable
     // nullifier spent-on-chain record.
@@ -109,6 +109,33 @@ describe.skipIf(!dbTestsEnabled)('PostgresGatewayStore (integration, requires Po
     const after = await store2.listAcceptedCalls({ onlyPendingSpend: true });
     expect(after.find((c) => c.proofHash === 'int-ph-queue')).toBeUndefined();
     expect(after.find((c) => c.proofHash === 'int-ph-1')).toBeDefined(); // prior-test row still pending
+  });
+
+  it('durably quarantines legacy settlement rows and excludes them from retries', async () => {
+    const store1 = new PostgresGatewayStore(pool);
+    await store1.recordAcceptedCall(
+      {
+        proofHash: 'int-ph-legacy',
+        nullifier: 'int-n-legacy',
+        epoch: 20260804,
+        slot: 1,
+        nonceHash: 'int-nh-legacy',
+        acceptedAt: new Date(),
+        proof: { a: 'legacy' },
+        pubSignals: ['root', 'int-n-legacy', 'x', 'y', '20260804'],
+      },
+      'int-comm-legacy',
+    );
+    await store1.quarantineSpend('int-ph-legacy', 'legacy settlement row has non-indexed public signals');
+
+    const store2 = new PostgresGatewayStore(pool);
+    const all = await store2.listAcceptedCalls();
+    expect(all.find((call) => call.proofHash === 'int-ph-legacy')).toMatchObject({
+      settlementStatus: 'quarantined',
+      settlementError: 'legacy settlement row has non-indexed public signals',
+    });
+    const pending = await store2.listAcceptedCalls({ onlyPendingSpend: true });
+    expect(pending.find((call) => call.proofHash === 'int-ph-legacy')).toBeUndefined();
   });
 
   it('stores API-key issuance but never links commitment to calls (privacy)', async () => {

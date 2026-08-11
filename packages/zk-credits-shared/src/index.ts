@@ -4,6 +4,10 @@ export {
   recoverSecretK,
   skToField,
   FR_ORDER,
+  mimcHash,
+  canonicalizeRequest,
+  requestDigestToField,
+  deriveTicketSignals,
 } from './crypto.js';
 export {
   proveGroth16,
@@ -11,6 +15,7 @@ export {
   generateDepositProof,
   verifyGroth16Proof,
   generateRlnProofSelfVerified,
+  generateMembershipRemovalProofSelfVerified,
   ProofSelfVerificationError,
 } from './proof.js';
 export type {
@@ -20,4 +25,7 @@ export type {
   RlnCircuitResources,
   RlnProofInput,
   RlnProofResult,
+  MembershipRemovalCircuitResources,
+  MembershipRemovalProofInput,
+  MembershipRemovalProofResult,
 } from './proof.js';

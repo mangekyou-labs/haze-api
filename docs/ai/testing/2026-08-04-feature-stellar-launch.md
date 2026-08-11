@@ -7,6 +7,67 @@ description: Verification plan for the public testnet launch - hosted deployment
 
 # Testing Strategy
 
+## Indexed-ticket verification in progress (2026-08-11)
+
+The revised launch gate is being exercised against the paper-aligned fixed-cost
+statement:
+
+- Shared crypto TDD covers canonical request hashing, distinct ticket slopes
+  and nullifiers, same-index fork behavior, and the `0..99` bound.
+- Gateway tests cover strict four-signal parsing, shared-bearer authorization,
+  request-body binding, durable exact-retry idempotency, distinct ticket
+  acceptance, and `fork_detected` slash evidence.
+- The circuit suite passes a valid four-signal proof, rejection of index 100,
+  and two root-removal statements: nine-signal ticket-fork slash and
+  three-signal browser-secret withdrawal. Fresh RLN/slash/membership zkeys,
+  browser artifacts, Soroban VKs, and self-verified proof fixtures are all
+  generated from the current source; legacy zkeys are not launch artifacts.
+- The contract test gate uses Rust 1.92+ locally (the system Rust 1.79 cannot
+  parse the cached `edition2024` dependency) and passes `24/24`: strict
+  four-signal spend, fresh nine-signal slash/root removal, three-signal
+  withdrawal/root removal, tampered proofs, wrong VKs, and immutable statement
+  key installation.
+- Manual Playwright validation will use the actual `feature-stellar-launch/web`
+  app: sign in, generate the browser identity/key, reserve a ticket, observe
+  local proof generation and the OpenRouter response, then verify usage changes
+  and the provider generation metadata in the UI.
+
+## Browser/build reliability evidence (2026-08-11)
+
+- [x] Offline-safe production typography: the focused Vercel-build regression
+  was red while `layout.tsx` imported `next/font/google`, then passed after
+  switching to local system font stacks; the full web unit suite is **16/16**.
+- [x] Production Playwright gate: `CI=1 E2E_PORT=3214 npm run test:e2e` ran the
+  built app with the dev-only test login and passed **13/13**. It covers the
+  landing shell, auth guards, styled UI, onboarding/recovery, dashboard
+  sections, and disabled integration states.
+- [x] Contract artifact gate: current source compiles and `24/24` tests pass
+  against the fresh RLN, slash, and membership-removal fixtures. The deprecated
+  SDK event API warnings are non-failing and remain a separate follow-up.
+- [x] Vercel isolated-build gate: the first preview failed on missing
+  `circomlibjs`; the new direct web dependency and regression test fixed it.
+  A second preview reached **Ready**, and its local-equivalent production build
+  plus Playwright suite passed (`16/16` web unit tests, `13/13` browser tests).
+
+## Settlement queue quarantine evidence (2026-08-11)
+
+- [x] M4.0 legacy-row quarantine: TDD coverage proves missing proof payloads
+  and legacy five-signal rows are marked `quarantined` with an audit reason,
+  excluded from future pending-spend drains, and never submitted to Soroban.
+  Migration `0007_settlement_quarantine.sql` adds the durable status/error/
+  timestamp columns and backfills malformed pre-indexed rows during upgrade.
+  The fresh TypeScript suite passes **140/151** with **11** opt-in skips; the
+  local PostgreSQL store integration passes **5/5**, including restart-visible
+  quarantine persistence.
+
+## Current hosted operational evidence (2026-08-11)
+
+- [x] Fee-sponsor health is currently reachable: Render returned HTTP 200.
+- [ ] Gateway health is currently unavailable: three bounded probes received no
+  headers before timing out. The hosted two-ticket, exact-retry, fee-bump,
+  withdrawal, restart, Stripe, OAuth, and OpenRouter checks remain blocked
+  pending Render gateway recovery and fresh indexed proving artifacts.
+
 ## Completed Evidence
 
 - [x] M1.1 Type-safety gate: `ts/` and `web/` compile under strict TypeScript (`npm run typecheck` exit 0 in both); no `@ts-nocheck`/`any`/`@ts-ignore`/`@ts-expect-error` in shipped non-test code (grep count 0).
@@ -21,7 +82,7 @@ description: Verification plan for the public testnet launch - hosted deployment
 - [x] M2.2 gateway durable store: `memory` store tests (6) cover the full `GatewayStore` contract (durable accept + duplicate-proofHash rejection, nullifier seen/spent transitions, key create/lookup/list, per-epoch → lifetime call counts, restart reconstruction returns nullifier set + call counts, pending-spend listing) and Postgres integration tests (3, `RUN_DB_TESTS=1`) prove restart durability across store instances + the privacy boundary (no commitment column on accepted_calls). Migration `0002_gateway.sql` verified offline (provisions all four tables; no commitment on accepted_calls) and against local Postgres 16.
 - [x] M2.2 server wiring: `server.test.ts` now 28/28 — new cases prove a valid proof is durably accepted (accepted-call persisted **before** upstream forward), replay of the same nullifier is rejected (403), a miss leaves the call to the on-chain `is_nullifier_spent` fallback (403 + durable spent-on-chain record), and the durable quota counter rejects the 101st call. Adapter + shared-verify are mocked (no real network). `ts` suite now **81/86** (5 skipped including opt-in DB integration), typecheck OK, escape-scan 0.
 - [x] M2.3 billing webhook idempotency: `MemoryBillingStore` tests (4) cover the idempotency contract (first delivery inserted, redelivery = duplicate, processed transition, ordering); Postgres integration tests (2, `RUN_DB_TESTS=1`) prove redelivery is a no-op across store instances + distinct event ids are independent. Gateway `/v1/billing/stripe-event` tests (6, in `server.test.ts`) cover: first delivery submits the deposit (txHash returned), redelivery is an idempotent duplicate (no txHash), missing commitment skips but records, non-checkout events record without deposit, auth + fails-closed. Migration `0003_billing.sql` verified offline + against local Postgres 16. `ts` suite now **92/99**, DB integration **25/25** (serial), web typecheck OK.
-- [x] M2.6 spend worker settlement queue: `db/spend-queue.test.ts` (2) proves the store round-trips the full proof + pub signals and pending-spend excludes spent rows; `spend-worker.test.ts` (6) proves drain submits each pending call + records the tx hash, treats `NullifierAlreadySpent` as settled (no infinite retry), leaves calls pending on transient failure, never re-submits spent calls, and skips pre-M2.6 rows without a proof. Migration `0004_spend_queue.sql` verified offline + against Postgres 16 (proof/jsonb columns). Postgres integration (<code>gateway.integration.test.ts</code>, 4 tests) proves restart resumption with the proof intact + `markSpendResult` settles atomically. `ts` suite now **101/109**, DB integration **29/29** (serial), web typecheck OK.
+- [x] M2.6 spend worker settlement queue: `db/spend-queue.test.ts` (2) proves the store round-trips the full proof + pub signals and pending-spend excludes spent rows; `spend-worker.test.ts` proves drain submits indexed calls + records the tx hash, treats `NullifierAlreadySpent` as settled (no infinite retry), leaves calls pending on transient failure, never re-submits spent calls, and quarantines pre-M2.6/malformed rows without a proof or four-signal payload. Migrations `0004_spend_queue.sql` and `0007_settlement_quarantine.sql` are verified offline; Postgres integration remains opt-in.
 - [x] M2.4 fee-sponsor + public fee-relay: `MemoryFeeSponsorStore` tests (4) cover relay idempotency (first wins, retry returns prior state, submit/fail transitions, ordering); Postgres integration (2, `RUN_DB_TESTS=1`) proves cross-instance idempotency on the inner tx hash. `fee-relay.test.ts` (9) builds real SDK txs to prove the method-validation gate: slash+withdraw accepted, payment (non-contract) → 403, `deposit` → 403 (not sponsored), malformed XDR → 400; `relayOne` fee-bumps + submits exactly once, is idempotent on retry, and marks `failed` + 503 on submission failure; `buildFeeBumpEnvelope` wraps the inner tx. `fee-sponsor-app.test.ts` (5, supertest) covers `/health`, accept withdraw, idempotent retry, missing inner tx (400), payment rejection (403). Migration `0005_fee_sponsor.sql` offline + Postgres-16 verified. Service boots via tsx and fails closed on missing env/DB. `ts` suite now **120/130**, DB integration **36/36** (serial), services typecheck OK.
 - [x] M2.5 gateway `/v1/withdraw` co-signer: `withdraw.test.ts` (5) proves the orchestrator builds the depositor envelope, relays it to the fee sponsor once (relay-reported duplicate is a no-op), rejects missing fields (400), and surfaces 502/503 on build/relay failure. `server.test.ts` (now 38) adds `/v1/withdraw` endpoint tests: co-signed withdraw relayed with fee-bump hash returned, missing auth → 401, missing fields → 400, fee-relay rejection → 502 (contract `buildWithdrawEnvelope` and global `fetch` both mocked). `ts` suite now **129/139**, DB integration **36/36** (serial), typecheck OK.
 - [x] M3.5 CI pipeline + web test baseline: `web` gained a vitest unit suite (`web/src/lib/crypto.test.ts`, 4 tests — 32-byte secret gen, 24-word BIP-39 derive→recover round-trip, `secretKToField` fr-reduction + determinism, alias stability; **the 12-word assertion was a TDD-caught error — the real implementation derives 24 words** from 32-byte entropy, matching the M1.2 record) and a Playwright E2E smoke (`web/playwright.config.ts` + `web/e2e/smoke.spec.ts`, 2 tests: landing renders + `/sign-in` "Get Started" link; **the assumed "Sign in" link label was a TDD-caught error**). Verified locally `npm test` 4/4 + `E2E_PORT=3211 npx playwright test` 2/2 (next-auth UntrustedHost server-log noise is harmless; `AUTH_URL` is set in the webServer command). `.github/workflows/ci.yml` (6-job matrix: gateway/shared/fee-sponsor/web/circuits/contract, Node 24 + `npm ci`, concurrency cancel) + `.github/workflows/deploy-smoke.yml` (post-deploy health template) created; both YAML-parse clean. Circuit artifacts un-ignored + committed (`.wasm`/`*_final.zkey` for `circuits/` + `web/public/circuits/` — a fresh checkout previously lacked the browser proof path and the CI circuits inputs).
@@ -34,12 +95,41 @@ description: Verification plan for the public testnet launch - hosted deployment
 **What level of testing do we aim to?**
 
 - 100% coverage of new/changed security-critical branches in the fee-sponsor, durable storage layer, proof self-verification, and isomorphic shared crypto; every uncovered line requires written rationale.
-- Retain the existing v1 gateway (46) + contract (15) + circuit test suites; replace in-memory state tests with PostgreSQL-backed equivalents.
+- Retain unaffected v1 gateway/contract tests, but replace every epoch-nullifier, random-signal, commitment-linked API-key, and "seen nullifier always rejects" assertion. Historical green tests for those behaviors are regression evidence for the legacy implementation, not launch acceptance.
 - Hosted-testnet E2E tests exercise the public deployment (sign-in -> buy -> call -> slash -> withdraw) against the live Render/Vercel/Soroban endpoints.
 - Alignment: every requirements success criterion has at least one test scenario.
 
 ## Unit Tests
 **What individual components need testing?**
+
+### Paper-aligned fixed-cost indexed tickets (release-blocking redesign)
+- [ ] Circuit accepts private ticket indices `0` and `99`, rejects `100`, and proves the fixed-cost solvency specialization `(i + 1) * C_demo <= D` with `D = 100 * C_demo` and `R = 0`.
+- [ ] For one `secret_k`, ticket indices `i` and `i + 1` produce distinct `a = H(k,i)` values and distinct `nullifier = H(a)` values; neither public proof reveals `i` or the deposit commitment.
+- [ ] For the same ticket index and canonical request, independently generated proofs produce the same `(nullifier, x, y)` even when Groth16 proof bytes differ.
+- [ ] For the same ticket index and two different canonical requests, nullifier is equal, `x`/`y` differ, and the slash circuit recovers the exact `secret_k` whose commitment is in the Merkle tree.
+- [ ] A canonical request mutation (model, messages, max tokens, or other forwarded field) changes `x`; the gateway rejects a proof whose `x` does not match the exact request sent to OpenRouter.
+- [ ] Same `(nullifier, x, y, requestDigest)` is idempotent and returns the stored response/status without a second OpenRouter forward. Same nullifier with different `x` is recorded as `fork_detected`, rejected before forwarding, and yields slash evidence.
+- [ ] Same nullifier and `x` with a different `y` is rejected before forwarding and recorded as an integrity/collision alert, but does not enter the exact-retry path or produce invalid two-point slash evidence.
+- [ ] Two independently randomized valid Groth16 proofs for the same ticket/request have different proof hashes but follow the exact-retry path; `proofHash` is never the idempotency or fork-classification key.
+- [ ] Two concurrent requests with the same unseen nullifier are transactionally serialized: at most one reaches OpenRouter; a different-`x` loser preserves valid slash evidence, while an exact duplicate receives the idempotent result/status.
+- [ ] The fixed Starter deposit amount is enforced by the contract; a smaller or arbitrary amount cannot enter the membership tree and acquire the 100-ticket statement.
+- [ ] Spend accepts only the current active root or an unexpired additive-update grace root; slash/withdraw remove membership and invalidate every root that still contains the removed commitment.
+- [ ] A proof from a slashed or withdrawn identity fails even if it was generated against a formerly valid historical root.
+- [x] Indexed-ticket, slash, and withdrawal-removal artifacts are generated
+  for BLS12-381; each final zkey is verified against its current R1CS and
+  exports the committed VK. The new contract accepts only the fresh RLN
+  four-signal, slash nine-signal, and membership three-signal layouts.
+- [ ] Contract stores separate spend, slash/removal, and membership-transition VKs; each valid proof succeeds only under its matching key/layout and fails under every other key.
+- [ ] Legacy `H(secret_k, epoch)` proofs and the legacy verification key are rejected by the new gateway/contract.
+
+### Browser ticket allocator and recovery
+- [ ] IndexedDB reserves ticket indices atomically under concurrent calls and never allocates one index twice.
+- [ ] A crash after reservation marks/skips the ambiguous ticket instead of reusing it and risking self-slash.
+- [ ] Mnemonic recovery reconstructs used indices locally by comparing all 100 derived ticket nullifiers with the public spent-ticket event set; candidate nullifiers are not submitted as an identity-linked batch to the gateway.
+- [ ] Recovery's global spent-ticket snapshot includes accepted-pending and on-chain nullifiers, accepts no candidate query, and prevents reuse during the asynchronous settlement window.
+- [ ] Two consecutive playground prompts reserve different indices, generate different nullifiers, return two assistant answers, and update usage `0 -> 1 -> 2`.
+- [ ] The anonymous call path uses only the shared compatibility bearer and proof; no request lookup can join that bearer or accepted call to a billing commitment.
+- [ ] Dashboard used/reserved/skipped/remaining counts are computed from IndexedDB plus public events; `/v1/status/:commitment` returns funding status only and no server-derived call count.
 
 ### Fee-sponsor service (new)
 - [x] Valid slash transaction targeting the configured contract method is fee-bumped and returned. (covers happy path — verified M2.4: `fee-relay.test.ts` 9)
@@ -58,12 +148,17 @@ description: Verification plan for the public testnet launch - hosted deployment
 - [x] Stale cache falls back to an on-chain read. (M2.2 — server test with mocked adapter: miss → `is_nullifier_spent` fallback → 403 + durable spent record)
 - [x] Stripe webhook event ID is idempotent across retries. (covers v1 OQ billing, M2.3)
 - [x] API-key issuance record does not link commitment to calls (privacy boundary). (M2.2 — accepted_calls/nullifier_records carry no commitment column)
+- [ ] Replace the legacy nullifier row with a spent-ticket record containing first `x`, `y`, request digest, proof hash, response/status, and fork state; migration preserves historical rows as legacy data without treating them as indexed tickets.
+- [ ] Exact-retry cache stores no prompt body, encrypts the OpenRouter response at rest, expires response content after the configured short TTL, and retains only digest/provider ID/settlement metadata.
+- [ ] Provider receipt capture retains the OpenRouter generation ID plus redacted model/provider/token/cost/latency metadata, exposes no upstream bearer or prompt/completion content, and labels the receipt as operator-authenticated operational evidence rather than a signed public attestation.
+- [ ] Prove at the schema and handler layers that the shared compatibility credential has no commitment field or join path to billing/deposit records.
 
 ### Proof self-verification (new)
 - [x] Shared `generateRlnProofSelfVerified` implemented: proves then locally verifies against the injected rln VK; throws `ProofSelfVerificationError` (for both `false` results and thrown snarkjs errors) and returns nothing on failure (code wired into `scripts/e2e-test.js` client path). (covers self-verify)
 - [x] Valid RLN proof is self-verified + sent — verified against the artifact set (shared package 12/12). (covers self-verify happy path)
 - [x] A deliberately malformed proof (wrong VK) fails local verification and is never sent — verified; rejection is `ProofSelfVerificationError`. (covers error handling)
 - [ ] Gateway re-verifies and rejects a proof that passed client verify but is stale (old root) — hosted E2E (M3.3/M4.1), depends on a running gateway + on-chain state; out of the local M1.3 scope.
+- [ ] Browser and gateway self-verify/re-verify the new four-signal indexed-ticket statement `[root, nullifier, x, y]`; tests using the legacy five-signal epoch statement fail closed.
 
 ### Isomorphic shared crypto (new)
 - [x] Poseidon/witness-core functions implemented in `packages/zk-credits-shared` (MiMCSponge aside: the circuit hash in this codebase is MiMCSponge, not Poseidon) — pure functions tested in Node vitest: secret_k gen, BIP-39 mnemonic derive/recover, Fr field reduction. (covers isomorphism of the pure crypto core)
@@ -82,25 +177,27 @@ description: Verification plan for the public testnet launch - hosted deployment
 - [ ] Browser proof path (HOSTED): `web/public/circuits/*` served such that `computeCommitment` runs against the hosted app — hosted E2E (M4.1).
 
 ### Existing v1 (retained/replaced)
-- [ ] Gateway proof-relay, OpenRouter adapter, session token (JWT) - retained.
-- [ ] Contract deposit/spend/slash/withdraw - retained (Rust unit tests).
-- [ ] Circuit prove/verify - retained; in-memory state tests replaced by durable equivalents.
+- [ ] OpenRouter provider adapter, fee sponsorship, withdrawal, and unaffected durable-storage behavior are retained.
+- [ ] Contract deposit/spend/slash tests are rewritten for fixed denomination, unique ticket nullifiers, idempotent retry, and ticket-fork slashing.
+- [ ] Epoch RLN circuit/prove/verify fixtures are replaced by indexed-ticket fixtures; historical artifacts remain only as migration evidence and are never served by the launch frontend.
 
 ## Integration Tests
 **How do we test component interactions?**
 
-- [ ] Gateway + PostgreSQL: accepted call persists across a forced restart; settlement queue resumes.
-- [ ] Gateway + Soroban: proof relay verifies on-chain; `NullifierSpent` event invalidates the cache.
-- [ ] Fee-sponsor + Soroban: fee-bumped slash transaction lands on-chain; 50/50 split verifiable.
+- [ ] Gateway + PostgreSQL: accepted ticket and its OpenRouter response persist across a forced restart; exact retry returns that result and settlement resumes without a second upstream forward.
+- [ ] Gateway + Soroban: two distinct ticket proofs from one identity both verify and emit distinct `NullifierSpent` events; event reconciliation preserves first-share metadata.
+- [ ] Gateway + Soroban root lifecycle: a slash/withdraw transition updates active membership, revokes unsafe grace roots, and causes all later proofs from that commitment to fail without a call-path commitment lookup.
+- [ ] Fee-sponsor + Soroban: two different requests using the same private ticket index produce a valid fee-bumped slash transaction and verifiable 50/50 split.
 - [ ] Fee-sponsor + Soroban: fee-bumped withdraw transaction lands on-chain; full amount transferred.
 - [ ] Web + Stripe + gateway: checkout -> webhook -> deposit flow is idempotent across webhook retries.
-- [ ] Browser + gateway: self-verified proof accepted; proof-free / replay calls rejected with correct status codes.
+- [ ] Browser + gateway: two distinct self-verified ticket proofs are accepted; proof-free and body/proof mismatch requests are rejected; exact retry is idempotent; ticket fork is rejected and flagged for slash.
 
 ## End-to-End Tests
 **What user flows need validation?**
 
-- [ ] **Public demo (hosted testnet):** a tester visits the public Vercel URL, signs in with GitHub, buys $5 test credits (Stripe test), sets `OPENAI_BASE_URL`/`OPENAI_API_KEY`, runs `claude "..."`, and receives a real Claude response. (covers the 5-minute demo)
-- [ ] **Slash (hosted testnet):** a simulated over-quota violation is slashed permissionlessly via the fee-relay; the 50/50 treasury/reporter split is verifiable on Stellar testnet.
+- [ ] **Public demo (hosted testnet):** a tester visits the public Vercel URL, signs in, buys the fixed $5 Starter package, submits two different playground prompts from one browser identity, receives two real OpenRouter answers, observes usage `0 -> 1 -> 2` and remaining tickets `100 -> 99 -> 98`, inspects each generation ID/redacted provider receipt, and sees the OpenRouter Logs link with the authenticated-operator caveat.
+- [ ] **Idempotent retry (hosted testnet):** replaying the exact first request/proof returns its stored response/status, does not call OpenRouter again, does not decrement remaining tickets again, and does not create slash evidence.
+- [ ] **Ticket-fork slash (hosted testnet):** a dedicated attack fixture uses one private ticket index for two different request digests; the second is not forwarded, `secret_k` is recovered through the slash proof, and a fee-sponsored 50/50 slash lands on Stellar testnet.
 - [ ] **Withdraw (hosted testnet):** an unslashed user withdraws unused test credits to a chosen Stellar address via the fee-relay, without acquiring XLM.
 - [ ] **Restart durability (hosted testnet):** the Render gateway is restarted mid-session; the tester's next call succeeds and no accepted call is lost or duplicated.
 - [ ] `scripts/e2e-test.js` passes against the public deployment.
@@ -112,7 +209,7 @@ description: Verification plan for the public testnet launch - hosted deployment
 - Stellar testnet funded accounts: gateway, treasury, reporter, user, fee-sponsor (disposable testnet keys).
 - Stripe test-mode webhook fixtures (event IDs, checkout sessions).
 - Circom circuit fixtures: valid/invalid proof vectors, witness vectors.
-- Fixture mnemonics (test-only), fixed UTC epochs, Merkle trees/witnesses.
+- Fixture mnemonics (test-only), ticket indices `0`, `1`, `99`, and invalid `100`, canonical request vectors, Merkle trees/witnesses, exact-retry pairs, and ticket-fork pairs.
 - Mock OpenRouter responses for non-live E2E; real OpenRouter for the hosted demo.
 - PostgreSQL test schemas (isolated from any production schema).
 
@@ -159,6 +256,8 @@ description: Verification plan for the public testnet launch - hosted deployment
 
 ## Acceptance evidence (2026-08-10)
 
+> Legacy evidence below demonstrates hosting, checkout, browser proving, OpenRouter, and Stellar serialization, but it does **not** satisfy the revised launch gate. The one-call epoch proof and `nullifier_spent` replay behavior must be replaced by the indexed-ticket evidence above.
+
 - [x] OpenRouter credential: a real `openai/gpt-4o-mini` request returned HTTP 200 with choices and no provider error; the key was never printed.
 - [x] Gateway/upstream path: a temporary acceptance test generated and locally self-verified a real RLN Groth16 proof, sent it through `/v1/chat/completions` to OpenRouter, received a real response, and replayed the same proof; the replay returned 403 `nullifier_spent`.
 - [x] Credit boundary: valid proofs for an unfunded commitment return 402 `credits_required`, do not forward upstream, and do not enter the durable accepted-call store. The dashboard status endpoint now reports the active Soroban deposit amount/status instead of a hardcoded zero.
@@ -170,3 +269,12 @@ description: Verification plan for the public testnet launch - hosted deployment
 - [x] Soroban spend-argument regressions: public signals are explicitly serialized as `u256`, and the event watcher emits the topic as base64 ScVal XDR; both have focused TDD coverage.
 - [x] Hosted funded call after BLS, proof-shape, and signal-serialization fixes: both Render services are live on `c02891c`; Playwright completed the hosted sign-in → API-key → Stripe test checkout path, the gateway returned a real OpenRouter response, and the live Soroban contract emitted two `NullifierSpent` events using the corrected event filter. Legacy pre-fix queued rows still fail with `RootMismatch` and are intentionally excluded from acceptance fixtures.
 - [x] Dashboard status proxy: a fresh no-payment Playwright check returned the same HTTP 200 `unfunded` status and zero balance from Vercel `/api/dashboard/status` and the direct Render gateway, ruling out a Vercel/Render proxy mismatch for the earlier checkout UI symptom.
+- [x] Browser LLM playground (2026-08-10, live Playwright interaction): local production web build served the dashboard UI; a fresh testnet-funded identity was transferred into the browser test context without exposing the secret in output; clicking `Generate response` visibly entered `Sending to OpenRouter…`, returned `ZK API Credits works.`, reported `self-verified proof` with ~24.7s end-to-end latency, and refreshed usage from `0` to `1` call with `99` remaining. The gateway health/upstream path was the hosted Render service, not a mock; console errors were 0.
+- [x] LLM playground shell regression: `web/e2e/dashboard.spec.ts` asserts the signed-in dashboard exposes the `LLM Playground` heading and labeled `Prompt` textbox, including the safe disabled state when gateway configuration is absent.
+
+## Indexed-ticket rollout validation (2026-08-11)
+
+- [x] Deposit rollback RED/GREEN: a mocked on-chain rejection initially increased `merkleTree.getLeafCount()` from 0 to 1. The staged-tree fix leaves both the root and leaf count unchanged. Gateway + Merkle regression suite: 54/54; full gateway suite: 142 passed, 11 skipped; strict typecheck passed.
+- [x] Shared proof suite: 19/19 passed. Web unit suite: 17/17 passed; strict typecheck and optimized Next build passed. Contract deployment transaction test passed.
+- [x] Soroban contract suite: 24/24 passed with `cargo +1.92.0 test`. The default local Cargo 1.79 remains too old for the Edition 2024/Soroban 26 dependency graph.
+- [ ] Hosted indexed-ticket acceptance is intentionally not claimed yet. The live Render gateway is still serving committed revision `42ef3d1`, whose five-signal endpoint rejects the current four-signal proofs before OpenRouter forwarding. The validated source revision must be pushed and redeployed before re-running two-ticket, exact-retry, fork/slash, withdrawal, and restart checks.

@@ -120,6 +120,16 @@ export class MerkleTree {
     return this.root();
   }
 
+  clone(): MerkleTree {
+    const copy = Object.create(MerkleTree.prototype) as MerkleTree;
+    copy.layers = this.layers.map((layer) => [...layer]);
+    return copy;
+  }
+
+  replaceWith(tree: MerkleTree): void {
+    this.layers = tree.layers.map((layer) => [...layer]);
+  }
+
   root(): bigint {
     return this.layers[TREE_DEPTH][0];
   }

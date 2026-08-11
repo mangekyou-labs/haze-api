@@ -5,6 +5,7 @@ import {
   computeDepositCommitment,
   generateDepositProof,
   generateRlnProofSelfVerified,
+  generateMembershipRemovalProofSelfVerified,
   ProofSelfVerificationError,
   proveGroth16,
   verifyGroth16Proof,
@@ -23,6 +24,12 @@ const rlnWasm = resolve(CIRCUITS_DIR, 'rln_nullifier.wasm');
 const rlnZkey = resolve(CIRCUITS_DIR, 'rln_nullifier_final.zkey');
 const rlnVkPath = resolve(CIRCUITS_DIR, 'verification_key_rln.json');
 const rlnReady = existsSync(rlnZkey) && existsSync(rlnWasm) && existsSync(rlnVkPath);
+const membershipRemovalWasm = resolve(CIRCUITS_DIR, 'membership_removal.wasm');
+const membershipRemovalZkey = resolve(CIRCUITS_DIR, 'membership_removal_final.zkey');
+const membershipRemovalVkPath = resolve(CIRCUITS_DIR, 'verification_key_membership_removal.json');
+const membershipRemovalReady = existsSync(membershipRemovalZkey)
+  && existsSync(membershipRemovalWasm)
+  && existsSync(membershipRemovalVkPath);
 
 const DEPOSIT_INPUT = {
   merkle_path_elements: ['0', '0', '0'],
@@ -100,8 +107,8 @@ describe('proveGroth16 + generateDepositProof + verifyGroth16Proof', () => {
 describe('generateRlnProofSelfVerified', () => {
   const rlnInput = {
     secret_k: '0',
-    signal_value: '0',
-    epoch: '0',
+    ticket_index: '0',
+    request_digest: '0',
     merkle_path_elements: ['0', '0', '0'],
     merkle_path_indices: ['0', '0', '0'],
   };
@@ -118,7 +125,7 @@ describe('generateRlnProofSelfVerified', () => {
         { ...rlnInput, secret_k: skToField(generateSecretK()) },
         resources,
       );
-      expect(result.publicSignals).toHaveLength(5); // [root, nullifier, share_x, share_y, epoch]
+      expect(result.publicSignals).toHaveLength(4); // [root, nullifier, share_x, share_y]
       expect(result.nullifier).toBe(result.publicSignals[1]);
     },
     180_000,
@@ -135,6 +142,52 @@ describe('generateRlnProofSelfVerified', () => {
           rlnResources(wrongVk),
         ),
       ).rejects.toBeInstanceOf(ProofSelfVerificationError);
+    },
+    180_000,
+  );
+
+  it.runIf(rlnReady)(
+    'uses the indexed-ticket four-signal statement and request digest input',
+    async () => {
+      const resources = rlnResources(JSON.parse(readFileSync(rlnVkPath, 'utf-8')));
+      const result = await generateRlnProofSelfVerified(
+        {
+          secret_k: skToField(generateSecretK()),
+          ticket_index: '0',
+          request_digest: '123',
+          merkle_path_elements: ['0', '0', '0'],
+          merkle_path_indices: ['0', '0', '0'],
+        } as never,
+        resources,
+      );
+      expect(result.publicSignals).toHaveLength(4); // [root, nullifier, x, y]
+      expect(result.publicSignals[2]).toBe('123');
+    },
+    180_000,
+  );
+});
+
+describe('generateMembershipRemovalProofSelfVerified', () => {
+  it.runIf(membershipRemovalReady)(
+    'self-verifies the three-signal membership-removal transition before returning it',
+    async () => {
+      const result = await generateMembershipRemovalProofSelfVerified(
+        {
+          secret_k: skToField(generateSecretK()),
+          merkle_path_elements: ['0', '0', '0'],
+          merkle_path_indices: ['0', '0', '0'],
+        },
+        {
+          membershipRemovalWasm,
+          membershipRemovalZkey,
+          membershipRemovalVk: JSON.parse(readFileSync(membershipRemovalVkPath, 'utf-8')),
+        },
+      );
+      expect(result.publicSignals).toHaveLength(3);
+      expect(result.commitment).toBe(result.publicSignals[0]);
+      expect(result.currentRoot).toBe(result.publicSignals[1]);
+      expect(result.nextRoot).toBe(result.publicSignals[2]);
+      expect(result.currentRoot).not.toBe(result.nextRoot);
     },
     180_000,
   );
