@@ -29,6 +29,10 @@ function hexToSecret(value: string): Uint8Array {
 export class IdentityStore {
   constructor(private readonly credentials: CredentialStore = keytar) {}
 
+  async hasIdentity(): Promise<boolean> {
+    return await this.credentials.getPassword(SERVICE, ACCOUNT) !== null;
+  }
+
   async importMnemonic(mnemonic: string): Promise<Uint8Array> {
     const secretK = recoverSecretK(mnemonic);
     if (secretK.length !== 32) throw new Error('Recovery phrase must encode a 32-byte secret');

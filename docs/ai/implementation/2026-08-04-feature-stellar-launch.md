@@ -448,3 +448,22 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
   eventual-consistency window.
 - The local sidecar generated a self-verified proof and completed a real
   `/v1/responses` request with HTTP 200 and response object `response`.
+
+## M5.5 Codex companion and standalone package (2026-08-11)
+
+- Added profile rendering/atomic installation, command-backed bearer output,
+  sidecar health/readiness/startup coordination, Codex process launching, and
+  redacted status composition. The user-facing commands are `setup codex`,
+  `codex`, `status`, and the internal auth command `token`.
+- Added unauthenticated loopback `GET /health` and authenticated
+  `GET /v1/models`; model discovery does not touch the ticket ledger. Paid Chat
+  Completions and Responses behavior is unchanged.
+- The listener now publishes its random token only after a successful bind.
+  Detached startup uses the current executable, an explicit state directory,
+  restrictive logs, bounded health polling, and no inherited terminal handles.
+- Replaced the sibling-package runtime dependency with a 5.7 MiB esbuild ESM
+  executable. The npm package still carries the pinned 8.1 MiB zkey, WASM, and
+  verification manifest and keeps native `keytar` as its sole runtime package
+  dependency.
+- Existing manual `import-mnemonic`, `serve`, and `env` entry points remain for
+  headless or other OpenAI-compatible clients.

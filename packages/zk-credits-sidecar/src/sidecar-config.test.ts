@@ -20,6 +20,7 @@ describe('sidecar configuration', () => {
     expect(sidecarStatePaths('/tmp/zk-credits-test')).toEqual({
       ledgerPath: '/tmp/zk-credits-test/tickets.json',
       tokenPath: '/tmp/zk-credits-test/loopback-token',
+      logPath: '/tmp/zk-credits-test/sidecar.log',
     });
   });
 });

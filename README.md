@@ -117,14 +117,16 @@ node scripts/e2e-test.js
 node scripts/slash-demo.js
 ```
 
-## Use an OpenAI-Compatible Client Through the Sidecar
+## Use ZK Credits with Codex CLI
 
 The first-party sidecar keeps `secret_k`, the recovery phrase, the Merkle
 witness, ticket index, and loopback bearer on the developer machine. Render
 receives only the shared compatibility bearer and a fresh body-bound ZK proof.
-It supports both Chat Completions and the Responses API.
+It supports both Chat Completions and the Responses API. Codex CLI uses the
+Responses endpoint through an isolated `zk-credits` provider profile.
 
-Until the package is published, install it from this checkout:
+The companion requires Node.js 20 or newer. Until the package is published,
+install it from this checkout:
 
 ```bash
 cd packages/zk-credits-sidecar
@@ -132,26 +134,41 @@ npm ci
 npm run build
 npm link
 
-zk-credits import-mnemonic  # prompts on a non-echoing terminal
-zk-credits serve
+zk-credits setup codex
 ```
 
-In a second shell, point an OpenAI-compatible client at the loopback server:
+Setup prompts for the funded identity's 24-word recovery phrase on a
+non-echoing terminal if the identity is not already in the operating-system
+credential store. It writes only an isolated, owner-only Codex profile; the
+random loopback bearer is supplied by a command and is never stored in TOML.
+
+Daily use is one command:
 
 ```bash
+zk-credits codex
+# Any normal Codex arguments also work, for example:
+zk-credits codex exec "summarize this repository"
+```
+
+The command reuses or starts the sidecar in the background, waits until it is
+ready, and then launches `codex --profile zk-credits`. Diagnose local setup
+without starting anything with `zk-credits status`.
+
+For another OpenAI-compatible client, the lower-level flow remains available:
+
+```bash
+zk-credits serve
 eval "$(zk-credits env)"
 # OPENAI_BASE_URL=http://127.0.0.1:3210/v1
-# OPENAI_API_KEY=zk-local-<random-loopback-token>
+# OPENAI_API_KEY=<random-loopback-token>
 ```
 
 `ZK_CREDITS_MNEMONIC` is for a headless process only and is not persisted by
 that path. The package verifies its pinned WASM, proving key, and
 verification-key SHA-256 manifest before it proves; it never downloads proving
-assets at runtime. The sidecar binds only `127.0.0.1`.
-
-Current Codex plugin/app capabilities do not provide a supported custom model
-transport hook, so Codex itself cannot yet be routed through this sidecar. Do
-not use a plugin or TLS-interception workaround to claim Codex support.
+assets at runtime. The sidecar binds only `127.0.0.1`. Codex integration uses
+its supported custom model-provider configuration; it does not install a
+plugin, intercept TLS, or modify the user's default Codex profile.
 
 ## Project Structure
 
@@ -240,7 +257,7 @@ Functions:
 4. **Browser proving:** ~1.5s first call per session, cached after. Acceptable for demo, needs optimization for production.
 5. **Network identity:** v1 hides payment identity, not IP. Tor/client-side relay is v2.
 6. **On-chain VK:** Contract deployed with dummy VK. Gateway verifies off-chain with real VK. Full on-chain verification needs BLS12-381 point serialization.
-7. **Client compatibility:** The sidecar requires a client that supports a custom OpenAI-compatible base URL. Current Codex model traffic has no supported transport override.
+7. **Client compatibility:** Codex CLI is supported through its custom Responses model-provider profile. Other clients must support a custom OpenAI-compatible base URL.
 
 ## Tech Stack
 

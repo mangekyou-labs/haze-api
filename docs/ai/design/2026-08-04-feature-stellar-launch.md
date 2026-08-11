@@ -367,3 +367,24 @@ type StripeEvent = {
 - [Proposal v2](https://hackmd.io/3da7PaYmTqmNTTwqxVidRg) and the [RLN protocol documentation](https://rate-limiting-nullifier.github.io/rln-docs/rln.html) support the same two-share recovery model.
 - [Stellar CAP-0059](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0059.md) supplies BLS12-381 host operations. Groth16/BLS12-381 changes the proof-system realization, not the paper's ticket/nullifier statement.
 - [OpenRouter's generation endpoint](https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation) requires bearer authentication and returns generation/provider/usage metadata. [OpenRouter Logs](https://openrouter.ai/docs/guides/overview/report-feedback) can reconcile a generation ID within the operator account; neither is treated as a signed public receipt.
+
+## M5.5 Codex Companion Design Extension (2026-08-11)
+
+`zk-credits setup codex` atomically creates an owner-only
+`zk-credits.config.toml` beneath the effective Codex home. The profile selects
+the ZK Credits Responses provider at `127.0.0.1:3210/v1` and obtains its bearer
+by invoking `zk-credits token`; no secret is serialized into Codex config.
+
+Both `token` and `codex` pass through one lifecycle boundary: probe the exact
+loopback health contract, spawn one detached `serve` process if needed, poll
+with a bounded timeout, then read the token published after the listener binds.
+A competing process that loses the bind race cannot replace the active token.
+`zk-credits codex` then executes `codex --profile zk-credits` with inherited
+stdio, unchanged trailing arguments, and the child exit status.
+
+The npm artifact bundles the TypeScript shared proof runtime into one ESM CLI,
+keeps native `keytar` external, and ships the pinned circuit files. This removes
+the checkout-relative `file:../zk-credits-shared` runtime dependency while
+retaining it as a development/build dependency. The detailed interaction and
+failure design is in
+`docs/superpowers/specs/2026-08-11-codex-companion-design.md`.

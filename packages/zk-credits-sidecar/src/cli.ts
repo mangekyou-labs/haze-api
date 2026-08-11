@@ -2,11 +2,20 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { launchCodexProcess } from './codex-launcher.js';
+import {
+  isCodexProfileInstalled,
+  resolveCodexHome,
+  writeCodexProfile,
+} from './codex-profile.js';
 import { IdentityStore } from './identity.js';
 import { createLocalProofGenerator } from './local-prover.js';
 import { MembershipClient } from './membership-client.js';
 import { runCliCommand } from './cli-runtime.js';
+import { createNodeSidecarLifecycle } from './node-sidecar-lifecycle.js';
+import { activateSidecarServer } from './server-startup.js';
 import { createLoopbackToken, sidecarStatePaths } from './sidecar-config.js';
+import { ensureSidecarReady } from './sidecar-lifecycle.js';
 import { readLoopbackToken, writeLoopbackToken } from './sidecar-state.js';
 import { createSidecarServer } from './sidecar.js';
 import { TicketLedger } from './ticket-ledger.js';
@@ -76,19 +85,23 @@ async function readHiddenMnemonic(): Promise<string> {
 
 function printHelp(): void {
   console.log(`Usage:
+  zk-credits setup codex [--model <model>]
+  zk-credits codex [codex arguments...]
+  zk-credits status
   zk-credits import-mnemonic
   zk-credits serve [--port <port>]
   eval "$(zk-credits env)"
 
-serve binds only 127.0.0.1. Set ZK_CREDITS_MNEMONIC only for a
-headless process; it is not persisted by that path.`);
+The Codex setup starts the loopback sidecar automatically; daily use is
+"zk-credits codex". serve/env remain available for other OpenAI-compatible
+clients. Set ZK_CREDITS_MNEMONIC only for a headless process; it is not
+persisted by that path.`);
 }
 
 async function serve(args: readonly string[]): Promise<void> {
   const port = readPort(args);
   const statePaths = sidecarStatePaths(stateDirectory());
   const localToken = createLoopbackToken();
-  await writeLoopbackToken(statePaths.tokenPath, localToken);
 
   const identities = new IdentityStore();
   const secretK = await identities.loadSecretK({ headlessMnemonic: process.env.ZK_CREDITS_MNEMONIC });
@@ -104,7 +117,16 @@ async function serve(args: readonly string[]): Promise<void> {
     ledger: new TicketLedger(statePaths.ledgerPath),
     proofGenerator,
   });
-  const address = await sidecar.listen(port);
+  let address: string;
+  try {
+    address = await activateSidecarServer({
+      listen: () => sidecar.listen(port),
+      publishToken: () => writeLoopbackToken(statePaths.tokenPath, localToken),
+    });
+  } catch (error: unknown) {
+    await sidecar.close();
+    throw error;
+  }
   console.log(`ZK Credits sidecar listening on ${address}/v1`);
   console.log('Run eval "$(zk-credits env)" in the client shell.');
 
@@ -128,14 +150,34 @@ async function main(): Promise<void> {
   }
 
   const identities = new IdentityStore();
-  const statePaths = sidecarStatePaths(stateDirectory());
-  await runCliCommand(args, {
+  const sidecarHome = stateDirectory();
+  const statePaths = sidecarStatePaths(sidecarHome);
+  const codexHome = resolveCodexHome(process.env, homedir());
+  const cliEntryPath = process.argv[1];
+  if (!cliEntryPath) throw new Error('Unable to resolve the zk-credits executable path');
+  const lifecycle = createNodeSidecarLifecycle({
+    loopbackBaseUrl: loopbackBaseUrl(),
+    stateDirectory: sidecarHome,
+    tokenPath: statePaths.tokenPath,
+    logPath: statePaths.logPath,
+    cliEntryPath,
+  });
+  const exitCode = await runCliCommand(args, {
     loopbackBaseUrl: loopbackBaseUrl(),
     readToken: () => readLoopbackToken(statePaths.tokenPath),
     importMnemonic: async (mnemonic) => { await identities.importMnemonic(mnemonic); },
     readMnemonic: readHiddenMnemonic,
     write: (line) => console.log(line),
+    isIdentityConfigured: () => identities.hasIdentity(),
+    configureCodex: async (model) => {
+      await writeCodexProfile({ codexHome, loopbackBaseUrl: loopbackBaseUrl(), model });
+    },
+    ensureSidecar: () => ensureSidecarReady(lifecycle),
+    isCodexProfileInstalled: () => isCodexProfileInstalled(codexHome),
+    isSidecarHealthy: () => lifecycle.isHealthy(),
+    launchCodex: (codexArgs) => launchCodexProcess(codexArgs),
   });
+  if (exitCode !== 0) process.exitCode = exitCode;
 }
 
 void main().catch((error: unknown) => {

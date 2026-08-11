@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { DEFAULT_CODEX_MODEL } from './codex-profile.js';
 import { TicketLedger } from './ticket-ledger.js';
 
 const MAX_REQUEST_BYTES = 2_000_000;
@@ -92,11 +93,32 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
   const inFlight = new Set<Promise<void>>();
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
     if (!isLoopbackAddress(req.socket.remoteAddress)) {
       sendJson(res, 403, { error: 'loopback_only' });
       return;
     }
-    if (req.method !== 'POST' || (req.url !== '/v1/chat/completions' && req.url !== '/v1/responses')) {
+    if (req.method === 'GET' && pathname === '/health') {
+      sendJson(res, 200, { service: 'zk-credits-sidecar', status: 'ok' });
+      return;
+    }
+    if (req.method === 'GET' && pathname === '/v1/models') {
+      if (req.headers.authorization !== `Bearer ${options.localToken}`) {
+        sendJson(res, 401, { error: 'invalid_local_token' });
+        return;
+      }
+      sendJson(res, 200, {
+        object: 'list',
+        data: [{
+          id: DEFAULT_CODEX_MODEL,
+          object: 'model',
+          created: 0,
+          owned_by: 'zk-credits',
+        }],
+      });
+      return;
+    }
+    if (req.method !== 'POST' || (pathname !== '/v1/chat/completions' && pathname !== '/v1/responses')) {
       sendJson(res, 404, { error: 'unsupported_openai_path' });
       return;
     }
@@ -112,7 +134,7 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
         ticketIndex: reservation.index,
         request: body.parsed,
       });
-      const upstream = await gatewayFetch(`${gatewayBaseUrl}${req.url}`, {
+      const upstream = await gatewayFetch(`${gatewayBaseUrl}${pathname}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${options.compatibilityKey}`,

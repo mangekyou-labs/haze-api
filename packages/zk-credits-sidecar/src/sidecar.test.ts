@@ -39,6 +39,47 @@ async function startTestSidecar() {
 }
 
 describe('loopback sidecar', () => {
+  it('reports loopback health without spending a ticket or requiring the bearer', async () => {
+    const { address, sidecar, proofGenerator, gatewayFetch } = await startTestSidecar();
+    try {
+      const response = await fetch(`${address}/health`);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        service: 'zk-credits-sidecar',
+        status: 'ok',
+      });
+      expect(proofGenerator).not.toHaveBeenCalled();
+      expect(gatewayFetch).not.toHaveBeenCalled();
+    } finally {
+      await sidecar.close();
+    }
+  });
+
+  it('serves the Codex model probe locally without spending a ticket', async () => {
+    const { address, sidecar, proofGenerator, gatewayFetch } = await startTestSidecar();
+    try {
+      const response = await fetch(`${address}/v1/models?client_version=0.147.0`, {
+        headers: { Authorization: `Bearer ${localToken}` },
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        object: 'list',
+        data: [{
+          id: 'openai/gpt-4o-mini',
+          object: 'model',
+          created: 0,
+          owned_by: 'zk-credits',
+        }],
+      });
+      expect(proofGenerator).not.toHaveBeenCalled();
+      expect(gatewayFetch).not.toHaveBeenCalled();
+    } finally {
+      await sidecar.close();
+    }
+  });
+
   it('rejects a request without the random local bearer before reserving a ticket', async () => {
     const { address, sidecar, proofGenerator, gatewayFetch } = await startTestSidecar();
     try {

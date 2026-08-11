@@ -170,3 +170,19 @@ None. The fixed-cost ticket model, paper-alignment boundary, end-user demo behav
 - [Proposal v2](https://hackmd.io/3da7PaYmTqmNTTwqxVidRg) and [RLN protocol documentation](https://rate-limiting-nullifier.github.io/rln-docs/rln.html) - supporting rationale for RLN share/nullifier behavior.
 - [Stellar CAP-0059](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0059.md) - BLS12-381 host functions used for the Stellar Groth16 realization.
 - [OpenRouter generation metadata](https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation) and [Logs/feedback workflow](https://openrouter.ai/docs/guides/overview/report-feedback) - authenticated provider-side reconciliation boundary for demo receipts.
+
+## M5.5 Codex Companion Requirements (accepted 2026-08-11)
+
+- A user with a funded recovery phrase completes one private setup with
+  `zk-credits setup codex` and starts later sessions with `zk-credits codex`.
+- Setup must not require manual TOML editing, shell exports, a visible local
+  bearer, a Render credential, or a separately managed sidecar process.
+- Codex integration uses an isolated custom Responses provider profile and
+  command-backed authentication. Existing Codex configuration is preserved.
+- Paid routes remain loopback-bearer protected. Health is unprivileged and
+  `/v1/models` is authenticated but must not reserve or consume a ticket.
+- Sidecar startup is detached, race-safe, bounded by a readiness timeout, and
+  writes owner-only state/log files. `status` is diagnostic and has no startup
+  side effect.
+- The distributed package must install without the monorepo sibling package;
+  proof code and pinned circuits remain local, auditable release artifacts.

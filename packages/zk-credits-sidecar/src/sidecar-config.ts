@@ -4,6 +4,7 @@ import { join } from 'node:path';
 export interface SidecarStatePaths {
   ledgerPath: string;
   tokenPath: string;
+  logPath: string;
 }
 
 export function createLoopbackToken(): string {
@@ -14,6 +15,7 @@ export function sidecarStatePaths(stateDirectory: string): SidecarStatePaths {
   return {
     ledgerPath: join(stateDirectory, 'tickets.json'),
     tokenPath: join(stateDirectory, 'loopback-token'),
+    logPath: join(stateDirectory, 'sidecar.log'),
   };
 }
 

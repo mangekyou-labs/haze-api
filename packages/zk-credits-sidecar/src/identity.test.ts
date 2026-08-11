@@ -19,6 +19,15 @@ class FakeCredentialStore implements CredentialStore {
 const testMnemonic = deriveMnemonic(new Uint8Array(32).fill(7));
 
 describe('IdentityStore', () => {
+  it('reports whether an identity is configured without exposing its value', async () => {
+    const credentialStore = new FakeCredentialStore();
+    const identities = new IdentityStore(credentialStore);
+
+    await expect(identities.hasIdentity()).resolves.toBe(false);
+    await identities.importMnemonic(testMnemonic);
+    await expect(identities.hasIdentity()).resolves.toBe(true);
+  });
+
   it('stores only the derived secret and retrieves it after mnemonic import', async () => {
     const credentialStore = new FakeCredentialStore();
     const identities = new IdentityStore(credentialStore);

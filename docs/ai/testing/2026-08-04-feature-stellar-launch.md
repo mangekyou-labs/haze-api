@@ -361,3 +361,24 @@ statement:
   HTTP 200.
 - [x] Public hosted pages and the deployed gateway/fee-sponsor health checks
   remain green after the live validation.
+
+## M5.5 Codex companion verification (2026-08-11)
+
+- [x] TDD coverage for profile isolation/permissions, lifecycle reuse/startup
+  timeout, detached process arguments, token publication after bind, identity
+  presence, CLI setup/token/status/launch behavior, Codex exit propagation,
+  health, authenticated model discovery, and package metadata.
+- [x] Full sidecar suite: 15 files and 39 tests passed.
+- [x] Standalone build produced an executable 5.7 MiB ESM bundle with no
+  checkout path or unresolved `@zk-credits/shared` import.
+- [x] `npm pack` produced an 8.0 MiB tarball (14.2 MiB unpacked, 37 files).
+  Installing that tarball into an empty temporary prefix succeeded; its linked
+  `zk-credits --help` ran without access to the monorepo.
+- [x] With no server running, clean-installed `token` automatically started a
+  detached loopback server from packaged circuits and returned one
+  43-character line. `/health` returned the exact ready contract,
+  authenticated `/v1/models` returned `openai/gpt-4o-mini`, `status` reported
+  the running process without mutation, and both token/log files were `0600`.
+- [x] Codex CLI 0.147.0 accepted the generated isolated profile and selected
+  provider `zk_credits`; the prior funded sidecar `/v1/responses` live check
+  remains the proof/gateway acceptance evidence.

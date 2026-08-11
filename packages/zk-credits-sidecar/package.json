@@ -3,26 +3,30 @@
   "version": "0.1.0",
   "description": "Loopback proof-aware OpenAI transport for ZK Credits.",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
-    "zk-credits": "dist/cli.js"
+    "zk-credits": "dist/zk-credits.js"
   },
   "files": [
     "dist",
     "circuits"
   ],
   "scripts": {
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/bundle.mjs",
     "clean": "node --input-type=module -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
     "test": "vitest run",
-    "start": "node dist/cli.js",
+    "start": "node dist/zk-credits.js",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@zk-credits/shared": "file:../zk-credits-shared",
     "keytar": "^7.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "@zk-credits/shared": "file:../zk-credits-shared",
+    "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

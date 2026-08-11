@@ -142,8 +142,8 @@ checks:
 
 Risks to track: durable membership-tree correctness and no call-to-commitment
 join (M5 release-blocking); stream replay storage/retention; local secret
-storage and loopback exposure; OpenRouter Responses beta compatibility; Codex's
-current lack of a model transport hook; restart-durability + fee-only-authority
+storage and loopback exposure; OpenRouter Responses beta compatibility; Codex
+custom-provider compatibility across CLI releases; restart-durability + fee-only-authority
 guarantees; Render free-tier sleep/restart behavior; GitHub OAuth and Stripe
 retry configuration; and OpenRouter per-key limits.
 
@@ -154,7 +154,7 @@ retry configuration; and OpenRouter per-key limits.
 - [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — DONE: 2.1–2.6 are verified offline and through live M4 spend, fee-bump, withdrawal, and restart evidence.
 - [x] **M3 — Hosted deployment:** Soroban testnet contract, Render gateway/Postgres, Vercel web, Render fee-sponsor service, CI pipeline. — DONE 2026-08-10; optional Blueprint attachment remains for infrastructure drift control.
 - [ ] **M4 — Launch validation + release readiness:** CORE PROTOCOL VALIDATION DONE — current indexed-ticket artifacts, browser/OpenRouter acceptance, fork/slash, withdrawal, and restart durability are verified. GitHub OAuth, Stripe webhook retry, OpenRouter tier review, README/caveat review, and Render cold-start monitoring remain external release-readiness tasks.
-- [ ] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.3 complete locally; M5.4 blocked.** Durable public Merkle snapshots, browser witness repair, proof-bound Responses relay, and a first-party loopback transport for base-URL-configurable clients are implemented. Safe deployment needs an exact legacy snapshot; Codex model-traffic support remains explicitly deferred pending a supported transport hook.
+- [x] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.5 complete.** Durable public Merkle snapshots, browser witness repair, proof-bound Responses relay, hosted/live validation, and a standalone Codex companion are implemented and verified.
 
 ## Task Breakdown
 **What specific work needs to be done?**
@@ -344,10 +344,10 @@ retry configuration; and OpenRouter per-key limits.
   - Outcome: Ship an independent Node package with `zk-credits import-mnemonic`, `serve`, and `env`. It uses OS credential storage (or a one-time headless environment input), no-echo import, a verified packaged circuit-artifact manifest, a local durable ticket ledger, loopback-only binding, and a random local bearer. It exposes Chat Completions and Responses and forwards only freshly generated, locally self-verified proofs to Render.
   - Depends on: 5.0–5.2 and `@zk-credits/shared`.
   - Validation: Unit coverage includes secret-redaction, a credential-store fake, random-token rejection, serialized ticket handling, retry, exhaustion, and circuit-manifest verification. Integration uses a mocked gateway; an `openai` Node client reaches the loopback base URL and raw Responses SSE is consumed successfully.
-  - Scope note: base-URL-configurable clients may use the sidecar. Codex model-traffic support remains deferred until a supported Codex transport/provider hook exists.
+  - Scope note: this task established generic base-URL client support; the isolated Codex custom-provider companion was added and accepted in 5.5.
 
-- [ ] **5.4 Validate, document, and roll out M5.** — LOCAL PACKAGE/CI WORK COMPLETE; RENDER MIGRATION BLOCKED.
-  - Outcome: The sidecar CI job, `npm pack` source/integrity check, setup documentation, and transparent privacy/compatibility limitations are implemented locally. Before deployment, recover the exact `{ leaves, layers }` snapshot for the existing nonzero live Soroban root and set `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT`; otherwise choose an explicitly authorized fresh/reconciled migration. Then deploy the Render relay, validate a real testnet deposit → sidecar → OpenRouter Responses request, and rerun the Chrome/Playwright browser regression. Do not claim that Codex itself uses the transport.
+- [x] **5.4 Validate, document, and roll out M5.** — COMPLETED 2026-08-11.
+  - Outcome: The exact legacy snapshot was recovered and deployed, all seven CI jobs passed, Playwright funded a fresh testnet identity, the sidecar completed a real proof-backed Responses request, and the hosted browser walkthrough passed. Codex-specific packaging followed in 5.5.
   - Depends on: 5.3 plus deployment settings/authority.
   - Validation: Relevant gateway/shared/web/contract/circuit/sidecar jobs are green; a real response consumes one ticket, stores no acceptance-table commitment, and logs no secret. A fresh browser trace passes.
   - Related testing scenarios: package installation; live Responses call; browser regression.
@@ -427,7 +427,7 @@ The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (wh
 | Rebuilt tree state diverges from Soroban after restart or a rejected deposit. | Serialize/stage updates, rebuild from durable leaves, compare active root to contract, and cover rollback/restart with two members. | Block 5.0. |
 | Loopback transport leaks the mnemonic or is exposed beyond the host. | OS credential store, no-echo import/redacted logs, `127.0.0.1` binding, and a random bearer with tests. | Block 5.3. |
 | Responses SSE duplicates/losses an upstream result after retry/restart. | Bind exact request to its accepted ticket, persist a bounded encrypted transcript, and test one-forward-plus-replay semantics. | Block 5.2/5.4. |
-| Users assume a Codex plugin can intercept Codex model traffic. | Document base-URL client scope and defer Codex support until a supported provider/transport hook exists. | Release communication gate. |
+| Users assume a Codex plugin intercepts model traffic or copy a bearer into config. | Use an isolated supported custom-provider profile with command-backed auth; document that no plugin/TLS interception is involved. | Release communication gate. |
 
 ## Resources Needed
 **What do we need to succeed?**
@@ -703,8 +703,9 @@ transport for clients that can set a base URL. Each request is proved locally,
 then verified and settled by the existing Render gateway. The gateway gains a
 proof-bound `/v1/responses` relay alongside Chat Completions. The plan preserves
 the four-signal ticket protocol, does not introduce hosted proof custody or a
-shared/reused proof, and makes no claim that current Codex model traffic can be
-routed through it.
+shared/reused proof, and made no Codex routing claim at the original M5.0–M5.4
+stage. The later approved M5.5 extension adds Codex's supported custom-provider
+path without changing those protocol invariants.
 
 **Implementation order:** close the membership-removal artifact and durable
 Merkle-tree blockers first (5.0); build local witness derivation and the
@@ -808,7 +809,7 @@ designed reconciled migration—not an inferred replacement of the live state.
 **Residual risks:** snapshot recovery is a release gate; leaves-only bootstrap
 is unsafe after removals. Render cold starts/timeouts, OpenRouter Responses
 compatibility and limits, native keychain packaging across host platforms, and
-the absence of a supported Codex provider/transport hook remain explicit
+custom-provider compatibility across Codex CLI releases remain explicit
 operational or compatibility constraints.
 
 ### M5.4 preflight reconciliation (2026-08-11)
@@ -823,3 +824,41 @@ was closed by a Playwright-generated, testnet-funded identity: after waiting
 for Soroban root convergence, the local sidecar completed a real
 OpenAI-compatible Responses request with HTTP 200. The final hosted root is
 `46021224362940611729075082982089263387372490162807947253747211328553024354536`.
+
+### Reconciliation (Dev-Implementation · Codex companion · 2026-08-11)
+
+**Approved scope:** package the existing local proof engine as a Codex-specific
+companion flow. A user performs one private setup and thereafter starts a
+proof-backed Codex session with `zk-credits codex`; they do not manually run
+the sidecar, export a bearer, edit TOML, or handle a Render credential. The
+full design is recorded in
+`docs/superpowers/specs/2026-08-11-codex-companion-design.md`.
+
+**Implementation queue:**
+
+- [x] **5.5a Codex profile and command-backed auth.** Atomically write an
+  isolated owner-only `zk-credits.config.toml` with the loopback Responses
+  provider and `zk-credits token` auth command. Preserve every unrelated Codex
+  file and never persist the bearer in TOML.
+- [x] **5.5b Automatic sidecar lifecycle.** Add a loopback health endpoint,
+  detached startup with restrictive logs, bounded readiness, and token output
+  that is exactly one secret line for the Codex auth subprocess.
+- [x] **5.5c End-user commands.** Add `setup codex`, `status`, and `codex` while
+  retaining `import-mnemonic`, `serve`, and `env`. Setup securely imports a
+  missing identity; launch preserves Codex arguments and exit status.
+- [x] **5.5d Package and acceptance.** Refresh usage/privacy documentation,
+  sidecar package tests and dry run, then exercise a fake-Codex end-to-end dry
+  run. A real funded Codex request is the final credential-dependent check.
+
+**Implementation order:** profile rendering and health behavior first; then
+lifecycle/token; then setup/status/launcher composition; finally documentation,
+package checks, and end-to-end dry run. Every behavior follows RED -> GREEN ->
+refactor with focused evidence before the next item.
+
+**Completion evidence:** all 15 sidecar test files (39 tests) pass; the bundled
+CLI builds and an 8.0 MiB tarball installs into an empty prefix; the installed
+binary starts the packaged sidecar and passes health, authenticated model-list,
+status, and one-line token checks. Codex CLI 0.147.0 accepts the generated
+provider profile. The previously completed funded sidecar Responses request
+remains the live proof/gateway check, so no additional ticket was spent for
+this packaging-only extension.

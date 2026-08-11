@@ -1,7 +1,7 @@
 # Proof-Aware OpenAI Sidecar
 
 **Date:** 2026-08-11
-**Status:** Approved design — pending written-spec review
+**Status:** Implemented; extended by `2026-08-11-codex-companion-design.md`
 **Scope:** First-party local sidecar and Render gateway extensions for proof-backed OpenAI-compatible calls.
 
 ## Goal
@@ -15,12 +15,21 @@ The first release exposes both `POST /v1/chat/completions` and `POST /v1/respons
 - Do not create a second hosted LLM proxy. Render remains the sole public gateway.
 - Do not issue users OpenRouter keys or allow direct OpenRouter calls.
 - Do not reuse one proof for multiple requests or introduce a session credential.
-- Do not claim support for Codex model traffic until Codex offers a supported custom transport/provider hook. A Codex plugin is not a model-request interceptor.
+- Do not implement Codex support as a plugin, TLS interceptor, or mutation of the user's default profile. Codex integration uses its supported custom model-provider profile.
 - Do not attempt network-layer anonymity. This design provides cryptographic unlinkability from deposits and credentials; IP address, timing, and prompt content remain observable by the gateway unless a separate anonymity network is used.
 
 ## User experience
 
-After a one-time import, the agent-facing setup is standard OpenAI configuration:
+Codex CLI users get a one-time setup and one daily command:
+
+```sh
+zk-credits setup codex
+zk-credits codex
+```
+
+The companion starts the loopback server on demand and supplies the random
+local bearer through Codex command-backed authentication. Other
+OpenAI-compatible clients can use the lower-level flow:
 
 ```sh
 zk-credits import-mnemonic
@@ -96,7 +105,7 @@ If a process failure leaves an accepted stream incomplete, the sidecar resubmits
 
 The sidecar is compatible with clients that allow a custom OpenAI-compatible base URL, including standard SDK consumers and agents with `OPENAI_BASE_URL`-style configuration. It exposes the Responses API so it is technically suitable for a client that can point Responses traffic at it.
 
-Current Codex plugin and app facilities do not rewrite Codex model transport. Codex-specific usage therefore remains blocked on a supported custom model-provider/transport hook; a fake plugin or a TLS-intercepting workaround is out of scope.
+Codex CLI is supported through an isolated custom Responses model-provider profile and command-backed authentication. The companion does not claim that Codex plugins or apps intercept model traffic. Other clients still require a configurable OpenAI-compatible base URL.
 
 ## Validation
 
@@ -113,4 +122,4 @@ Current Codex plugin and app facilities do not rewrite Codex model transport. Co
 2. Add and test the shared gateway spend pipeline plus `/v1/responses` and safe streaming replay.
 3. Build the sidecar package, credential import, ticket ledger, and loopback server.
 4. Publish install/configuration documentation and validate against a base-URL-compatible client.
-5. Evaluate Codex again only when a supported transport hook exists; do not represent the sidecar as working with Codex before then.
+5. Add the isolated Codex provider profile, automatic sidecar lifecycle, command-backed auth, and clean-install package acceptance described in the companion design.
