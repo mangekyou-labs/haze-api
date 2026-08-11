@@ -343,6 +343,8 @@ statement:
   the Render credential in the repository.
 - [x] Deploy revision `f0c1b77`, confirm gateway and fee-sponsor health, and
   verify the hosted membership endpoint returns the recovered root.
+- [x] CI run `31497435312` passed all seven jobs, including the Linux sidecar
+  credential-store test after installing `libsecret-1-0`.
 - [ ] Complete a funded sidecar Responses request and the Chrome/Playwright
   walkthrough. The public Vercel walkthrough is complete; the funded sidecar
   portion requires the recovery phrase for the active testnet commitment.

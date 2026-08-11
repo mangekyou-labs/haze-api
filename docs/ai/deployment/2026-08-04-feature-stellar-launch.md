@@ -343,6 +343,11 @@ Rollback triggers: health check failure ≥3 consecutive intervals, E2E smoke fa
   `/recover` with the expected rendered content.
 - A funded sidecar `/v1/responses` request remains pending until the active
   testnet commitment's recovery phrase is available.
+- CI run `31497435312` for `69b31ce` completed successfully across all seven
+  jobs after the sidecar workflow installed Ubuntu's `libsecret-1-0` runtime.
+- The follow-up Render deployments for `69b31ce` were
+  `dep-d9tico37uimc73cm4c6g` (gateway) and `dep-d9tico37uimc73cm4ci0`
+  (fee sponsor); both reached `live`.
 
 ## M5.4 Render bootstrap preflight (2026-08-11)
 

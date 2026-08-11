@@ -432,5 +432,8 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Pushed source revision `f0c1b77`; the Render gateway and fee-sponsor
   deployments reached `live`, and the hosted PostgreSQL bootstrap now returns
   the recovered root through `/v1/membership-tree`.
+- Added the Ubuntu `libsecret-1-0` runtime to the sidecar CI job after the
+  hosted runner exposed a missing `keytar` shared library; the complete
+  seven-job CI run for `69b31ce` passed.
 - The funded sidecar Responses call remains credential-gated: no recovery
   phrase for the active on-chain commitment is present in this workspace.
