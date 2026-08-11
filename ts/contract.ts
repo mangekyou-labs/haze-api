@@ -127,6 +127,22 @@ function getContract(): Contract {
   return new Contract(CONTRACT_ID);
 }
 
+/**
+ * Soroban contract invocations need simulation-derived resources and auth
+ * entries before the inner source signs. Fee-bumped slash/withdraw envelopes
+ * are submitted by another account, but their inner transaction still must be
+ * fully prepared and signed by its required source.
+ */
+export async function prepareAndSignEnvelope(
+  server: Pick<SorobanRpc.Server, 'prepareTransaction'>,
+  transaction: Parameters<SorobanRpc.Server['prepareTransaction']>[0],
+  keypair: Keypair,
+): Promise<string> {
+  const prepared = await server.prepareTransaction(transaction);
+  prepared.sign(keypair);
+  return prepared.toEnvelope().toXDR('base64');
+}
+
 // ─── Read functions (simulate, no signing needed) ──────────────
 
 export async function getDepositCount(): Promise<number> {
@@ -199,8 +215,7 @@ export async function buildWithdrawEnvelope(
     .setTimeout(30)
     .build();
 
-  tx.sign(keypair);
-  return tx.toEnvelope().toXDR('base64');
+  return prepareAndSignEnvelope(server, tx, keypair);
 }
 
 // Permissionless slash transaction builder. The reporter signs the inner
@@ -231,8 +246,7 @@ export async function buildSlashEnvelope(
     .setTimeout(30)
     .build();
 
-  tx.sign(keypair);
-  return tx.toEnvelope().toXDR('base64');
+  return prepareAndSignEnvelope(server, tx, keypair);
 }
 
 export async function getDeposit(

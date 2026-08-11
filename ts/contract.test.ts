@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { scValToNative, xdr } from '@stellar/stellar-sdk';
 import {
   groth16ProofToScVal,
   groth16PublicSignalsToScVal,
   nullifierSpentEventFilter,
+  prepareAndSignEnvelope,
 } from './contract.js';
 
 const fixtureProof = {
@@ -63,5 +64,22 @@ describe('Groth16 Soroban proof serialization', () => {
 
     expect(typeof topic).toBe('string');
     expect(xdr.ScVal.fromXDR(topic as string, 'base64').sym().toString()).toBe('NullifierSpent');
+  });
+});
+
+describe('fee-relayed Soroban envelopes', () => {
+  it('prepares an inner transaction before signing its source account', async () => {
+    const prepared = {
+      sign: vi.fn(),
+      toEnvelope: () => ({ toXDR: () => 'prepared-envelope-xdr' }),
+    };
+    const server = { prepareTransaction: vi.fn().mockResolvedValue(prepared) };
+    const unprepared = { toEnvelope: () => ({ toXDR: () => 'unprepared-envelope-xdr' }) };
+    const signer = { publicKey: () => 'GTEST' };
+
+    await expect(prepareAndSignEnvelope(server as never, unprepared as never, signer as never))
+      .resolves.toBe('prepared-envelope-xdr');
+    expect(server.prepareTransaction).toHaveBeenCalledWith(unprepared);
+    expect(prepared.sign).toHaveBeenCalledWith(signer);
   });
 });

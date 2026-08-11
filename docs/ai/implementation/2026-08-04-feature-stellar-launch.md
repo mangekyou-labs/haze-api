@@ -347,3 +347,8 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - A live duplicate-deposit attempt was rejected on-chain with `DuplicateCommitment`, but exposed that the gateway had already mutated its process-local Merkle tree before awaiting the contract transaction. A later deposit would therefore propose a root that did not represent the contract state.
 - `ts/server.ts` now stages each deposit against a cloned tree, submits the contract transaction, and replaces the live tree only after success. A small in-process queue serializes those stage/commit operations so two concurrent requests cannot derive competing roots.
 - `ts/merkle.ts` supplies defensive clone/replace operations. The behavior is covered at the HTTP boundary: the new test first failed because a rejected contract call increased the leaf count, then passes with both root and leaf count unchanged.
+
+## Prepared fee-relay envelopes (2026-08-11)
+
+- Live slash validation reached the fee sponsor but the submitted fee bump was rejected as malformed. The inner Soroban transaction had been signed before `prepareTransaction()` added its simulation-derived resources and authorization entries.
+- `buildSlashEnvelope()` and `buildWithdrawEnvelope()` now share `prepareAndSignEnvelope()`: prepare first, then attach the inner source signature, then hand the resulting XDR to the fee-only sponsor.
