@@ -12,6 +12,7 @@ export interface CliCommandDependencies {
   isCodexProfileInstalled(): Promise<boolean>;
   isSidecarHealthy(): Promise<boolean>;
   launchCodex(args: readonly string[]): Promise<number>;
+  launchCline(args: readonly string[], localToken: string): Promise<number>;
 }
 
 function setupModel(args: readonly string[]): string | undefined {
@@ -68,7 +69,15 @@ export async function runCliCommand(
       await dependencies.ensureSidecar();
       return dependencies.launchCodex(args.slice(1));
     }
+    case 'cline': {
+      if (!await dependencies.isIdentityConfigured()) {
+        await dependencies.importMnemonic(await dependencies.readMnemonic());
+        dependencies.write('ZK Credits identity imported into the system credential store.');
+      }
+      const localToken = await dependencies.ensureSidecar();
+      return dependencies.launchCline(args.slice(1), localToken);
+    }
     default:
-      throw new Error('Usage: zk-credits <setup codex|codex|status|token|import-mnemonic|serve|env>');
+      throw new Error('Usage: zk-credits <cline|setup codex|codex|status|token|import-mnemonic|serve|env>');
   }
 }

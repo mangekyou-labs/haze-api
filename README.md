@@ -117,20 +117,19 @@ node scripts/e2e-test.js
 node scripts/slash-demo.js
 ```
 
-## Use ZK Credits with Codex CLI
+## Use ZK Credits with Cline CLI
 
 The first-party sidecar keeps `secret_k`, the recovery phrase, the Merkle
 witness, ticket index, and loopback bearer on the developer machine. Render
 receives only the shared compatibility bearer and a fresh body-bound ZK proof.
-It supports both Chat Completions and the Responses API. Codex CLI uses the
-Responses endpoint through an isolated `zk-credits` provider profile.
+It supports both Chat Completions and the Responses API. Cline uses Chat
+Completions through an isolated `openai-compatible` provider profile.
 
-The companion requires Node.js 20 or newer. Install it globally, then run the
-one-time Codex setup:
+The companion requires Node.js 20 or newer and the Cline CLI. Install both:
 
 ```bash
+npm install --global cline
 npm install --global zk-credits
-zk-credits setup codex
 ```
 
 Contributors can instead install it from this checkout:
@@ -142,27 +141,32 @@ npm run build
 npm link
 ```
 
-Setup prompts for the funded identity's 24-word recovery phrase on a
-non-echoing terminal if the identity is not already in the operating-system
-credential store. It writes only an isolated, owner-only Codex profile; the
-random loopback bearer is supplied by a command and is never stored in TOML.
-
-Daily use is one command:
+Run Cline through ZK Credits with one command:
 
 ```bash
-zk-credits codex
-# Any normal Codex arguments also work, for example:
-zk-credits codex exec "summarize this repository"
+zk-credits cline "summarize this repository"
+# Any normal Cline arguments also work:
+zk-credits cline --json "audit this package"
 ```
 
-The command reuses or starts the sidecar in the background, waits until it is
-ready, and then launches `codex --profile zk-credits`. Diagnose local setup
-without starting anything with `zk-credits status`.
+On first use, the command prompts for the funded identity's 24-word recovery
+phrase on a non-echoing terminal if it is not already in the operating-system
+credential store. It then reuses or starts the sidecar, writes an owner-only
+Cline profile below `~/.zk-credits`, and launches Cline with provider
+`openai-compatible`, `OPENAI_BASE_URL=http://127.0.0.1:3210/v1`, and the random
+local API key. It does not use Cline's default model provider or modify the
+user's normal `~/.cline` profile.
 
-This flow is live-validated with Codex CLI 0.147.0: a normal `codex exec`
-request generated its proof locally, passed the hosted Render verifier, and
-returned an upstream model response without exposing the identity or loopback
-bearer.
+This flow is live-validated with Cline CLI 3.0.51: a headless `--json` request
+used provider `openai-compatible`, returned a real upstream model answer, and
+durably consumed its proof ticket through the hosted Render verifier.
+
+The existing Codex companion remains available for users who want it:
+
+```bash
+zk-credits setup codex
+zk-credits codex
+```
 
 For another OpenAI-compatible client, the lower-level flow remains available:
 
@@ -176,9 +180,9 @@ eval "$(zk-credits env)"
 `ZK_CREDITS_MNEMONIC` is for a headless process only and is not persisted by
 that path. The package verifies its pinned WASM, proving key, and
 verification-key SHA-256 manifest before it proves; it never downloads proving
-assets at runtime. The sidecar binds only `127.0.0.1`. Codex integration uses
-its supported custom model-provider configuration; it does not install a
-plugin, intercept TLS, or modify the user's default Codex profile.
+assets at runtime. The sidecar binds only `127.0.0.1`. The coding-agent
+integrations use supported custom provider configuration; they do not install
+a plugin, intercept TLS, or replace the user's default agent profile.
 
 ## Project Structure
 

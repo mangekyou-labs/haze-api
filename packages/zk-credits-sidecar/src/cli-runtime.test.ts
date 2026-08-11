@@ -19,6 +19,7 @@ function dependencies(
     isCodexProfileInstalled: async () => true,
     isSidecarHealthy: async () => true,
     launchCodex: async () => 0,
+    launchCline: async () => 0,
     ...overrides,
   };
 }
@@ -139,5 +140,42 @@ describe('CLI commands', () => {
     }))).rejects.toThrow('Run zk-credits setup codex first');
 
     expect(ensureSidecar).not.toHaveBeenCalled();
+  });
+
+  it('starts the sidecar and launches Cline with the active local token', async () => {
+    const ensureSidecar = vi.fn(async () => 'private-cline-token');
+    const launchCline = vi.fn(async () => 19);
+    const write = vi.fn();
+
+    await expect(runCliCommand(
+      ['cline', '--json', 'explain this repository'],
+      dependencies({ ensureSidecar, launchCline, write }),
+    )).resolves.toBe(19);
+
+    expect(ensureSidecar).toHaveBeenCalledOnce();
+    expect(launchCline).toHaveBeenCalledWith(
+      ['--json', 'explain this repository'],
+      'private-cline-token',
+    );
+    expect(write.mock.calls.flat().join('\n')).not.toContain('private-cline-token');
+  });
+
+  it('imports a missing identity before the first Cline launch', async () => {
+    const mnemonic = 'private recovery phrase that must remain hidden';
+    const importMnemonic = vi.fn(async () => undefined);
+    const launchCline = vi.fn(async () => 0);
+    const write = vi.fn();
+
+    await runCliCommand(['cline', 'hello'], dependencies({
+      isIdentityConfigured: async () => false,
+      readMnemonic: async () => mnemonic,
+      importMnemonic,
+      launchCline,
+      write,
+    }));
+
+    expect(importMnemonic).toHaveBeenCalledWith(mnemonic);
+    expect(launchCline).toHaveBeenCalledOnce();
+    expect(write.mock.calls.flat().join('\n')).not.toContain(mnemonic);
   });
 });
