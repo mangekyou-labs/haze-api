@@ -414,9 +414,9 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
   signed slash XDR that the sponsor validates. The gateway applies that
   transition to its durable membership snapshot only after the sponsor accepts
   the slash, matching withdrawal removal behavior.
-- These local source changes are not deployed. The remaining M5.4 gate is
-  PostgreSQL/bootstrap migration, Render deployment, a real Responses call
-  through the sidecar, and the required interactive Chrome walkthrough.
+- At the preflight checkpoint, PostgreSQL/bootstrap migration, Render
+  deployment, a real Responses call through the sidecar, and the required
+  interactive Chrome walkthrough remained open; those gates are closed below.
 
 ## M5.4 Render bootstrap preflight (2026-08-11)
 
@@ -435,5 +435,16 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Added the Ubuntu `libsecret-1-0` runtime to the sidecar CI job after the
   hosted runner exposed a missing `keytar` shared library; the complete
   seven-job CI run for `69b31ce` passed.
-- The funded sidecar Responses call remains credential-gated: no recovery
-  phrase for the active on-chain commitment is present in this workspace.
+
+## M5.4 live Playwright + sidecar validation (2026-08-11)
+
+- Playwright generated a fresh 24-word browser identity and held the phrase
+  only in the test process; it was never logged or written to the repository.
+- The gateway accepted a 5 USDC testnet deposit for the generated commitment
+  at leaf `2`, transaction
+  `d34e9387f7b49157f173cb49ca1204e3f7b5daaeb4f9dbfffab3215cf96f2e4e`.
+- The test waited for Soroban's current root to converge with the gateway's
+  updated public snapshot before proving, closing the observed deployment
+  eventual-consistency window.
+- The local sidecar generated a self-verified proof and completed a real
+  `/v1/responses` request with HTTP 200 and response object `response`.

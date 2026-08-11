@@ -348,3 +348,16 @@ statement:
 - [ ] Complete a funded sidecar Responses request and the Chrome/Playwright
   walkthrough. The public Vercel walkthrough is complete; the funded sidecar
   portion requires the recovery phrase for the active testnet commitment.
+
+## M5.4 live validation reconciliation (2026-08-11)
+
+- [x] Playwright generated a fresh browser identity without exposing its
+  recovery phrase; the generated commitment was funded through the testnet
+  gateway deposit path.
+- [x] Waited for the Soroban current root to match the gateway snapshot after
+  the deposit.
+- [x] Started the sidecar with the phrase in process memory, generated a
+  self-verified RLN proof, and completed a real `/v1/responses` request with
+  HTTP 200.
+- [x] Public hosted pages and the deployed gateway/fee-sponsor health checks
+  remain green after the live validation.

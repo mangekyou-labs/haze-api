@@ -349,6 +349,19 @@ Rollback triggers: health check failure ≥3 consecutive intervals, E2E smoke fa
   `dep-d9tico37uimc73cm4c6g` (gateway) and `dep-d9tico37uimc73cm4ci0`
   (fee sponsor); both reached `live`.
 
+## M5.4 live sidecar validation (2026-08-11)
+
+- Playwright generated a fresh 24-word browser identity in an isolated
+  context; the phrase remained process-only.
+- The gateway accepted a 5 USDC testnet deposit at leaf `2` in transaction
+  `d34e9387f7b49157f173cb49ca1204e3f7b5daaeb4f9dbfffab3215cf96f2e4e`.
+- After waiting for root convergence, the local sidecar completed a real
+  OpenAI-compatible `/v1/responses` call with HTTP 200 and response object
+  `response`.
+- The final hosted contract/membership root is
+  `46021224362940611729075082982089263387372490162807947253747211328553024354536`;
+  the gateway reports six total deposits and the public tree matches it.
+
 ## M5.4 Render bootstrap preflight (2026-08-11)
 
 - Replayed the live contract history to recover the exact seven-leaf snapshot

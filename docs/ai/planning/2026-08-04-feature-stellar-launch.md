@@ -819,4 +819,7 @@ matches `get_current_root`, and the one-time Render bootstrap environment
 variable is configured with the full `{root, depth, leaves, layers}` payload.
 Revision `f0c1b77` is deployed to both Render services, and the hosted
 PostgreSQL bootstrap/root checks pass. The remaining credential-dependent gate
-is one funded sidecar Responses request through an OpenAI-compatible client.
+was closed by a Playwright-generated, testnet-funded identity: after waiting
+for Soroban root convergence, the local sidecar completed a real
+OpenAI-compatible Responses request with HTTP 200. The final hosted root is
+`46021224362940611729075082982089263387372490162807947253747211328553024354536`.
