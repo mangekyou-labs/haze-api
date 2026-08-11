@@ -461,9 +461,19 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - The listener now publishes its random token only after a successful bind.
   Detached startup uses the current executable, an explicit state directory,
   restrictive logs, bounded health polling, and no inherited terminal handles.
-- Replaced the sibling-package runtime dependency with a 5.7 MiB esbuild ESM
-  executable. The npm package still carries the pinned 8.1 MiB zkey, WASM, and
-  verification manifest and keeps native `keytar` as its sole runtime package
-  dependency.
+- Replaced the sibling-package runtime dependency with a 39.6 KiB esbuild ESM
+  executable. Path-sensitive proving libraries remain normal npm runtime
+  dependencies (`@scure/bip39`, `circomlibjs`, `snarkjs`, and native `keytar`)
+  so their Node worker and native-module paths resolve correctly after
+  installation. The package still carries the pinned 8.1 MiB zkey, WASM, and
+  verification manifest.
+- Codex model discovery now returns Codex's `models` catalog schema instead of
+  an OpenAI list object. The Render gateway accepts bounded JSON bodies up to
+  2,000,000 bytes so Codex's skill/plugin instructions survive the relay while
+  retaining an explicit request-size ceiling.
+- Revision `73df52b` deployed through the Render-tracked branch. A real Codex
+  CLI 0.147.0 `exec` request then generated and self-verified a local proof,
+  received HTTP 200 through `/v1/responses`, consumed local ticket index `2`,
+  and returned exactly `ZK Credits Codex works.`.
 - Existing manual `import-mnemonic`, `serve`, and `env` entry points remain for
   headless or other OpenAI-compatible clients.

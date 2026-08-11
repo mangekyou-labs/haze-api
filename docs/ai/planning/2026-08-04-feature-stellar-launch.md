@@ -855,10 +855,11 @@ lifecycle/token; then setup/status/launcher composition; finally documentation,
 package checks, and end-to-end dry run. Every behavior follows RED -> GREEN ->
 refactor with focused evidence before the next item.
 
-**Completion evidence:** all 15 sidecar test files (39 tests) pass; the bundled
-CLI builds and an 8.0 MiB tarball installs into an empty prefix; the installed
-binary starts the packaged sidecar and passes health, authenticated model-list,
-status, and one-line token checks. Codex CLI 0.147.0 accepts the generated
-provider profile. The previously completed funded sidecar Responses request
-remains the live proof/gateway check, so no additional ticket was spent for
-this packaging-only extension.
+**Completion evidence:** all 15 sidecar test files (39 tests) pass; the
+39,588-byte CLI launcher builds and a 6,083,920-byte tarball installs into an empty
+prefix; the installed binary starts the packaged sidecar and passes health,
+authenticated model-list, status, and one-line token checks. Codex CLI 0.147.0
+accepts the generated provider profile and catalog. After TDD fixes for
+path-sensitive proof dependencies and Codex-sized gateway bodies, revision
+`73df52b` deployed to Render and a real `zk-credits codex exec` request exited
+0 with the exact requested response; local ticket index `2` is consumed.

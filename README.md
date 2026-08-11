@@ -154,6 +154,11 @@ The command reuses or starts the sidecar in the background, waits until it is
 ready, and then launches `codex --profile zk-credits`. Diagnose local setup
 without starting anything with `zk-credits status`.
 
+This flow is live-validated with Codex CLI 0.147.0: a normal `codex exec`
+request generated its proof locally, passed the hosted Render verifier, and
+returned an upstream model response without exposing the identity or loopback
+bearer.
+
 For another OpenAI-compatible client, the lower-level flow remains available:
 
 ```bash

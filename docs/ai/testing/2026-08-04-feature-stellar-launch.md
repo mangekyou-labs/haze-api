@@ -369,10 +369,19 @@ statement:
   presence, CLI setup/token/status/launch behavior, Codex exit propagation,
   health, authenticated model discovery, and package metadata.
 - [x] Full sidecar suite: 15 files and 39 tests passed.
-- [x] Standalone build produced an executable 5.7 MiB ESM bundle with no
-  checkout path or unresolved `@zk-credits/shared` import.
-- [x] `npm pack` produced an 8.0 MiB tarball (14.2 MiB unpacked, 37 files).
-  Installing that tarball into an empty temporary prefix succeeded; its linked
+- [x] Standalone build produced an executable 39,588-byte ESM launcher with no
+  checkout path or unresolved `@zk-credits/shared` import. Path-sensitive
+  proving/native libraries are package dependencies so Node workers and
+  `keytar` resolve from the installed package rather than from bundled paths.
+- [x] `npm pack --dry-run` produced a 6,083,920-byte tarball (8,276,935 bytes
+  unpacked, 36 files).
+- [!] `npm audit --omit=dev` reports 19 production dependency findings
+  (13 low, 2 moderate, 4 high, 0 critical), all in the legacy
+  `circomlibjs`/ethers/jsonpath dependency graph. npm's advertised remediation
+  changes `circomlibjs` across versions and is not applied automatically;
+  dependency replacement or an upstream release remains a distribution risk
+  to resolve before treating the package as production-hardened.
+- [x] Installing that tarball into an empty temporary prefix succeeded; its linked
   `zk-credits --help` ran without access to the monorepo.
 - [x] With no server running, clean-installed `token` automatically started a
   detached loopback server from packaged circuits and returned one
@@ -380,5 +389,11 @@ statement:
   authenticated `/v1/models` returned `openai/gpt-4o-mini`, `status` reported
   the running process without mutation, and both token/log files were `0600`.
 - [x] Codex CLI 0.147.0 accepted the generated isolated profile and selected
-  provider `zk_credits`; the prior funded sidecar `/v1/responses` live check
-  remains the proof/gateway acceptance evidence.
+  provider `zk_credits`. TDD regressions cover Codex's `models` response shape
+  and 256 KB gateway requests; the latter failed with HTTP 413 before the
+  bounded 2 MB parser limit and passed afterward.
+- [x] Revision `73df52b` reached the hosted Render gateway. The exact end-user
+  command `zk-credits codex exec ...` exited 0, returned exactly
+  `ZK Credits Codex works.`, and left local ticket index `2` in `consumed`
+  state. Failed compatibility probes reserved indices `0` and `1` without
+  marking them consumed, preserving the no-reassignment ambiguity rule.
