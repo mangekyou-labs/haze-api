@@ -25,6 +25,10 @@ export interface ProviderResponse {
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const FLAT_COST_PER_CALL = 1000n;
 
+function openRouterPath(endpoint: ProviderEndpoint): string {
+  return endpoint === 'chat.completions' ? 'chat/completions' : 'responses';
+}
+
 export class OpenRouterAdapter implements ProviderAdapter {
   id = 'openrouter';
 
@@ -33,7 +37,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
     providerAuth: string,
     endpoint: ProviderEndpoint = 'chat.completions',
   ): Promise<Response> {
-    const response = await fetch(`${OPENROUTER_BASE_URL}/${endpoint}`, {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/${openRouterPath(endpoint)}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${providerAuth}`,

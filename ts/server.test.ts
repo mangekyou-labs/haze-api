@@ -344,6 +344,38 @@ describe('gateway server', () => {
       expect(await store.getCallCount('0xdurable')).toBe(0);
     });
 
+    it('returns and records a structured upstream error when the provider body is not JSON', async () => {
+      sharedVerify.verify.mockResolvedValue(true);
+      adapterMock.forward.mockResolvedValueOnce(new Response('<!DOCTYPE html><title>Not Found</title>', {
+        status: 404,
+        headers: { 'Content-Type': 'text/html' },
+      }));
+      const body = { model: 'test', messages: [{ role: 'user', content: 'hello' }] };
+
+      const first = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', await proofHeaderFor(body, 'non-json-upstream'))
+        .send(body);
+      const second = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', await proofHeaderFor(body, 'non-json-upstream'))
+        .send(body);
+
+      expect(first.status).toBe(404);
+      expect(first.body).toEqual({
+        error: 'upstream_non_json_response',
+        message: 'The upstream provider returned HTTP 404 with a non-JSON body.',
+      });
+      expect(second.status).toBe(404);
+      expect(second.body).toEqual(first.body);
+      expect(adapterMock.forward).toHaveBeenCalledOnce();
+      const [accepted] = await getGatewayStore().listAcceptedCalls();
+      expect(accepted.responseStatus).toBe(404);
+      expect(accepted.responseBody).toEqual(first.body);
+    });
+
     it('rejects a replayed nullifier (durable replay protection)', async () => {
       sharedVerify.verify.mockResolvedValue(true);
       const keyRes = await request(app)

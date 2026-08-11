@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   OpenRouterAdapter,
   MockProviderAdapter,
@@ -45,6 +45,28 @@ describe('ProviderAdapter interface', () => {
     it('computeCost returns flat rate', () => {
       const adapter = new OpenRouterAdapter();
       expect(adapter.computeCost!({})).toBe(1000n);
+    });
+
+    it.each([
+      ['chat.completions', 'https://openrouter.ai/api/v1/chat/completions'],
+      ['responses', 'https://openrouter.ai/api/v1/responses'],
+    ] as const)('maps %s to the OpenRouter HTTP path', async (endpoint, expectedUrl) => {
+      const fetchMock = vi.fn(async () => new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const adapter = new OpenRouterAdapter();
+        await adapter.forwardRequest({ model: 'test' }, 'sk-test', endpoint);
+
+        expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ Authorization: 'Bearer sk-test' }),
+        }));
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it.skip('forwardRequest returns 401 without API key (manual integration test)', async () => {

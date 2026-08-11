@@ -136,7 +136,7 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
         body: body.raw,
       });
       await relayGatewayResponse(res, upstream);
-      if (upstream.status >= 200 && upstream.status < 300) {
+      if (upstream.status >= 200 && upstream.status < 300 && upstream.status !== 202) {
         await options.ledger.consume(reservation.requestDigest);
       }
     } catch (error: unknown) {

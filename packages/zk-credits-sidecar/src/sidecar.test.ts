@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +35,7 @@ async function startTestSidecar() {
     gatewayFetch,
   });
   const address = await sidecar.listen(0);
-  return { address, sidecar, proofGenerator, gatewayFetch };
+  return { address, directory, sidecar, proofGenerator, gatewayFetch };
 }
 
 describe('loopback sidecar', () => {
@@ -124,6 +124,33 @@ describe('loopback sidecar', () => {
           'X-ZK-Proof': expect.any(String),
         }),
       }));
+    } finally {
+      await sidecar.close();
+    }
+  });
+
+  it('keeps a ticket reserved while the gateway response is still pending', async () => {
+    const { address, directory, sidecar, gatewayFetch } = await startTestSidecar();
+    gatewayFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      accepted: true,
+      status: 'pending',
+    }), { status: 202, headers: { 'Content-Type': 'application/json' } }));
+    try {
+      const response = await fetch(`${address}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: 'test', messages: [{ role: 'user', content: 'hello' }] }),
+      });
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toMatchObject({ status: 'pending' });
+      const ledger = JSON.parse(await readFile(join(directory, 'tickets.json'), 'utf8')) as {
+        entries: Array<{ index: number; state: string }>;
+      };
+      expect(ledger.entries).toEqual([{ index: 0, requestDigest: expect.any(String), state: 'reserved' }]);
     } finally {
       await sidecar.close();
     }

@@ -402,6 +402,24 @@ async function relaySseTranscript(
   }
 }
 
+async function readProviderJsonResponse(upstream: globalThis.Response): Promise<{
+  status: number;
+  body: unknown;
+}> {
+  const rawBody = await upstream.text();
+  try {
+    return { status: upstream.status, body: JSON.parse(rawBody) as unknown };
+  } catch {
+    return {
+      status: upstream.ok ? 502 : upstream.status,
+      body: {
+        error: 'upstream_non_json_response',
+        message: `The upstream provider returned HTTP ${upstream.status} with a non-JSON body.`,
+      },
+    };
+  }
+}
+
 async function relayProofBoundRequest(
   req: Request,
   res: Response,
@@ -540,13 +558,19 @@ async function relayProofBoundRequest(
       await relaySseTranscript(res, upstream, acceptedCall);
       return;
     }
-    const upstreamBody = await upstream.json();
+    const providerResponse = await readProviderJsonResponse(upstream);
+    const upstreamBody = providerResponse.body;
     const generationId = upstream.headers.get('x-generation-id') ??
       (typeof upstreamBody === 'object' && upstreamBody !== null && 'id' in upstreamBody
         ? String((upstreamBody as { id?: unknown }).id ?? '')
         : undefined);
-    await gatewayStore.recordProviderResponse(acceptedCall.proofHash, upstream.status, upstreamBody, generationId);
-    res.status(upstream.status).json(upstreamBody);
+    await gatewayStore.recordProviderResponse(
+      acceptedCall.proofHash,
+      providerResponse.status,
+      upstreamBody,
+      generationId,
+    );
+    res.status(providerResponse.status).json(upstreamBody);
   } catch (err) {
     console.error('/v1/chat/completions error:', err);
     res.status(500).json({ error: 'internal_error' });
