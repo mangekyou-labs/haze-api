@@ -65,13 +65,13 @@ describe('loopback sidecar', () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
-        object: 'list',
-        data: [{
-          id: 'openai/gpt-4o-mini',
-          object: 'model',
-          created: 0,
-          owned_by: 'zk-credits',
-        }],
+        models: [expect.objectContaining({
+          slug: 'openai/gpt-4o-mini',
+          display_name: 'GPT-4o Mini (ZK Credits)',
+          visibility: 'list',
+          supported_in_api: true,
+          base_instructions: expect.any(String),
+        })],
       });
       expect(proofGenerator).not.toHaveBeenCalled();
       expect(gatewayFetch).not.toHaveBeenCalled();

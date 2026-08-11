@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { DEFAULT_CODEX_MODEL } from './codex-profile.js';
+import { codexModelsResponse } from './codex-profile.js';
 import { TicketLedger } from './ticket-ledger.js';
 
 const MAX_REQUEST_BYTES = 2_000_000;
@@ -107,15 +107,7 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
         sendJson(res, 401, { error: 'invalid_local_token' });
         return;
       }
-      sendJson(res, 200, {
-        object: 'list',
-        data: [{
-          id: DEFAULT_CODEX_MODEL,
-          object: 'model',
-          created: 0,
-          owned_by: 'zk-credits',
-        }],
-      });
+      sendJson(res, 200, codexModelsResponse());
       return;
     }
     if (req.method !== 'POST' || (pathname !== '/v1/chat/completions' && pathname !== '/v1/responses')) {

@@ -13,6 +13,12 @@ describe('sidecar package distribution', () => {
 
     expect(packageJson.bin?.['zk-credits']).toBe('dist/zk-credits.js');
     expect(packageJson.dependencies?.['@zk-credits/shared']).toBeUndefined();
+    expect(packageJson.dependencies).toMatchObject({
+      '@scure/bip39': expect.any(String),
+      circomlibjs: expect.any(String),
+      keytar: expect.any(String),
+      snarkjs: expect.any(String),
+    });
     expect(packageJson.devDependencies?.['@zk-credits/shared']).toBe('file:../zk-credits-shared');
     expect(packageJson.scripts?.build).toContain('scripts/bundle.mjs');
     expect(packageJson.scripts?.start).toBe('node dist/zk-credits.js');

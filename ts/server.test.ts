@@ -153,6 +153,15 @@ describe('gateway server', () => {
   });
 
   describe('POST /v1/chat/completions', () => {
+    it('accepts Codex-sized JSON request bodies before authentication', async () => {
+      const res = await request(app)
+        .post('/v1/responses')
+        .send({ model: 'test', instructions: 'x'.repeat(256_000), input: [] });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('missing_authorization');
+    });
+
     it('rejects missing auth', async () => {
       const res = await request(app)
         .post('/v1/chat/completions')

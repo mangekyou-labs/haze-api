@@ -8,6 +8,13 @@ const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputPath = resolve(packageDirectory, 'dist/zk-credits.js');
 const entryPoint = resolve(packageDirectory, 'dist/cli.js');
 const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
+const runtimeExternalPackages = ['@scure/bip39', 'circomlibjs', 'keytar', 'snarkjs'];
+
+function isRuntimeExternal(path) {
+  return runtimeExternalPackages.some((packageName) => (
+    path === packageName || path.startsWith(`${packageName}/`)
+  ));
+}
 
 const resolveBareImportsWithoutPnp = {
   name: 'resolve-bare-imports-without-pnp',
@@ -19,7 +26,7 @@ const resolveBareImportsWithoutPnp = {
       if (nodeBuiltins.has(args.path)) {
         return { path: args.path, external: true };
       }
-      if (args.path === 'keytar') {
+      if (isRuntimeExternal(args.path)) {
         return { path: args.path, external: true };
       }
 
@@ -44,7 +51,7 @@ await build({
   banner: {
     js: "import { createRequire as __createNodeRequire } from 'node:module'; const require = __createNodeRequire(import.meta.url);",
   },
-  external: ['keytar'],
+  external: runtimeExternalPackages.flatMap((packageName) => [packageName, `${packageName}/*`]),
   plugins: [resolveBareImportsWithoutPnp],
   legalComments: 'external',
   logLevel: 'warning',

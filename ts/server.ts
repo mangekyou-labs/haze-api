@@ -258,7 +258,7 @@ async function isCompatibilityBearer(value: string): Promise<boolean> {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: 2_000_000 }));
 
 // ─── Provider adapter setup ──────────────────────────────────────
 
