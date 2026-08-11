@@ -271,7 +271,7 @@ Functions:
 4. **Browser proving:** ~1.5s first call per session, cached after. Acceptable for demo, needs optimization for production.
 5. **Network identity:** v1 hides payment identity, not IP. Tor/client-side relay is v2.
 6. **On-chain VK:** Contract deployed with dummy VK. Gateway verifies off-chain with real VK. Full on-chain verification needs BLS12-381 point serialization.
-7. **Client compatibility:** Codex CLI is supported through its custom Responses model-provider profile. Other clients must support a custom OpenAI-compatible base URL.
+7. **Client compatibility:** `zk-credits cline` manages an isolated Cline OpenAI-compatible profile automatically; the Codex companion remains supported. Other clients must accept a custom OpenAI-compatible base URL.
 
 ## Tech Stack
 
