@@ -74,6 +74,8 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: packages/zk-credits-sidecar/package-lock.json
+      - name: Install Linux keytar runtime
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-0
       - name: Build @zk-credits/shared package (file dependency)
         working-directory: packages/zk-credits-shared
         run: npm ci && npm run build
