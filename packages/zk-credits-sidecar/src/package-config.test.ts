@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 describe('sidecar package distribution', () => {
   it('builds a standalone executable without a checkout-local runtime dependency', async () => {
     const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
+      name?: string;
       bin?: Record<string, string>;
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
@@ -11,6 +12,7 @@ describe('sidecar package distribution', () => {
       scripts?: Record<string, string>;
     };
 
+    expect(packageJson.name).toBe('zk-credits');
     expect(packageJson.bin?.['zk-credits']).toBe('dist/zk-credits.js');
     expect(packageJson.dependencies?.['@zk-credits/shared']).toBeUndefined();
     expect(packageJson.dependencies).toMatchObject({

@@ -1,5 +1,5 @@
 {
-  "name": "@zk-credits/sidecar",
+  "name": "zk-credits",
   "version": "0.1.0",
   "description": "Loopback proof-aware OpenAI transport for ZK Credits.",
   "type": "module",

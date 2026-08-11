@@ -125,16 +125,21 @@ receives only the shared compatibility bearer and a fresh body-bound ZK proof.
 It supports both Chat Completions and the Responses API. Codex CLI uses the
 Responses endpoint through an isolated `zk-credits` provider profile.
 
-The companion requires Node.js 20 or newer. Until the package is published,
-install it from this checkout:
+The companion requires Node.js 20 or newer. Install it globally, then run the
+one-time Codex setup:
+
+```bash
+npm install --global zk-credits
+zk-credits setup codex
+```
+
+Contributors can instead install it from this checkout:
 
 ```bash
 cd packages/zk-credits-sidecar
 npm ci
 npm run build
 npm link
-
-zk-credits setup codex
 ```
 
 Setup prompts for the funded identity's 24-word recovery phrase on a
