@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   canonicalizeRequest,
+  deriveMembershipWitness,
   deriveMnemonic,
   deriveTicketSignals,
   generateSecretK,
+  mimcHash,
   recoverSecretK,
   requestDigestToField,
   skToField,
@@ -132,5 +134,55 @@ describe('paper-aligned indexed tickets', () => {
     const secret = generateSecretK();
     await expect(deriveTicketSignals(secret, -1, request)).rejects.toThrow('ticket index');
     await expect(deriveTicketSignals(secret, 100, request)).rejects.toThrow('ticket index');
+  });
+});
+
+describe('public membership snapshots', () => {
+  it('derives the real path for the second indexed leaf', async () => {
+    const parent = await mimcHash([11n, 22n]);
+    const upper = await mimcHash([BigInt(parent), 0n]);
+    const root = await mimcHash([BigInt(upper), 0n]);
+    const witness = await deriveMembershipWitness('22', {
+      root,
+      depth: 3,
+      leaves: ['11', '22', '0', '0', '0', '0', '0', '0'],
+    });
+
+    expect(witness).toEqual({
+      root,
+      leafIndex: 1,
+      merklePathElements: ['11', '0', '0'],
+      merklePathIndices: ['1', '0', '0'],
+    });
+  });
+
+  it('rejects a snapshot whose leaves do not reproduce its claimed root', async () => {
+    await expect(deriveMembershipWitness('22', {
+      root: '123',
+      depth: 3,
+      leaves: ['11', '22', '0', '0', '0', '0', '0', '0'],
+    })).rejects.toThrow(/root/i);
+  });
+
+  it('uses persisted layers when a removed branch cannot be rebuilt from leaves alone', async () => {
+    const removedBranch = await mimcHash([0n, 0n]);
+    const activeBranch = await mimcHash([202n, 0n]);
+    const upper = await mimcHash([BigInt(removedBranch), BigInt(activeBranch)]);
+    const root = await mimcHash([BigInt(upper), 0n]);
+
+    const witness = await deriveMembershipWitness('202', {
+      root,
+      depth: 3,
+      leaves: ['0', '0', '202', '0', '0', '0', '0', '0'],
+      layers: [
+        ['0', '0', '202', '0', '0', '0', '0', '0'],
+        [removedBranch, activeBranch, '0', '0'],
+        [upper, '0'],
+        [root],
+      ],
+    });
+
+    expect(witness.merklePathElements).toEqual(['0', removedBranch, '0']);
+    expect(witness.merklePathIndices).toEqual(['0', '1', '0']);
   });
 });

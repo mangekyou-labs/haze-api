@@ -6,8 +6,20 @@ import cors from 'cors';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { OpenRouterAdapter, MockProviderAdapter, registerAdapter, getAdapter } from './providerAdapter.js';
+import {
+  OpenRouterAdapter,
+  MockProviderAdapter,
+  registerAdapter,
+  getAdapter,
+  type ProviderEndpoint,
+} from './providerAdapter.js';
 import { MerkleTree } from './merkle.js';
+import {
+  bootstrapMembershipTreeFromLeaves,
+  bootstrapMembershipTreeFromSnapshot,
+  parseMembershipTreeBootstrapSnapshot,
+  reconstructMembershipTreeFromStore,
+} from './membership-tree.js';
 import { requestDigestToField, verifyGroth16Proof } from '@zk-credits/shared';
 import {
   MemoryGatewayStore,
@@ -22,8 +34,10 @@ import {
   type BillingStore,
 } from './db/index.js';
 import { startSpendWorker, type SpendSubmitter } from './spend-worker.js';
+import { extractSlashTransition } from './fee-relay.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
+const MAX_SSE_REPLAY_BYTES = Number(process.env.MAX_SSE_REPLAY_BYTES ?? 1_000_000);
 
 // ─── Durable store (replaces the v1 in-memory Maps) ────────────
 // Tests/local dev default to the memory store; production startup picks the
@@ -78,11 +92,42 @@ export async function initDurableGatewayStore(
   await runMigrations(pool, migrationsDir);
   const store = new PostgresGatewayStore(pool);
   const state = await reconstructGatewayState(store);
+  let membershipLeaves = await store.listMembershipLeaves();
+  if (env.ZK_CONTRACT_ID) {
+    const contractModule = await import('./contract.js');
+    const chainRoot = await contractModule.getCurrentRoot();
+    if (membershipLeaves.length === 0 && env.MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT) {
+      const snapshot = parseMembershipTreeBootstrapSnapshot(env.MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT);
+      merkleTree.replaceWith(await bootstrapMembershipTreeFromSnapshot(store, snapshot, chainRoot));
+      membershipLeaves = await store.listMembershipLeaves();
+    } else if (membershipLeaves.length === 0 && env.MEMBERSHIP_TREE_BOOTSTRAP_LEAVES) {
+      let bootstrapLeaves: unknown;
+      try {
+        bootstrapLeaves = JSON.parse(env.MEMBERSHIP_TREE_BOOTSTRAP_LEAVES);
+      } catch {
+        throw new Error('MEMBERSHIP_TREE_BOOTSTRAP_LEAVES must be a JSON array of field elements');
+      }
+      if (!Array.isArray(bootstrapLeaves) || !bootstrapLeaves.every((leaf) => typeof leaf === 'string')) {
+        throw new Error('MEMBERSHIP_TREE_BOOTSTRAP_LEAVES must be a JSON array of field elements');
+      }
+      merkleTree.replaceWith(await bootstrapMembershipTreeFromLeaves(store, bootstrapLeaves, chainRoot));
+      membershipLeaves = await store.listMembershipLeaves();
+    } else {
+      merkleTree.replaceWith(await reconstructMembershipTreeFromStore(store, chainRoot));
+    }
+  } else if (membershipLeaves.length > 0) {
+    throw new Error('ZK_CONTRACT_ID is required to verify durable membership-tree state');
+  } else {
+    merkleTree.replaceWith(new MerkleTree());
+  }
   if (state.nullifiers.size > 0 || state.callCounts.size > 0) {
     console.log(
       `[db] Restart reconstruction: ${state.nullifiers.size} nullifiers, ` +
         `${state.callCounts.size} commitments with call counts`,
     );
+  }
+  if (membershipLeaves.length > 0) {
+    console.log(`[db] Restart reconstruction: ${membershipLeaves.length} membership leaves`);
   }
   setGatewayStore(store);
   setBillingStore(new PostgresBillingStore(pool));
@@ -107,6 +152,7 @@ export async function initDurableGatewayStore(
 export async function resetGatewayStoreForTests(): Promise<void> {
   setGatewayStore(new MemoryGatewayStore());
   setBillingStore(new MemoryBillingStore());
+  merkleTree.replaceWith(new MerkleTree());
 }
 
 // ─── Config ──────────────────────────────────────────────────────
@@ -236,9 +282,131 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-// ─── POST /v1/chat/completions (OpenAI-compatible) ──────────────
+// Public, parameter-free snapshot. Clients derive their own path locally;
+// this route deliberately has no commitment/candidate-leaf lookup semantics.
+app.get('/v1/membership-tree', (_req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    root: merkleTree.root().toString(),
+    depth: 3,
+    leaves: merkleTree.getLeaves().map((leaf) => leaf.toString()),
+    // Layers are needed to retain the valid zero-branch state after a
+    // slash/withdrawal. They are deterministic public Merkle data, never a
+    // commitment lookup or a per-caller witness.
+    layers: merkleTree.getLayers().map((layer) => layer.map((node) => node.toString())),
+    generatedAt: new Date().toISOString(),
+  });
+});
 
-app.post('/v1/chat/completions', async (req: Request, res: Response) => {
+// ─── Proof-bound OpenAI-compatible relay ─────────────────────────
+
+type StoredSseTranscript = { kind: 'zk_sse_transcript'; base64: string };
+type StoredUnreplayableStream = { kind: 'zk_sse_unreplayable'; reason: 'replay_limit_exceeded' };
+
+function isStoredSseTranscript(value: unknown): value is StoredSseTranscript {
+  return !!value
+    && typeof value === 'object'
+    && (value as Record<string, unknown>).kind === 'zk_sse_transcript'
+    && typeof (value as Record<string, unknown>).base64 === 'string';
+}
+
+function isStoredUnreplayableStream(value: unknown): value is StoredUnreplayableStream {
+  return !!value
+    && typeof value === 'object'
+    && (value as Record<string, unknown>).kind === 'zk_sse_unreplayable'
+    && (value as Record<string, unknown>).reason === 'replay_limit_exceeded';
+}
+
+function isStreamingRequest(body: unknown): boolean {
+  return !!body && typeof body === 'object' && (body as Record<string, unknown>).stream === true;
+}
+
+function replayStoredProviderResponse(res: Response, status: number, body: unknown): void {
+  if (isStoredSseTranscript(body)) {
+    res.status(status)
+      .set('Content-Type', 'text/event-stream; charset=utf-8')
+      .set('Cache-Control', 'no-cache')
+      .send(Buffer.from(body.base64, 'base64'));
+    return;
+  }
+  if (isStoredUnreplayableStream(body)) {
+    res.status(409).json({
+      error: 'stream_replay_unavailable',
+      message: 'The accepted stream exceeded the bounded replay limit; its ticket remains reserved for this exact request only.',
+    });
+    return;
+  }
+  res.status(status).json(body ?? { accepted: true });
+}
+
+async function relaySseTranscript(
+  res: Response,
+  upstream: globalThis.Response,
+  acceptedCall: AcceptedCall,
+): Promise<void> {
+  const contentType = upstream.headers.get('content-type') || 'text/event-stream; charset=utf-8';
+  res.status(upstream.status)
+    .set('Content-Type', contentType)
+    .set('Cache-Control', 'no-cache');
+
+  if (!upstream.body) {
+    await gatewayStore.recordProviderResponse(
+      acceptedCall.proofHash,
+      upstream.status,
+      { kind: 'zk_sse_transcript', base64: '' },
+      upstream.headers.get('x-generation-id') ?? undefined,
+    );
+    res.end();
+    return;
+  }
+
+  const reader = upstream.body.getReader();
+  const chunks: Buffer[] = [];
+  let replayable = true;
+  let transcriptBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      transcriptBytes += chunk.length;
+      if (replayable && transcriptBytes <= MAX_SSE_REPLAY_BYTES) {
+        chunks.push(chunk);
+      } else {
+        replayable = false;
+        chunks.length = 0;
+      }
+      res.write(chunk);
+    }
+    if (replayable) {
+      await gatewayStore.recordProviderResponse(
+        acceptedCall.proofHash,
+        upstream.status,
+        { kind: 'zk_sse_transcript', base64: Buffer.concat(chunks).toString('base64') },
+        upstream.headers.get('x-generation-id') ?? undefined,
+      );
+    } else {
+      await gatewayStore.recordProviderResponse(
+        acceptedCall.proofHash,
+        upstream.status,
+        { kind: 'zk_sse_unreplayable', reason: 'replay_limit_exceeded' },
+        upstream.headers.get('x-generation-id') ?? undefined,
+      );
+    }
+    res.end();
+  } catch (err) {
+    res.end();
+    throw err;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function relayProofBoundRequest(
+  req: Request,
+  res: Response,
+  providerEndpoint: ProviderEndpoint,
+): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
     const proofHeader = req.headers['x-zk-proof'] as string;
@@ -321,7 +489,7 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
           requestDigest: requestDigest.digest,
         });
         if (stored?.responseStatus !== null && stored?.responseStatus !== undefined) {
-          res.status(stored.responseStatus).json(stored.responseBody ?? { accepted: true });
+          replayStoredProviderResponse(res, stored.responseStatus, stored.responseBody);
           return;
         }
         res.status(202).json({ accepted: true, status: 'pending', nullifier });
@@ -367,7 +535,11 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     await gatewayStore.recordAcceptedCall(acceptedCall, '');
 
     const adapter = getAdapter(OPENROUTER_API_KEY ? 'openrouter' : 'mock')!;
-    const upstream = await adapter.forwardRequest(req.body, OPENROUTER_API_KEY);
+    const upstream = await adapter.forwardRequest(req.body, OPENROUTER_API_KEY, providerEndpoint);
+    if (isStreamingRequest(req.body) && upstream.headers.get('content-type')?.includes('text/event-stream')) {
+      await relaySseTranscript(res, upstream, acceptedCall);
+      return;
+    }
     const upstreamBody = await upstream.json();
     const generationId = upstream.headers.get('x-generation-id') ??
       (typeof upstreamBody === 'object' && upstreamBody !== null && 'id' in upstreamBody
@@ -379,6 +551,14 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     console.error('/v1/chat/completions error:', err);
     res.status(500).json({ error: 'internal_error' });
   }
+}
+
+app.post('/v1/chat/completions', (req: Request, res: Response) => {
+  void relayProofBoundRequest(req, res, 'chat.completions');
+});
+
+app.post('/v1/responses', (req: Request, res: Response) => {
+  void relayProofBoundRequest(req, res, 'responses');
 });
 
 // ─── POST /v1/slash (permissionless → fee sponsor) ─────────────
@@ -397,6 +577,31 @@ app.post('/v1/slash', async (req: Request, res: Response) => {
       return;
     }
 
+    // A successful slash changes the contract root. Mirror only the exact
+    // transition encoded in the signed inner XDR, and only if it reproduces
+    // locally. This keeps the public witness snapshot durable after slashing.
+    let slashRemoval: { leafIndex: number; nextRoot: string; removedTree: MerkleTree } | null = null;
+    if (process.env.ZK_CONTRACT_ID) {
+      const transition = extractSlashTransition(innerTransactionXdr, process.env.ZK_CONTRACT_ID);
+      const membershipLeaf = (await gatewayStore.listMembershipLeaves())
+        .find((leaf) => leaf.commitment === transition.commitment && leaf.status === 'active');
+      if (!membershipLeaf || merkleTree.root().toString() !== transition.currentRoot) {
+        res.status(409).json({ error: 'membership_tree_mismatch' });
+        return;
+      }
+      const removedTree = merkleTree.clone();
+      const computedNextRoot = await removedTree.setLeaf(membershipLeaf.leafIndex, 0n);
+      if (computedNextRoot.toString() !== transition.nextRoot) {
+        res.status(409).json({ error: 'membership_tree_mismatch' });
+        return;
+      }
+      slashRemoval = {
+        leafIndex: membershipLeaf.leafIndex,
+        nextRoot: transition.nextRoot,
+        removedTree,
+      };
+    }
+
     const feeSponsorUrl = process.env.FEE_SPONSOR_URL || 'http://localhost:3002';
     const relayRes = await fetch(`${feeSponsorUrl}/v1/fee-relay`, {
       method: 'POST',
@@ -411,6 +616,19 @@ app.post('/v1/slash', async (req: Request, res: Response) => {
         message: relayData.error ?? 'unknown',
       });
       return;
+    }
+
+    if (relayData.method !== 'slash') {
+      res.status(502).json({ error: 'fee_relay_rejected', message: 'unexpected relay method' });
+      return;
+    }
+    if (slashRemoval) {
+      await gatewayStore.removeMembershipLeaf(
+        slashRemoval.leafIndex,
+        slashRemoval.nextRoot,
+        slashRemoval.removedTree.getLayers().map((layer) => layer.map(String)),
+      );
+      merkleTree.replaceWith(slashRemoval.removedTree);
     }
 
     res.json({
@@ -559,17 +777,35 @@ export async function submitDeposit(
 
   return withDepositLock(async () => {
     const candidateTree = merkleTree.clone();
-    const leafIndex = candidateTree.getLeafCount();
+    const leafIndex = candidateTree.getLeaves().indexOf(0n);
+    if (leafIndex < 0) throw new Error('Tree is full');
     const newRoot = await candidateTree.insert(BigInt(commitment));
 
-    const contractModule = await import('./contract.js');
-    const txHash = await contractModule.deposit(
-      gatewaySecretKey,
+    await gatewayStore.reserveMembershipLeaf({
+      leafIndex,
       commitment,
-      newRoot.toString(),
-      amount.toString(),
-    );
+      candidateRoot: newRoot.toString(),
+    });
 
+    const contractModule = await import('./contract.js');
+    let txHash: string;
+    try {
+      txHash = await contractModule.deposit(
+        gatewaySecretKey,
+        commitment,
+        newRoot.toString(),
+        amount.toString(),
+      );
+    } catch (err) {
+      await gatewayStore.discardPendingMembershipLeaf(leafIndex);
+      throw err;
+    }
+
+    await gatewayStore.activateMembershipLeaf(
+      leafIndex,
+      newRoot.toString(),
+      candidateTree.getLayers().map((layer) => layer.map(String)),
+    );
     merkleTree.replaceWith(candidateTree);
     return { txHash, newRoot: newRoot.toString(), leafIndex };
   });
@@ -715,6 +951,27 @@ app.post('/v1/withdraw', async (req: Request, res: Response) => {
       });
       return;
     }
+    if (
+      typeof commitment !== 'string'
+      || pubSignals.length !== 3
+      || !pubSignals.every((signal) => typeof signal === 'string')
+    ) {
+      res.status(400).json({ error: 'invalid_membership_transition' });
+      return;
+    }
+
+    const membershipLeaf = (await gatewayStore.listMembershipLeaves())
+      .find((leaf) => leaf.commitment === commitment && leaf.status === 'active');
+    if (!membershipLeaf || pubSignals[0] !== commitment || merkleTree.root().toString() !== pubSignals[1]) {
+      res.status(409).json({ error: 'membership_tree_mismatch' });
+      return;
+    }
+    const removedTree = merkleTree.clone();
+    const computedNextRoot = await removedTree.setLeaf(membershipLeaf.leafIndex, 0n);
+    if (computedNextRoot.toString() !== pubSignals[2]) {
+      res.status(409).json({ error: 'membership_tree_mismatch' });
+      return;
+    }
 
     const gatewaySecretKey = process.env.GATEWAY_SECRET_KEY;
     if (!gatewaySecretKey) {
@@ -745,6 +1002,13 @@ app.post('/v1/withdraw', async (req: Request, res: Response) => {
       res.status(502).json({ error: 'fee_relay_rejected', message: relayData.error ?? 'unknown' });
       return;
     }
+
+    await gatewayStore.removeMembershipLeaf(
+      membershipLeaf.leafIndex,
+      computedNextRoot.toString(),
+      removedTree.getLayers().map((layer) => layer.map(String)),
+    );
+    merkleTree.replaceWith(removedTree);
 
     res.json({
       withdrawn: true,

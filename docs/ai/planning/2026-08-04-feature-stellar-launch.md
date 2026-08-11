@@ -11,9 +11,9 @@ description: Ordered implementation plan derived from the approved requirements,
 
 This is the working plan for `stellar-launch`, a parallel track to `feature-mina-protocol-migration`. The existing Stellar v1 codebase (circuits, Soroban contract, gateway, web) is already built; this plan adds the PRXVT-derived hardening (fee sponsorship, durable storage, type safety, self-verify, isomorphism), resolves the six v1 open questions, and takes the result to a public hosted testnet launch.
 
-Tracking: `M1 done` -> `M2 CODE-COMPLETE (live testnet spike pending)` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 IN PROGRESS (indexed-ticket launch gate)` -> `Web UI fix & browser verification DONE (W1–W7)`.
+Tracking: `M1 done` -> `M2 done` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 CORE PROTOCOL VALIDATION DONE (external launch-readiness checks pending)` -> `M5.0–M5.3 proof-aware OpenAI sidecar COMPLETE LOCALLY; M5.4 rollout blocked on safe legacy-tree migration` -> `Web UI & browser verification DONE (W1–W7)`.
 
-### Current Status (reconciled 2026-08-11)
+### Current Status (reconciled 2026-08-11; final browser acceptance)
 
 M1 (Hardening foundation) is **COMPLETE and verified**:
 
@@ -30,17 +30,24 @@ and membership removal has 15,846 / 15,854. Each final zkey was
 contributed, beaconed, and verified against the fresh power-15 transcript;
 the browser copies match the circuit copies byte-for-byte.
 
-M2 (Durable storage + fee sponsorship) is **CODE COMPLETE offline**: 2.1 done (PostgreSQL schemas + migrations + fails-closed config, verified against local Postgres 16); 2.2 done (gateway durable store + server wiring + restart reconstruction + stale-cache on-chain fallback); 2.3 done (billing webhook idempotency); 2.6 done (per-call async `spend()` worker, durable settlement queue); 2.4 done (fee-sponsor service + public fee-relay, method-validation gate, fee-bump + idempotency); 2.5 now requires a browser-generated membership-removal proof in addition to the gateway co-signature. **M2 code complete offline** — live transaction validation waits for fresh artifacts, a redeployed contract, and funded testnet accounts.
+M2 (Durable storage + fee sponsorship) is **COMPLETE and live validated**: PostgreSQL-backed gateway state, billing idempotency, the durable spend worker, fee-only relay authorization, and membership-proof withdrawal are implemented. The hosted M4 pass confirmed on-chain spend settlement, a fee-bumped slash, a fee-bumped withdrawal, and restart recovery; the remaining Stripe retry work is a release-readiness exercise rather than a protocol blocker.
 
 M3 (Hosted deployment) is **COMPLETE for deployment**:
 - **3.5 CI** ✅ DONE 2026-08-05 (final verified run 31026106925 GREEN: all 6 jobs)
-- **3.2 Gateway deployment** ✅ DONE — Render service `zk-credits-gateway` is live at https://zk-credits-gateway.onrender.com with shared Postgres; health and contract-status checks return 200, and the service runs the corrected `c02891c` revision.
-- **3.4 Fee-sponsor deployment** ✅ DONE — Render service `zk-credits-fee-sponsor` is live at https://zk-credits-fee-sponsor.onrender.com and `/health` returns 200; live fee-bump behavior remains an M4 validation task.
-- **3.1 Contract confirm** ✅ VERIFIED 2026-08-10 — the public Render gateway reports the deployed Soroban contract on `stellar:testnet`; corrected hosted spend calls produced `NullifierSpent` events.
-- **3.3 Vercel web** ✅ DEPLOYED — https://feature-zk-api-credits.vercel.app serves the production web app; hosted dev-account sign-in, API-key issuance, Stripe test checkout, status proxy, and dashboard flow were exercised. GitHub OAuth acceptance remains an M4 external-configuration check.
+- **3.2 Gateway deployment** ✅ DONE — Render service `zk-credits-gateway` is live at https://zk-credits-gateway.onrender.com with shared Postgres; current health reports testnet proof verification enabled.
+- **3.4 Fee-sponsor deployment** ✅ DONE — Render service `zk-credits-fee-sponsor` is live and the hosted M4 slash/withdraw flows confirmed live fee bumps.
+- **3.1 Contract confirm** ✅ VERIFIED — the public gateway reports Soroban testnet contract `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`; live spends, slash, and withdrawal read back with their expected on-chain states.
+- **3.3 Vercel web** ✅ DEPLOYED — https://feature-zk-api-credits-gadillacers-projects.vercel.app serves the production web app. Gateway/API-key configuration is live; GitHub OAuth acceptance remains an external configuration check.
 - **3.6 Render Blueprint attachment** ⏭ OPTIONAL — `render.yaml` validates and documents the three resources, but the existing Render services are API/Dashboard-managed rather than Blueprint-attached. Attaching the Blueprint is useful for drift control and must not create duplicate resources.
 
-M4 (Launch validation) is **IN PROGRESS**. The previous hosted epoch-flow evidence is retained as historical evidence only; it does not satisfy the revised indexed-ticket launch gate. The indexed-ticket source, fresh proving artifacts, and fresh on-chain fixtures are complete. The remaining gate is live deployment plus browser-to-gateway/OpenRouter acceptance.
+M4 (Launch validation) has **COMPLETED its protocol gate**. The current four-signal indexed-ticket deployment has live evidence for two provider-backed spends and exact retry, ticket-fork detection plus a fee-sponsored slash, membership-proof withdrawal through the fee sponsor, and accepted-call durability across a Render restart. The historical epoch flow remains migration evidence only.
+
+M5 (Proof-aware OpenAI sidecar) has **M5.0–M5.3 COMPLETE LOCALLY**. It adds a first-party loopback transport for clients that accept an OpenAI-compatible base URL. The private identity and per-request proving stay on the user machine; Render remains the only hosted proof-verifying relay and upstream provider credential holder. Durable full-tree snapshots, browser/sidecar witness derivation, a proof-bound Responses relay, bounded stream replay, and the sidecar package are implemented and locally verified. M5.4 deployment, hosted validation, and Chrome observation are blocked until the exact legacy membership-tree snapshot is recovered or a replacement migration is explicitly authorized. It does not claim to route Codex itself until Codex provides a supported custom model-provider/transport hook.
+
+The remaining release-readiness work is external/operator-managed rather than
+unverified protocol implementation: configure and accept GitHub OAuth, rerun
+the hosted Stripe checkout/webhook-retry path, confirm the OpenRouter account
+tier, perform the README/caveat review, and monitor Render cold-start behavior.
 
 Web UI fix track (user-directed 2026-08-06): **DONE** — W1–W7 implemented, committed in `ba47f4c`, and re-verified locally on 2026-08-09.
 
@@ -98,13 +105,17 @@ launch path.
   generated Soroban proof fixtures.
 - **Done locally:** Real indexed spend, nine-signal slash, and three-signal
   membership-removal fixtures are accepted by the dedicated contract VKs.
-- **Next local gate:** Run the manual Chrome Playwright flow against the built
-  app to observe landing, onboarding/recovery, sign-in, and dashboard states.
-- **Blocked operationally:** Current Render gateway health probes time out,
-  while the fee-sponsor health endpoint returns 200. Recover the gateway before
-  treating historical hosted acceptance evidence as current M4 validation.
-- **Open after local proof:** Update hosted circuit artifacts/deployment and
-  repeat the public indexed-ticket demo, exact retry, and ticket-fork checks.
+- **Done:** Persistent Playwright/Chrome interaction covered landing → sign-in
+  → test-only dev account → browser identity/API key → 5-USDC testnet deposit
+  → self-verified proof → live OpenRouter request. The UI rendered the expected
+  response, marked ticket `0` consumed, refreshed the balance to 99 remaining,
+  and reported zero console errors.
+- **Operational caveat:** Render's public edge can time out transiently while
+  the service control plane reports `live`; retries recovered during the hosted
+  pass. This is a monitoring risk, not a failed protocol check.
+- **External acceptance open:** the hosted production sign-in page correctly
+  disables GitHub OAuth until client credentials are configured. Stripe and
+  OpenRouter account-tier validation require operator-console access.
 
 The earlier manual Playwright run is recorded as a blocker, not acceptance
 evidence: it reached the playground but failed before any gateway/OpenRouter
@@ -114,27 +125,36 @@ is incompatible rather than demonstrating a protocol failure.
 
 ### Next Focus
 
-M3 deployment is complete and focus advances to M4 launch validation:
-1. **Run the local manual Playwright acceptance flow** — observe landing,
-   onboarding/recovery, sign-in, and dashboard states in Chrome. A real
-   OpenRouter answer, self-verified proof state, and ticket decrement still
-   require the recovered gateway and configured live integrations.
-2. **Complete indexed-ticket launch validation** — deploy the newly compiled
-   contract with its fresh VKs, then repeat hosted two-ticket, exact-retry,
-   fork/slash, restart, Stripe/OAuth, and OpenRouter-tier checks.
-3. **After the indexed gate passes:** run the live fee-bumped slash/withdraw
-   spike and optionally attach the
-   existing Render services to the validated Blueprint without duplicates.
+M5.4 is the next focus, before the remaining operator-managed release-readiness
+checks:
+1. **Recover the exact legacy tree snapshot** — retrieve and independently
+   validate the current indexed `leaves` *and* `layers` from a trusted prior
+   gateway/process record, then set `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` for
+   the first upgraded Render start. A leaves-only reconstruction is valid only
+   for additive history and is unsafe after slash/withdraw removal.
+2. **Deploy and observe the migration** — deploy the upgraded gateway only
+   after the snapshot is available, require its root to match Soroban, and
+   test a restart plus the public parameter-free snapshot endpoint.
+3. **Complete M5.4 validation and rollout** — push/observe the seven-job CI,
+   run a funded sidecar `/v1/responses` request, then rerun the Vercel Chrome /
+   Playwright walkthrough. Retain GitHub OAuth, Stripe retry, OpenRouter tier,
+   README/caveat, and Render monitoring checks as independent readiness work.
 
-Risks to track: restart-durability + fee-only-authority guarantees (release-blocking per testing doc); the multi-hour local fresh trusted setup; accidental serving of legacy five-signal artifacts; Render free-tier sleep/restart behavior; legacy pre-fix queue rows; GitHub OAuth and Stripe retry configuration; and OpenRouter per-key limits.
+Risks to track: durable membership-tree correctness and no call-to-commitment
+join (M5 release-blocking); stream replay storage/retention; local secret
+storage and loopback exposure; OpenRouter Responses beta compatibility; Codex's
+current lack of a model transport hook; restart-durability + fee-only-authority
+guarantees; Render free-tier sleep/restart behavior; GitHub OAuth and Stripe
+retry configuration; and OpenRouter per-key limits.
 
 ## Milestones
 **What are the major checkpoints?**
 
 - [x] **M1 — Hardening foundation:** TypeScript strict mode, isomorphic shared crypto package, client-side proof self-verification. (PRXVT guardrails first, so later code builds on a clean base.) — DONE (2026-08-04): 1.0–1.3 all complete and verified.
-- [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — CODE COMPLETE (2026-08-04): 2.1–2.6 all done and verified offline (durable store, restart reconstruction, billing idempotency, spend worker, fee-relay, withdraw co-signer). Remaining: live Stellar testnet spike (pending user-funded keys) before M3.
+- [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — DONE: 2.1–2.6 are verified offline and through live M4 spend, fee-bump, withdrawal, and restart evidence.
 - [x] **M3 — Hosted deployment:** Soroban testnet contract, Render gateway/Postgres, Vercel web, Render fee-sponsor service, CI pipeline. — DONE 2026-08-10; optional Blueprint attachment remains for infrastructure drift control.
-- [ ] **M4 — Launch validation + evidence:** IN PROGRESS — indexed-ticket source path and legacy queue-cleanup migration are implemented; fresh artifacts, real browser/OpenRouter acceptance, fresh contract fixtures, slash/withdrawal, restart durability, OAuth, Stripe retry, README review, and OpenRouter tier checks remain.
+- [ ] **M4 — Launch validation + release readiness:** CORE PROTOCOL VALIDATION DONE — current indexed-ticket artifacts, browser/OpenRouter acceptance, fork/slash, withdrawal, and restart durability are verified. GitHub OAuth, Stripe webhook retry, OpenRouter tier review, README/caveat review, and Render cold-start monitoring remain external release-readiness tasks.
+- [ ] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.3 complete locally; M5.4 blocked.** Durable public Merkle snapshots, browser witness repair, proof-bound Responses relay, and a first-party loopback transport for base-URL-configurable clients are implemented. Safe deployment needs an exact legacy snapshot; Codex model-traffic support remains explicitly deferred pending a supported transport hook.
 
 ## Task Breakdown
 **What specific work needs to be done?**
@@ -258,31 +278,31 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
 
 ### M4 — Launch validation + evidence
 
-- [x] **4.0 Quarantine legacy spend-queue rows.** — CODE COMPLETE / deployment migration pending
+- [x] **4.0 Quarantine legacy spend-queue rows.** — DONE
   - Outcome: Prevent pre-fix accepted calls (BN254-root or positional-proof payloads) from being retried indefinitely; retain their hashes and failure reason for audit, while allowing post-`c02891c` calls to settle.
   - Depends on: 3.2 and the live queue schema.
   - Validation: Memory TDD and local PostgreSQL integration prove legacy rows are durably quarantined and excluded from retries; deployment must apply `0007` before the fresh funded hosted call can close the operational part.
   - Related testing scenarios: gateway + Soroban integration; restart durability.
 
-- [ ] **4.1 Hosted end-to-end demo.** — IN PROGRESS / core funded path verified
-  - Outcome: A public tester visits the Vercel URL, signs in with GitHub, buys $5 test credits (Stripe test), sets `OPENAI_BASE_URL`/`OPENAI_API_KEY`, runs `claude "..."`, and receives a real Claude response via a self-verified ZK-RLN proof.
+- [ ] **4.1 Hosted end-to-end demo.** — PROTOCOL PATH DONE / OAuth + Stripe acceptance pending
+  - Outcome: A browser identity completes the proof-backed OpenRouter path from sign-in through a funded credit and a self-verified indexed-ticket request. GitHub OAuth and Stripe test checkout remain separate hosted acceptance exercises.
   - Depends on: 3.2, 3.3, 3.4.
-  - Validation: Core path passed with a hosted test account: Stripe checkout, real OpenRouter response, replay rejection, and two live `NullifierSpent` events. Remaining acceptance: GitHub OAuth, the committed public demo script, and a clean post-fix queue.
+  - Validation: The persistent Playwright/Chrome run created a browser identity and key, funded it with 5 USDC on testnet, received a real OpenRouter answer after local proof verification, and refreshed usage to 1 used / 99 remaining with no console errors. Two-ticket, exact-retry, and on-chain settlement evidence is recorded in the hosted M4 pass. Remaining acceptance: GitHub OAuth and Stripe checkout/webhook retry.
   - Related testing scenarios: hosted E2E public demo.
 
-- [ ] **4.2 Hosted slash demo.** — blocked on live testnet (M3/M4 encodes; the fee-relay that makes slash permissionless is code-complete offline, 2.4)
+- [x] **4.2 Hosted slash demo.** — DONE 2026-08-11
   - Outcome: A simulated over-quota violation is slashed permissionlessly on testnet via the fee-relay; the 50/50 treasury/reporter split is verifiable on-chain.
   - Depends on: 4.1, 2.4 (fee-relay code DONE — live submission pending).
   - Validation: `scripts/slash-demo.js` passes against the public deployment. (Covers testing: hosted slash E2E.)
   - Related testing scenarios: hosted slash E2E; fee-sponsor + Soroban integration.
 
-- [ ] **4.3 Hosted withdraw demo.** — blocked on live testnet (withdraw co-signer code is done, 2.5)
+- [x] **4.3 Hosted withdraw demo.** — DONE 2026-08-11
   - Outcome: An unslashed user withdraws unused test credits to a chosen Stellar address via a gateway-mediated, fee-sponsored flow (gateway co-signs as depositor; fee-sponsor fee-bumps), without acquiring XLM.
   - Depends on: 4.1, 2.5 (withdraw endpoint code DONE — live broadcast pending).
   - Validation: Withdraw transaction confirmed on Stellar testnet; full amount transferred. (Covers testing: hosted withdraw E2E.)
   - Related testing scenarios: hosted withdraw E2E; fee-sponsor + Soroban integration.
 
-- [ ] **4.4 Restart durability test on the hosted gateway.**
+- [x] **4.4 Restart durability test on the hosted gateway.** — DONE 2026-08-11
   - Outcome: Restart the Render gateway mid-session; the tester's next call succeeds and no accepted call is lost or duplicated; sustain 100 accepted calls across a restart.
   - Depends on: 4.1.
   - Validation: `scripts/e2e-test.js` passes immediately after a restart; 100-call sustained run shows no drops/duplicates. (Covers testing: restart durability hosted; performance.)
@@ -299,6 +319,38 @@ Risks to track: restart-durability + fee-only-authority guarantees (release-bloc
   - Depends on: 4.1.
   - Validation: Documented tier + per-key limit check; no gateway-key rate-limit failures during hosted demo load. (Covers testing: hosted E2E under load.)
   - Related testing scenarios: hosted E2E; performance testing.
+
+### M5 — Proof-aware OpenAI sidecar
+
+- [x] **5.0 Persist the membership tree and publish a privacy-safe snapshot.** — IMPLEMENTED LOCALLY 2026-08-11; deployment/bootstrap validation remains in M5.4.
+  - Outcome: Track the missing membership-removal `.wasm`/`.zkey` artifacts for CI and browser recovery. Add durable gateway membership-tree state (leaf position, commitment, root, and version lifecycle), reconstruct `MerkleTree` at boot, and expose `GET /v1/membership-tree` as `{ root, depth, leaves, layers, generatedAt }`. `layers` is public deterministic tree data required after a removal; the public endpoint accepts no commitment, candidate leaf, API key, or proof. Deposit/slash/withdraw updates serialize durable state, reconcile the rebuilt root with Soroban, and never persist an accepted-call-to-commitment join.
+  - Depends on: M2 durable state and the current active-root contract check.
+  - Validation: A fresh checkout passes the Circuits membership-removal test; unit/integration coverage proves two active leaves, rejected-deposit rollback, restart reconstruction, a snapshot root matching Soroban, and no candidate lookup. The Circuits CI job and a Linux clean install pass.
+  - Related testing scenarios: two-member browser/sidecar membership; restart durability.
+
+- [x] **5.1 Derive witnesses locally in browser/shared crypto.** — IMPLEMENTED LOCALLY 2026-08-11.
+  - Outcome: Extend the isomorphic shared Merkle/crypto helpers to derive an authentication path from the public snapshot, and remove the hard-coded zero paths from `web/src/lib/crypto.ts`. The browser proves only after validating root/path freshness and never sends its commitment to a witness endpoint.
+  - Depends on: 5.0.
+  - Validation: TDD coverage proves both the first and second leaf, rejects root/path tampering and stale snapshots, and verifies the withdrawal path uses the same source. Playwright exercises a second funded identity call.
+  - Related testing scenarios: browser self-verification; membership-proof withdrawal.
+
+- [x] **5.2 Add a proof-bound `/v1/responses` relay to Render.** — IMPLEMENTED LOCALLY 2026-08-11.
+  - Outcome: Extract the shared proof parsing, root/body binding, replay, and settlement path used by Chat Completions and add `POST /v1/responses`. Preserve the original Responses JSON while forwarding to OpenRouter's Responses endpoint. Support JSON and SSE with bounded replay-safe transcript retention; an exact retry reuses its accepted ticket tuple, while a fork is rejected. Do not add prompt-to-commitment persistence or modify the ticket protocol.
+  - Depends on: 5.0; requires no new on-chain contract feature.
+  - Validation: Gateway tests prove Chat/Responses equivalence for authentication, proof requirement, binding/root rejection, exact retry, and fork detection. Mocked non-streaming and SSE tests observe one upstream request followed by replay, including after restart, while preserving error behavior.
+  - Related testing scenarios: Responses compatibility; stream replay; durable settlement.
+
+- [x] **5.3 Build the first-party `packages/zk-credits-sidecar`.** — IMPLEMENTED LOCALLY 2026-08-11.
+  - Outcome: Ship an independent Node package with `zk-credits import-mnemonic`, `serve`, and `env`. It uses OS credential storage (or a one-time headless environment input), no-echo import, a verified packaged circuit-artifact manifest, a local durable ticket ledger, loopback-only binding, and a random local bearer. It exposes Chat Completions and Responses and forwards only freshly generated, locally self-verified proofs to Render.
+  - Depends on: 5.0–5.2 and `@zk-credits/shared`.
+  - Validation: Unit coverage includes secret-redaction, a credential-store fake, random-token rejection, serialized ticket handling, retry, exhaustion, and circuit-manifest verification. Integration uses a mocked gateway; an `openai` Node client reaches the loopback base URL and raw Responses SSE is consumed successfully.
+  - Scope note: base-URL-configurable clients may use the sidecar. Codex model-traffic support remains deferred until a supported Codex transport/provider hook exists.
+
+- [ ] **5.4 Validate, document, and roll out M5.** — LOCAL PACKAGE/CI WORK COMPLETE; RENDER MIGRATION BLOCKED.
+  - Outcome: The sidecar CI job, `npm pack` source/integrity check, setup documentation, and transparent privacy/compatibility limitations are implemented locally. Before deployment, recover the exact `{ leaves, layers }` snapshot for the existing nonzero live Soroban root and set `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT`; otherwise choose an explicitly authorized fresh/reconciled migration. Then deploy the Render relay, validate a real testnet deposit → sidecar → OpenRouter Responses request, and rerun the Chrome/Playwright browser regression. Do not claim that Codex itself uses the transport.
+  - Depends on: 5.3 plus deployment settings/authority.
+  - Validation: Relevant gateway/shared/web/contract/circuit/sidecar jobs are green; a real response consumes one ticket, stores no acceptance-table commitment, and logs no secret. A fresh browser trace passes.
+  - Related testing scenarios: package installation; live Responses call; browser regression.
 
 ## Dependencies
 **What needs to happen in what order?**
@@ -330,11 +382,17 @@ flowchart LR
   M --> P[4.4 Restart durability]
   M --> Q[4.5 README honest caveats]
   M --> R[4.6 OpenRouter tier check]
+  I --> S0[5.0 Durable membership tree]
+  S0 --> S1[5.1 Shared local witness]
+  S0 --> S2[5.2 Responses relay]
+  S1 --> S3[5.3 Loopback sidecar]
+  S2 --> S3
+  S3 --> S4[5.4 CI + live validation]
 ```
 
-- **Hard dependencies:** 1.1 -> 1.2 (guardrails build on each other); 1.0 -> 1.3 + test suite (self-verify and the 3 circuit tests need built circuit artifacts); 1.2 -> 1.3 (self-verify uses the shared verifier); 2.1 -> 2.2/2.3/2.4 (storage migrations need schemas); 2.2 -> 2.6 (spend worker drains the durable accepted_calls queue); 2.5 depends on 2.2 + 2.4; 3.x deployments need M2 code complete; 4.x demos need all of M3 deployed (and the M2 live testnet spike).
+- **Hard dependencies:** 1.1 -> 1.2 (guardrails build on each other); 1.0 -> 1.3 + test suite (self-verify and the 3 circuit tests need built circuit artifacts); 1.2 -> 1.3 (self-verify uses the shared verifier); 2.1 -> 2.2/2.3/2.4 (storage migrations need schemas); 2.2 -> 2.6 (spend worker drains the durable accepted_calls queue); 2.5 depends on 2.2 + 2.4; 3.x deployments need M2 code complete; 4.x demos need all of M3 deployed (and the M2 live testnet spike). M5.0 must establish durable, root-correct tree state before M5.1 or M5.2; both feed M5.3, which gates M5.4.
 - **External dependencies:** Stripe test-mode credentials, GitHub OAuth app, OpenRouter API key (sufficient tier), Stellar testnet funded accounts (gateway, treasury, reporter, user, fee-sponsor), Render + Vercel accounts, a PostgreSQL instance.
-- **Parallelism:** 2.2, 2.3, 2.4 can proceed in parallel after 2.1. 3.2, 3.3, 3.4 can proceed in parallel after their M2 dependencies. 4.2, 4.3, 4.4, 4.5, 4.6 can proceed in parallel after 4.1.
+- **Parallelism:** 2.2, 2.3, 2.4 can proceed in parallel after 2.1. 3.2, 3.3, 3.4 can proceed in parallel after their M2 dependencies. 4.2, 4.3, 4.4, 4.5, 4.6 can proceed in parallel after 4.1. After 5.0, the local-witness and gateway Responses paths (5.1, 5.2) may proceed in parallel; sidecar assembly and live validation remain sequential.
 
 ## Timeline & Estimates
 **When will things be done?**
@@ -347,8 +405,9 @@ No delivery date was supplied. These are relative planning estimates, not commit
 | M2 | Large | PostgreSQL migration (replaces in-memory state) + new fee-sponsor service; security-critical. |
 | M3 | Medium | Hosted deployment (Render + Vercel + Soroban) + CI; ops work, not novel code. |
 | M4 | Small–Medium | Hosted E2E validation + docs; depends on external services being provisioned. |
+| M5 | Large | Durable tree state, browser witness repair, Responses forwarding/stream replay, and a security-sensitive local package. |
 
-The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (which rewrites everything). The fastest path to a public demo is M1 -> M2 -> M3 -> M4 with parallelism inside M2 and M3.
+The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (which rewrites everything). M5 is a follow-on transport milestone: 5.0 must precede parallel 5.1/5.2 work, then 5.3 and 5.4.
 
 ## Risks & Mitigation
 **What could go wrong?**
@@ -364,6 +423,11 @@ The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (wh
 | Public launch overclaims "real ZK" with a dev-only trusted setup. | Honest-caveats README/landing review (4.5); explicit "testnet ZK with dev-only setup" framing. | Block launch sign-off. |
 | CI cannot run Circom/stellar-sdk in GitHub Actions. | Use a Docker action with circom + stellar-cli preinstalled; mark circuit/contract tests as required-gate only after CI passes. | Block 3.5. |
 | snarkjs bls12381 Groth16 setup is very slow (WASM; >10 min/circuit). | Build circuit artifacts once as a detached background job; keep artifacts present on CI/demo machines; parallelize M1.2 while it runs; do not block other M1 tasks on it. | Block 1.0 / demo / 3.5. |
+| A public snapshot enables unintended commitment correlation or a witness endpoint becomes an identity oracle. | Snapshot has no request parameters or commitment lookup; derive paths locally and do not add call-to-commitment state. | Block 5.0/5.1. |
+| Rebuilt tree state diverges from Soroban after restart or a rejected deposit. | Serialize/stage updates, rebuild from durable leaves, compare active root to contract, and cover rollback/restart with two members. | Block 5.0. |
+| Loopback transport leaks the mnemonic or is exposed beyond the host. | OS credential store, no-echo import/redacted logs, `127.0.0.1` binding, and a random bearer with tests. | Block 5.3. |
+| Responses SSE duplicates/losses an upstream result after retry/restart. | Bind exact request to its accepted ticket, persist a bounded encrypted transcript, and test one-forward-plus-replay semantics. | Block 5.2/5.4. |
+| Users assume a Codex plugin can intercept Codex model traffic. | Document base-URL client scope and defer Codex support until a supported provider/transport hook exists. | Release communication gate. |
 
 ## Resources Needed
 **What do we need to succeed?**
@@ -374,6 +438,7 @@ The existing v1 codebase significantly de-scope M1/M2 vs. the Mina migration (wh
 - PostgreSQL instance (Render Postgres or external) with isolated schemas.
 - CI (GitHub Actions) capable of running TypeScript, Circom, stellar-cli/Rust, and Playwright; secret redaction.
 - Security review capacity for the fee-sponsor authority boundary and the gateway privacy data-flow before public launch.
+- Sidecar package release identity plus OS credential-storage support for the supported host platforms; Render gateway deployment authority for the Responses route.
 
 ## Update Summary (2026-08-05)
 
@@ -606,3 +671,151 @@ OpenRouter low-token requests succeeded, while account-wide provider tier and
 billing limits remain an operator-console check. Render edge cold starts/timeouts
 were observed and should be monitored before public traffic. These are
 operational/account tasks, not unverified protocol behavior.
+
+### Reconciliation (Dev-Planning · Phase 6 · final browser acceptance · 2026-08-11)
+
+**Progress:** M1, M2, and M3 are complete. M4.0–M4.4 are complete for the
+four-signal indexed-ticket protocol: legacy spend rows are quarantined; real
+provider requests, exact retries, on-chain settlement, fee-sponsored slash,
+fee-sponsored membership-proof withdrawal, and a Render restart all have live
+testnet evidence. A persistent Playwright/Chrome session independently
+exercised the UI path through sign-in, browser identity/key generation, a
+5-USDC testnet deposit, local proof self-verification, ticket consumption, and
+a real OpenRouter response; the browser console reported zero errors.
+
+**Scope and risks:** the plan now separates completed protocol work from
+external release-readiness work. GitHub OAuth credentials/consent, a hosted
+Stripe checkout plus webhook-retry run, and the OpenRouter account-tier check
+are operator-account dependencies. Render edge cold starts/timeouts remain a
+monitoring risk. The optional Render Blueprint attachment remains deferred to
+avoid creating duplicate resources.
+
+**Next actions:** (1) configure and accept production GitHub OAuth; (2) run
+and record Stripe test checkout plus webhook retry; (3) confirm OpenRouter
+limits, complete the README/caveat review, and establish Render availability
+monitoring. No further protocol implementation task is required unless one of
+those external acceptance checks exposes a defect.
+
+### Reconciliation (Dev-Planning · M5 proof-aware sidecar plan · 2026-08-11)
+
+**Approved scope:** M5 creates a first-party loopback OpenAI-compatible
+transport for clients that can set a base URL. Each request is proved locally,
+then verified and settled by the existing Render gateway. The gateway gains a
+proof-bound `/v1/responses` relay alongside Chat Completions. The plan preserves
+the four-signal ticket protocol, does not introduce hosted proof custody or a
+shared/reused proof, and makes no claim that current Codex model traffic can be
+routed through it.
+
+**Implementation order:** close the membership-removal artifact and durable
+Merkle-tree blockers first (5.0); build local witness derivation and the
+Responses relay in parallel only after that invariant is established (5.1–5.2);
+then assemble the loopback package (5.3) and perform CI, package, browser, and
+live testnet validation (5.4). The snapshot is deliberately public and
+parameter-free so the service does not become a commitment lookup oracle.
+
+**Original preconditions (now resolved locally):** the membership-removal
+proving artifacts are tracked, and browser proof generation no longer uses a
+first-leaf-only zero witness. M5.0 and M5.1 were release-blocking correctness
+work, not optional transport features. The remaining blocker is safe migration
+of the old live nonzero tree; OAuth, Stripe, OpenRouter tier, caveat, and
+availability work remain separate operator release-readiness concerns.
+
+### Reconciliation (Dev-Implementation · M5.0 durable membership tree · 2026-08-11)
+
+**Implemented locally:** `0008_membership_tree.sql` separates indexed
+membership leaves and versioned root state from `accepted_calls`; a staged leaf
+is persisted before its Soroban deposit, activated only after success, and is
+recovered or discarded against the live chain root after a crash. The gateway
+now fails closed on an unreproducible root and exposes only the parameter-free
+`GET /v1/membership-tree` snapshot. `MerkleTree` can rebuild exact indexed
+leaves. The membership-removal WASM/zkey and matching browser copies are now
+tracked release artifacts.
+
+**Migration boundary:** an existing deployment that predates durable leaf rows
+must provide `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` once as the exact public
+`{ leaves, layers }` JSON snapshot; layers are essential after a slash or
+withdrawal because leaves alone canonicalize retained zero branches. The
+gateway verifies its reconstructed root against Soroban before persisting it.
+`MEMBERSHIP_TREE_BOOTSTRAP_LEAVES` remains additive-only compatibility input.
+The gateway refuses to start on an unknown nonzero root rather than publish a
+divergent witness. This bootstrap must be performed and observed on Render
+before claiming M5.0 deployed.
+
+**Evidence:** focused RED/GREEN tests cover indexed reconstruction, staged
+leaf activation without call records, chain-confirmed pending-leaf recovery,
+root-mismatch failure, snapshot shape, and rejected-deposit rollback. Fresh
+local verification: gateway tests `149 passed, 11 skipped`, strict typecheck,
+and shared proof tests `19 passed` (including membership removal).
+
+**Superseded next step:** M5.1 is complete; the current reconciliation below
+is authoritative for M5 rollout status.
+
+### Reconciliation (Dev-Planning · M5 local implementation progress · 2026-08-11)
+
+**Status:** M5.0–M5.3 are complete in the local worktree. M5.4 is not
+complete: the local package/CI/documentation work is ready, while the live
+Render migration, funded sidecar request, and interactive Chrome walkthrough
+remain blocked on safe recovery of the legacy membership tree.
+
+**Completed locally:**
+
+- Durable membership state now stores exact indexed leaves and full Merkle
+  layers, reconciles pending deposits, and applies the same removal transition
+  after a membership withdrawal or fee-sponsored slash. The public snapshot is
+  parameter-free and no accepted-call-to-commitment join was introduced.
+- Shared/browser crypto derives real membership witnesses from that snapshot;
+  tracked membership-removal artifacts are available to browser and CI builds.
+- The gateway accepts proof-bound Chat Completions and `/v1/responses` calls.
+  SSE exact retries replay a bounded stored transcript; oversized completed
+  streams fail deterministically on retry rather than hanging or forwarding a
+  second upstream request.
+- `packages/zk-credits-sidecar` provides no-echo mnemonic import, OS-keychain
+  storage (or process-only headless input), a restrictive local ticket ledger,
+  pinned circuit-artifact hashes, loopback-only serving, and a random local
+  bearer. It forwards the unmodified Chat Completions or Responses body only
+  with a freshly generated and locally self-verified proof.
+- The CI workflow has a new local `sidecar` job that builds the shared package,
+  runs the sidecar suite, builds it, and checks `npm pack --dry-run`. It will
+  become the seventh job after these changes are pushed.
+
+**Fresh local evidence:** shared `23` tests passed; gateway `160` passed and
+`11` skipped (with strict typecheck passing); web `18` tests, strict typecheck,
+and production build passed; sidecar `16` tests, build, and package dry-run
+passed after a clean install. These are local results only—no commit/push,
+Render mutation, or Chrome/Playwright interaction was performed after work was
+stopped for this planning update.
+
+**Deployment blocker:** the currently live gateway predates the snapshot
+endpoint and reports a nonzero active Soroban root. It cannot provide the
+exact historical `{ leaves, layers }` required to reconstruct a tree that has
+had removals. The upgraded gateway correctly fails closed in this condition.
+Do not deploy it against the existing root until a trusted old gateway/process
+record supplies and validates the exact snapshot. If recovery is impossible,
+the remaining path is an explicitly authorized fresh deployment or a separately
+designed reconciled migration—not an inferred replacement of the live state.
+
+**Next actions when implementation resumes:**
+
+1. Recover and independently validate the exact legacy snapshot, set it as the
+   one-time `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT`, then deploy and restart-test
+   the Render gateway against its existing Soroban root.
+2. Commit/push the completed work and observe the seven-job CI run, including
+   the sidecar package check.
+3. Run one funded testnet sidecar `/v1/responses` request through a
+   base-URL-compatible client, then launch Chrome through Playwright and
+   perform the Vercel UI walkthrough.
+
+**Residual risks:** snapshot recovery is a release gate; leaves-only bootstrap
+is unsafe after removals. Render cold starts/timeouts, OpenRouter Responses
+compatibility and limits, native keychain packaging across host platforms, and
+the absence of a supported Codex provider/transport hook remain explicit
+operational or compatibility constraints.
+
+### M5.4 preflight reconciliation (2026-08-11)
+
+The exact public membership snapshot has been recovered by replaying the live
+contract's historical deposit, slash, and withdrawal transitions. Its root
+matches `get_current_root`, and the one-time Render bootstrap environment
+variable is configured with the full `{root, depth, leaves, layers}` payload.
+The next gate is deploying this source revision and validating the migration
+and bootstrap against the hosted PostgreSQL instance.

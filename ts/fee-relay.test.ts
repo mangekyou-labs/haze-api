@@ -16,6 +16,7 @@ import {
 } from '@stellar/stellar-sdk';
 import {
   validateRelayRequest,
+  extractSlashTransition,
   relayOne,
   buildFeeBumpEnvelope,
   InvalidRelayRequestError,
@@ -41,7 +42,12 @@ function buildContractTx(method: 'slash' | 'withdraw' | 'deposit'): string {
   const addrVal = Address.fromString(Keypair.random().publicKey()).toScVal();
   const args: unknown[] =
     method === 'slash'
-      ? [nativeToScVal({ a: 'A', b: 'B', c: 'C' }), nativeToScVal(['1', '2']), nativeToScVal('123'), addrVal]
+      ? [
+        nativeToScVal({ a: 'A', b: 'B', c: 'C' }),
+        nativeToScVal(['0', '123', '99', '456', '789', '1', '2', '3', '4']),
+        nativeToScVal('123'),
+        addrVal,
+      ]
       : method === 'withdraw'
         ? [nativeToScVal('123'), addrVal]
         : [addrVal, nativeToScVal('123'), nativeToScVal('0'), nativeToScVal(100)];
@@ -84,6 +90,14 @@ describe('validateRelayRequest (method-validation gate)', () => {
     const { method, innerTxHash } = validateRelayRequest(buildContractTx('slash'), CONTRACT_ID);
     expect(method).toBe('slash');
     expect(innerTxHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('extracts the slash membership transition from the signed inner XDR', () => {
+    expect(extractSlashTransition(buildContractTx('slash'), CONTRACT_ID)).toEqual({
+      commitment: '123',
+      currentRoot: '456',
+      nextRoot: '789',
+    });
   });
 
   it('accepts a withdraw transaction', () => {

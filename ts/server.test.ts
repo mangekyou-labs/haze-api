@@ -11,7 +11,18 @@ import {
 } from './server.js';
 import { requestDigestToField } from '@zk-credits/shared';
 import { MemoryGatewayStore } from './db/index.js';
+import { MerkleTree } from './merkle.js';
 import request from 'supertest';
+import {
+  Address,
+  BASE_FEE,
+  Contract,
+  Keypair,
+  Networks,
+  nativeToScVal,
+  StrKey,
+  TransactionBuilder,
+} from '@stellar/stellar-sdk';
 
 const sharedVerify = vi.hoisted(() => ({ verify: vi.fn() }));
 const adapterMock = vi.hoisted(() => ({
@@ -85,6 +96,31 @@ describe('gateway server', () => {
       const res = await request(app).get('/health');
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('ok');
+    });
+  });
+
+  describe('GET /v1/membership-tree', () => {
+    it('publishes a parameter-free snapshot with indexed leaves', async () => {
+      const originalTree = merkleTree.clone();
+      try {
+        merkleTree.replaceWith(new MerkleTree());
+        await merkleTree.insert(101n);
+        await merkleTree.insert(202n);
+
+        const res = await request(app)
+          .get('/v1/membership-tree?commitment=101');
+
+        expect(res.status).toBe(200);
+        expect(res.body).toMatchObject({
+          root: merkleTree.root().toString(),
+          depth: 3,
+          leaves: ['101', '202', '0', '0', '0', '0', '0', '0'],
+          layers: merkleTree.getLayers().map((layer) => layer.map(String)),
+        });
+        expect(new Date(res.body.generatedAt).toISOString()).toBe(res.body.generatedAt);
+      } finally {
+        merkleTree.replaceWith(originalTree);
+      }
     });
   });
 
@@ -411,6 +447,96 @@ describe('gateway server', () => {
       });
     });
 
+  describe('POST /v1/responses', () => {
+    it('uses the same proof-bound durable acceptance path as Chat Completions', async () => {
+      sharedVerify.verify.mockResolvedValue(true);
+      const body = { model: 'openai/gpt-4o-mini', input: 'hello through Responses' };
+      const proofHeader = await proofHeaderFor(body, 'responses-nullifier', '7');
+
+      const first = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+      const second = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(await getGatewayStore().listAcceptedCalls()).toHaveLength(1);
+      expect(adapterMock.forward).toHaveBeenCalledTimes(1);
+      expect(adapterMock.forward).toHaveBeenCalledWith(body, '', 'responses');
+    });
+
+    it('requires a fresh proof before forwarding a Responses body', async () => {
+      const res = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .send({ model: 'openai/gpt-4o-mini', input: 'missing proof' });
+
+      expect(res.status).toBe(402);
+      expect(res.body.error).toBe('proof_required');
+    });
+
+    it('relays and replays an SSE Responses transcript without a second upstream call', async () => {
+      sharedVerify.verify.mockResolvedValue(true);
+      const transcript = 'event: response.output_text.delta\ndata: {"delta":"hello"}\n\nevent: response.completed\ndata: {}\n\n';
+      adapterMock.forward.mockResolvedValueOnce(new Response(transcript, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }));
+      const body = { model: 'openai/gpt-4o-mini', input: 'stream please', stream: true };
+      const proofHeader = await proofHeaderFor(body, 'responses-sse-nullifier', '8');
+
+      const first = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+      const second = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+
+      expect(first.status).toBe(200);
+      expect(first.headers['content-type']).toContain('text/event-stream');
+      expect(first.text).toBe(transcript);
+      expect(second.status).toBe(200);
+      expect(second.headers['content-type']).toContain('text/event-stream');
+      expect(second.text).toBe(transcript);
+      expect(adapterMock.forward).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns a terminal replay error instead of pending forever when an SSE transcript exceeds the replay limit', async () => {
+      sharedVerify.verify.mockResolvedValue(true);
+      adapterMock.forward.mockResolvedValueOnce(new Response('x'.repeat(1_000_001), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }));
+      const body = { model: 'openai/gpt-4o-mini', input: 'large stream', stream: true };
+      const proofHeader = await proofHeaderFor(body, 'responses-large-sse-nullifier', '9');
+
+      const first = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+      const second = await request(app)
+        .post('/v1/responses')
+        .set('Authorization', 'Bearer sk-zk-local-demo')
+        .set('X-ZK-Proof', proofHeader)
+        .send(body);
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(409);
+      expect(second.body.error).toBe('stream_replay_unavailable');
+      expect(adapterMock.forward).toHaveBeenCalledTimes(1);
+    });
+  });
 
 
   describe('POST /v1/slash (permissionless → fee relay)', () => {
@@ -449,6 +575,53 @@ describe('gateway server', () => {
           body: JSON.stringify({ innerTransactionXdr: 'reporter-signed-inner-slash-xdr' }),
         }),
       );
+    });
+
+    it('removes the commitment from the durable public tree using the signed slash transition', async () => {
+      const contractId = StrKey.encodeContract(Buffer.alloc(32, 9));
+      process.env.ZK_CONTRACT_ID = contractId;
+      const currentRoot = await merkleTree.setLeaf(0, 123n);
+      await getGatewayStore().reserveMembershipLeaf({
+        leafIndex: 0,
+        commitment: '123',
+        candidateRoot: currentRoot.toString(),
+      });
+      await getGatewayStore().activateMembershipLeaf(
+        0,
+        currentRoot.toString(),
+        merkleTree.getLayers().map((layer) => layer.map(String)),
+      );
+      const removedTree = merkleTree.clone();
+      const nextRoot = await removedTree.setLeaf(0, 0n);
+      const reporter = Keypair.random();
+      const account = {
+        accountId: () => reporter.publicKey(),
+        sequenceNumber: () => '1',
+        incrementSequenceNumber: () => {},
+      } as unknown as Parameters<typeof TransactionBuilder>[0];
+      const innerTxXdr = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(new Contract(contractId).call(
+          'slash',
+          nativeToScVal({ a: 'A', b: 'B', c: 'C' }),
+          nativeToScVal(['0', '123', '99', currentRoot.toString(), nextRoot.toString(), '1', '2', '3', '4']),
+          nativeToScVal('123'),
+          new Address(reporter.publicKey()).toScVal(),
+        ))
+        .setTimeout(30)
+        .build()
+        .toEnvelope()
+        .toXDR('base64');
+
+      const res = await request(app).post('/v1/slash').send({ innerTransactionXdr: innerTxXdr });
+
+      expect(res.status).toBe(200);
+      expect(merkleTree.root().toString()).toBe(nextRoot.toString());
+      await expect(getGatewayStore().listMembershipLeaves()).resolves.toMatchObject([
+        { leafIndex: 0, status: 'removed' },
+      ]);
     });
 
     it('rejects missing fields', async () => {
@@ -574,6 +747,18 @@ describe('gateway server', () => {
       expect(res.body.amount).toBe('5000000');
       expect(res.body.newRoot).toBeDefined();
       expect(res.body.leafIndex).toBe(0);
+      expect(await getGatewayStore().listMembershipLeaves()).toMatchObject([
+        {
+          leafIndex: 0,
+          commitment: '42',
+          status: 'active',
+          candidateRoot: res.body.newRoot,
+        },
+      ]);
+      expect(await getGatewayStore().getMembershipTreeState()).toMatchObject({
+        root: res.body.newRoot,
+        version: 1,
+      });
     });
 
     it('preserves Merkle state when the on-chain deposit is rejected', async () => {
@@ -688,11 +873,25 @@ describe('gateway server', () => {
 
   describe('POST /v1/withdraw (gateway co-signer → fee relay)', () => {
     const withdrawalProof = { pi_a: ['1', '2', '1'] };
-    const withdrawalSignals = ['123', '456', '789'];
+    let withdrawalSignals: string[];
 
-    beforeEach(() => {
+    beforeEach(async () => {
       process.env.GATEWAY_SECRET_KEY = 'test-stellar-key';
       process.env.FEE_SPONSOR_URL = 'http://fee-sponsor.test';
+      const currentRoot = await merkleTree.setLeaf(0, 123n);
+      await getGatewayStore().reserveMembershipLeaf({
+        leafIndex: 0,
+        commitment: '123',
+        candidateRoot: currentRoot.toString(),
+      });
+      await getGatewayStore().activateMembershipLeaf(
+        0,
+        currentRoot.toString(),
+        merkleTree.getLayers().map((layer) => layer.map(String)),
+      );
+      const removedTree = merkleTree.clone();
+      const nextRoot = await removedTree.setLeaf(0, 0n);
+      withdrawalSignals = ['123', currentRoot.toString(), nextRoot.toString()];
       global.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ accepted: true, feeBumpHash: 'fee-bump-1', duplicate: false }), {
           status: 200,
@@ -730,6 +929,10 @@ describe('gateway server', () => {
           body: JSON.stringify({ innerTransactionXdr: 'mock-withdraw-envelope-xdr' }),
         }),
       );
+      expect(merkleTree.root().toString()).toBe(withdrawalSignals[2]);
+      expect(await getGatewayStore().listMembershipLeaves()).toMatchObject([
+        { leafIndex: 0, status: 'removed' },
+      ]);
     });
 
     it('rejects missing auth', async () => {

@@ -1,0 +1,29 @@
+{
+  "name": "@zk-credits/sidecar",
+  "version": "0.1.0",
+  "description": "Loopback proof-aware OpenAI transport for ZK Credits.",
+  "type": "module",
+  "bin": {
+    "zk-credits": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "circuits"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "clean": "node --input-type=module -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
+    "test": "vitest run",
+    "start": "node dist/cli.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@zk-credits/shared": "file:../zk-credits-shared",
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

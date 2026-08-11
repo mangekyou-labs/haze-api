@@ -32,14 +32,22 @@ target/
 !circuits/deposit_membership.wasm
 !circuits/rln_nullifier.wasm
 !circuits/slash.wasm
+!circuits/membership_removal.wasm
 !circuits/deposit_membership_final.zkey
 !circuits/rln_nullifier_final.zkey
 !circuits/slash_final.zkey
+!circuits/membership_removal_final.zkey
 !web/public/circuits/deposit_membership.wasm
 !web/public/circuits/deposit_membership_final.zkey
 !web/public/circuits/rln_nullifier.wasm
 !web/public/circuits/rln_nullifier_final.zkey
+!web/public/circuits/membership_removal.wasm
+!web/public/circuits/membership_removal_final.zkey
 !web/public/circuits/verification_key_rln.json
+
+# The proof-aware loopback sidecar ships its pinned RLN proving resources.
+!packages/zk-credits-sidecar/circuits/rln_nullifier.wasm
+!packages/zk-credits-sidecar/circuits/rln_nullifier_final.zkey
 
 # OS
 .DS_Store

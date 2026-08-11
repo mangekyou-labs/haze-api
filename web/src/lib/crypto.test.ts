@@ -1,10 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
+  fetchMembershipTreeSnapshot,
   generateSecretK,
   deriveMnemonic,
   recoverSecretK,
   secretKToField,
 } from './crypto';
+
+const originalFetch = global.fetch;
+
+afterEach(() => {
+  global.fetch = originalFetch;
+});
 
 describe('web/src/lib/crypto (browser wiring of @zk-credits/shared)', () => {
   it('generateSecretK returns a 32-byte secret', () => {
@@ -41,5 +48,21 @@ describe('web/src/lib/crypto (browser wiring of @zk-credits/shared)', () => {
   it('secretKToField is the v1 alias `secretKToField` (stable surface)', () => {
     const sk = generateSecretK();
     expect(secretKToField(sk)).toBe(secretKToField(sk));
+  });
+
+  it('fetches a fresh parameter-free public membership snapshot', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      root: '0',
+      depth: 3,
+      leaves: Array<string>(8).fill('0'),
+      layers: [Array<string>(8).fill('0'), Array<string>(4).fill('0'), Array<string>(2).fill('0'), ['0']],
+      generatedAt: new Date().toISOString(),
+    }), { status: 200 })) as unknown as typeof fetch;
+
+    await expect(fetchMembershipTreeSnapshot()).resolves.toMatchObject({ root: '0', depth: 3 });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:3001/v1/membership-tree',
+      { cache: 'no-store' },
+    );
   });
 });

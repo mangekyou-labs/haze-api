@@ -289,3 +289,59 @@ statement:
 - [x] Restart durability: Render restart deployment `dep-d9tdhsjncjis7391ec80` reached `live`; an accepted ticket replay returned an identical SHA-256 response fingerprint after restart and the restarted worker's nullifier settlement was verified on Soroban.
 - [x] Chrome/Playwright observation: the Vercel preview and production deployments rendered the landing without console errors. Chrome clicked Get Started into the dashboard on preview; production reached the GitHub sign-in screen with its OAuth button visible and zero console errors.
 - [!] Operational caveat: Render's public edge intermittently timed out during the long live pass while the API reported the service `live`; retrying health checks recovered. Treat free-tier cold-start/edge availability as a launch-monitoring risk.
+
+## M5.0 durable membership-tree validation (2026-08-11)
+
+- [x] `ts/merkle.test.ts`: RED/GREEN indexed rebuild reconstructs a two-member
+  root exactly and preserves both leaf positions.
+- [x] `ts/db/gateway.test.ts`: a staged membership leaf is persisted apart
+  from accepted calls, activates only with its expected root, and versions the
+  root state. `ts/db/migrate.test.ts` asserts migration `0008` creates only
+  separate membership-tree tables.
+- [x] `ts/membership-tree.test.ts`: a chain-confirmed pending deposit is
+  promoted after simulated restart; an unknown chain root fails closed; an
+  empty durable store bootstraps atomically from an exact public
+  `{ leaves, layers }` snapshot, including a post-removal retained zero branch
+  that leaf-only reconstruction cannot reproduce.
+- [x] `ts/server.test.ts`: the public snapshot is parameter-free and exposes
+  indexed leaf values, layers, and a fresh timestamp; successful deposits and
+  slash/withdraw removals activate durable leaf/root state; existing rollback
+  coverage confirms rejected deposits leave the in-memory root unchanged.
+- [x] Focused local evidence covers the durable tree, signed slash transition,
+  and strict typecheck. The final suite count is refreshed in M5.4.
+- [ ] Pending M5.4: migrate Render with an exact
+  `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` (`leaves` plus `layers`) and verify live
+  root/restart;
+  PostgreSQL integration tests remain opt-in (`RUN_DB_TESTS=1`) and must run
+  against a disposable database before production rollout.
+
+## M5.1–M5.3 proof-aware transport validation (2026-08-11)
+
+- [x] Shared crypto tests derive a valid witness for a second active leaf,
+  reject a tampered root, and preserve a post-removal zero branch through the
+  published layers. The RLN proof suite self-verifies a non-first-leaf proof.
+- [x] Web tests assert the snapshot call is parameter-free and `no-store`;
+  shared browser proof wiring uses the derived witness for chat and withdrawal.
+- [x] Gateway tests cover proof-bound `/v1/responses` acceptance, missing proof
+  rejection, JSON exact retry, SSE transcript exact replay, and the terminal
+  bounded-stream replay outcome without a second upstream call.
+- [x] Sidecar unit/integration tests cover secret persistence boundaries,
+  one-time headless input, artifact-manifest mismatch rejection, local witness
+  derivation with no commitment query, durable ticket serialization, local
+  bearer rejection, Responses forwarding, package build, and package dry-run.
+- [ ] Pending M5.4: use a real testnet membership through the sidecar and an
+  OpenAI-compatible Responses client; then deploy and inspect the hosted web
+  application in Chrome/Playwright.
+
+## M5.4 Render bootstrap preflight (2026-08-11)
+
+- [x] Replayed the live contract event and transaction history to produce an
+  exact public `{root, depth, leaves, layers}` snapshot for the current root.
+- [x] Verified the replayed root against `get_current_root` and the replayed
+  deposit/slash/withdraw transitions.
+- [x] Set the one-time Render bootstrap environment variable without storing
+  the Render credential in the repository.
+- [ ] Deploy the source revision, confirm gateway and fee-sponsor health, and
+  verify the hosted membership endpoint returns the recovered root.
+- [ ] Complete a funded sidecar Responses request and the Chrome/Playwright
+  walkthrough.

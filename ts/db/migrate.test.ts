@@ -70,6 +70,14 @@ describe('migrations (offline, static)', () => {
     expect(sql).toMatch(/UPDATE gateway\.accepted_calls/i);
     expect(sql).toMatch(/jsonb_array_length\(pub_signals\)\s+<>\s+4/i);
   });
+
+  it('membership-tree migration (0008) persists leaves and root state outside accepted calls', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0008_membership_tree.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS gateway\.membership_tree_leaves/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS gateway\.membership_tree_state/i);
+    expect(sql).toMatch(/candidate_root\s+text NOT NULL/i);
+    expect(sql).not.toMatch(/ALTER TABLE\s+gateway\.accepted_calls/i);
+  });
 });
 
 describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', () => {

@@ -4,7 +4,7 @@ Anonymous RLN-rate-limited API credits for coding agents on Stellar.
 
 ## What It Is
 
-A privacy gateway between coding agents (Claude Code, Codex, OpenCode, Cline) and LLM APIs (OpenRouter, 400+ models). Developers buy anonymous credits with a card; agents call LLMs via ZK-RLN proofs; over-quota calls slash deposits on-chain.
+A privacy gateway between base-URL-configurable coding agents and LLM APIs (OpenRouter, 400+ models). Developers buy anonymous credits with a card; a local sidecar adds a ZK-RLN proof to each LLM request; ticket forks slash deposits on-chain.
 
 **The gateway cannot link a call to a deposit.** ZK enforced.
 
@@ -117,6 +117,42 @@ node scripts/e2e-test.js
 node scripts/slash-demo.js
 ```
 
+## Use an OpenAI-Compatible Client Through the Sidecar
+
+The first-party sidecar keeps `secret_k`, the recovery phrase, the Merkle
+witness, ticket index, and loopback bearer on the developer machine. Render
+receives only the shared compatibility bearer and a fresh body-bound ZK proof.
+It supports both Chat Completions and the Responses API.
+
+Until the package is published, install it from this checkout:
+
+```bash
+cd packages/zk-credits-sidecar
+npm ci
+npm run build
+npm link
+
+zk-credits import-mnemonic  # prompts on a non-echoing terminal
+zk-credits serve
+```
+
+In a second shell, point an OpenAI-compatible client at the loopback server:
+
+```bash
+eval "$(zk-credits env)"
+# OPENAI_BASE_URL=http://127.0.0.1:3210/v1
+# OPENAI_API_KEY=zk-local-<random-loopback-token>
+```
+
+`ZK_CREDITS_MNEMONIC` is for a headless process only and is not persisted by
+that path. The package verifies its pinned WASM, proving key, and
+verification-key SHA-256 manifest before it proves; it never downloads proving
+assets at runtime. The sidecar binds only `127.0.0.1`.
+
+Current Codex plugin/app capabilities do not provide a supported custom model
+transport hook, so Codex itself cannot yet be routed through this sidecar. Do
+not use a plugin or TLS-interception workaround to claim Codex support.
+
 ## Project Structure
 
 ```
@@ -145,6 +181,9 @@ node scripts/slash-demo.js
 │       └── lib/
 │           ├── crypto.ts  Browser witness calculator
 │           └── stellar.ts Contract read stub (M8)
+├── packages/zk-credits-sidecar/
+│   ├── circuits/          Pinned RLN resources and SHA-256 manifest
+│   └── src/               Loopback transport, keychain identity, ticket ledger
 └── scripts/
     ├── setup-testnet.sh   Testnet account setup
     ├── e2e-test.js        End-to-end test script
@@ -160,6 +199,8 @@ node scripts/slash-demo.js
 |---|---|---|---|
 | `/health` | GET | None | Health check |
 | `/v1/chat/completions` | POST | API key | OpenAI-compatible chat (ZK proof required) |
+| `/v1/responses` | POST | API key | OpenAI-compatible Responses API (ZK proof required) |
+| `/v1/membership-tree` | GET | None | Public parameter-free `{ root, leaves, layers }` snapshot |
 | `/v1/api-keys` | POST | Gateway secret | Generate API key |
 | `/v1/status/:commitment` | GET | None | User stats (calls, quota, keys) |
 | `/v1/contract-status` | GET | None | On-chain contract state |
@@ -199,6 +240,7 @@ Functions:
 4. **Browser proving:** ~1.5s first call per session, cached after. Acceptable for demo, needs optimization for production.
 5. **Network identity:** v1 hides payment identity, not IP. Tor/client-side relay is v2.
 6. **On-chain VK:** Contract deployed with dummy VK. Gateway verifies off-chain with real VK. Full on-chain verification needs BLS12-381 point serialization.
+7. **Client compatibility:** The sidecar requires a client that supports a custom OpenAI-compatible base URL. Current Codex model traffic has no supported transport override.
 
 ## Tech Stack
 

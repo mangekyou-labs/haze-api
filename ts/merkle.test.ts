@@ -46,6 +46,34 @@ describe('MerkleTree', () => {
     expect(root1).toBe(root2);
   });
 
+  it('rebuilds a two-member tree from indexed leaves without changing positions', async () => {
+    const original = new MerkleTree();
+    await original.insert(11n);
+    await original.insert(22n);
+
+    const rebuilt = await MerkleTree.fromLeaves(['11', '22', '0', '0', '0', '0', '0', '0']);
+
+    expect(rebuilt.root()).toBe(original.root());
+    expect(rebuilt.getLeaf(0)).toBe(11n);
+    expect(rebuilt.getLeaf(1)).toBe(22n);
+  });
+
+  it('restores persisted layers after a removal leaves a non-canonical zero branch', async () => {
+    const original = new MerkleTree();
+    await original.setLeaf(0, 101n);
+    await original.setLeaf(2, 202n);
+    await original.setLeaf(0, 0n);
+
+    const restored = await MerkleTree.fromLayers(
+      original.getLayers().map((layer) => layer.map(String)),
+    );
+    const leafOnly = await MerkleTree.fromLeaves(original.getLeaves().map(String));
+
+    expect(restored.root()).toBe(original.root());
+    expect(restored.getLeaf(2)).toBe(202n);
+    expect(leafOnly.root()).not.toBe(original.root());
+  });
+
   it('root changes after each insert', async () => {
     const tree = new MerkleTree();
     const root1 = await tree.insert(BigInt(1));

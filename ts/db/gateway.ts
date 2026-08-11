@@ -53,6 +53,30 @@ export interface ApiKeyRecord {
   revokedAt: Date | null;
 }
 
+export type MembershipLeafStatus = 'pending' | 'active' | 'removed';
+
+/**
+ * Membership state belongs to the deposit/tree boundary, never to an
+ * accepted call. A pending record closes the crash window between a Soroban
+ * deposit and the local root activation.
+ */
+export interface MembershipLeaf {
+  leafIndex: number;
+  commitment: string;
+  status: MembershipLeafStatus;
+  candidateRoot: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MembershipTreeState {
+  root: string;
+  version: number;
+  /** Full node layers preserve zero-branch hashes after a membership removal. */
+  layers: string[][];
+  updatedAt: Date;
+}
+
 export interface ReconstructedState {
   /** Every nullifier ever seen (off-chain accepted and/or on-chain spent). */
   nullifiers: Set<string>;
@@ -109,6 +133,27 @@ export interface GatewayStore {
   getCallCount(commitment: string): Promise<number>;
   /** All lifetime call totals for restart reconstruction. */
   getAllCallCounts(): Promise<Map<string, number>>;
+
+  // ── Membership tree ───────────────────────────────────────────
+  /** Stage a leaf before its matching on-chain deposit is submitted. */
+  reserveMembershipLeaf(leaf: {
+    leafIndex: number;
+    commitment: string;
+    candidateRoot: string;
+  }): Promise<void>;
+  /** Commit a staged leaf only after its root is active on-chain. */
+  activateMembershipLeaf(leafIndex: number, root: string, layers: string[][]): Promise<void>;
+  /** Remove a staged leaf when the matching on-chain deposit is rejected. */
+  discardPendingMembershipLeaf(leafIndex: number): Promise<void>;
+  /** Commit a verified slash/withdraw membership removal and its next root. */
+  removeMembershipLeaf(leafIndex: number, root: string, layers: string[][]): Promise<void>;
+  /** One-time import of a complete public tree snapshot for a legacy deployment. */
+  bootstrapMembershipTree(
+    leaves: Array<{ leafIndex: number; commitment: string }>,
+    state: { root: string; layers: string[][] },
+  ): Promise<void>;
+  listMembershipLeaves(): Promise<MembershipLeaf[]>;
+  getMembershipTreeState(): Promise<MembershipTreeState | null>;
 }
 // ─── In-memory implementation (offline tests / local dev) ─────────
 
@@ -117,6 +162,8 @@ export class MemoryGatewayStore implements GatewayStore {
   private nullifiers = new Map<string, NullifierRecord>();
   private keys = new Map<string, ApiKeyRecord>();
   private counts = new Map<string, Map<number, number>>();
+  private membershipLeaves = new Map<number, MembershipLeaf>();
+  private membershipTreeState: MembershipTreeState | null = null;
 
   async recordAcceptedCall(call: AcceptedCall, commitment: string): Promise<void> {
     if (this.calls.has(call.proofHash)) {
@@ -280,12 +327,127 @@ export class MemoryGatewayStore implements GatewayStore {
     return out;
   }
 
+  async reserveMembershipLeaf(leaf: {
+    leafIndex: number;
+    commitment: string;
+    candidateRoot: string;
+  }): Promise<void> {
+    if (this.membershipLeaves.has(leaf.leafIndex)) {
+      throw new Error(`membership leaf index already exists: ${leaf.leafIndex}`);
+    }
+    if ([...this.membershipLeaves.values()].some((existing) => existing.status === 'pending')) {
+      throw new Error('a membership leaf is already pending reconciliation');
+    }
+    for (const existing of this.membershipLeaves.values()) {
+      if (existing.commitment === leaf.commitment) {
+        throw new Error(`membership commitment already exists: ${leaf.commitment}`);
+      }
+    }
+    const now = new Date();
+    this.membershipLeaves.set(leaf.leafIndex, {
+      ...leaf,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async activateMembershipLeaf(leafIndex: number, root: string, layers: string[][]): Promise<void> {
+    const leaf = this.membershipLeaves.get(leafIndex);
+    if (!leaf || leaf.status !== 'pending') {
+      throw new Error(`pending membership leaf not found: ${leafIndex}`);
+    }
+    if (leaf.candidateRoot !== root) {
+      throw new Error(`membership root mismatch for leaf ${leafIndex}`);
+    }
+    const updatedAt = new Date();
+    this.membershipLeaves.set(leafIndex, { ...leaf, status: 'active', updatedAt });
+    this.membershipTreeState = {
+      root,
+      version: (this.membershipTreeState?.version ?? 0) + 1,
+      layers: layers.map((layer) => [...layer]),
+      updatedAt,
+    };
+  }
+
+  async discardPendingMembershipLeaf(leafIndex: number): Promise<void> {
+    const leaf = this.membershipLeaves.get(leafIndex);
+    if (!leaf || leaf.status !== 'pending') {
+      throw new Error(`pending membership leaf not found: ${leafIndex}`);
+    }
+    this.membershipLeaves.delete(leafIndex);
+  }
+
+  async removeMembershipLeaf(leafIndex: number, root: string, layers: string[][]): Promise<void> {
+    const leaf = this.membershipLeaves.get(leafIndex);
+    if (!leaf || leaf.status !== 'active') {
+      throw new Error(`active membership leaf not found: ${leafIndex}`);
+    }
+    const updatedAt = new Date();
+    this.membershipLeaves.set(leafIndex, { ...leaf, status: 'removed', updatedAt });
+    this.membershipTreeState = {
+      root,
+      version: (this.membershipTreeState?.version ?? 0) + 1,
+      layers: layers.map((layer) => [...layer]),
+      updatedAt,
+    };
+  }
+
+  async bootstrapMembershipTree(
+    leaves: Array<{ leafIndex: number; commitment: string }>,
+    state: { root: string; layers: string[][] },
+  ): Promise<void> {
+    if (this.membershipLeaves.size > 0 || this.membershipTreeState) {
+      throw new Error('membership tree bootstrap requires an empty durable store');
+    }
+    const indices = new Set<number>();
+    const commitments = new Set<string>();
+    for (const leaf of leaves) {
+      if (!Number.isInteger(leaf.leafIndex) || leaf.leafIndex < 0 || leaf.leafIndex >= 8
+        || indices.has(leaf.leafIndex) || commitments.has(leaf.commitment)) {
+        throw new Error('membership tree bootstrap is malformed');
+      }
+      indices.add(leaf.leafIndex);
+      commitments.add(leaf.commitment);
+    }
+    const now = new Date();
+    for (const leaf of leaves) {
+      this.membershipLeaves.set(leaf.leafIndex, {
+        ...leaf,
+        status: 'active',
+        candidateRoot: state.root,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    this.membershipTreeState = {
+      root: state.root,
+      version: 1,
+      layers: state.layers.map((layer) => [...layer]),
+      updatedAt: now,
+    };
+  }
+
+  async listMembershipLeaves(): Promise<MembershipLeaf[]> {
+    return [...this.membershipLeaves.values()]
+      .sort((a, b) => a.leafIndex - b.leafIndex)
+      .map((leaf) => ({ ...leaf }));
+  }
+
+  async getMembershipTreeState(): Promise<MembershipTreeState | null> {
+    return this.membershipTreeState
+      ? { ...this.membershipTreeState, layers: this.membershipTreeState.layers.map((layer) => [...layer]) }
+      : null;
+  }
+
   /** Test/dev helper: reset all durable rows. */
   reset(): void {
     this.calls.clear();
     this.nullifiers.clear();
     this.keys.clear();
     this.counts.clear();
+    this.membershipLeaves.clear();
+    this.membershipTreeState = null;
   }
 }
 
@@ -298,6 +460,8 @@ const C = {
   nullifiers: 'gateway.nullifier_records',
   keys: 'gateway.api_key_records',
   counts: 'gateway.call_counts',
+  membershipLeaves: 'gateway.membership_tree_leaves',
+  membershipTreeState: 'gateway.membership_tree_state',
 } as const;
 
 function rowToAcceptedCall(r: Record<string, unknown>): AcceptedCall {
@@ -346,6 +510,26 @@ function rowToApiKey(r: Record<string, unknown>): ApiKeyRecord {
     label: r.label as string,
     issuedAt: r.issued_at as Date,
     revokedAt: (r.revoked_at as Date) ?? null,
+  };
+}
+
+function rowToMembershipLeaf(r: Record<string, unknown>): MembershipLeaf {
+  return {
+    leafIndex: Number(r.leaf_index),
+    commitment: r.commitment as string,
+    status: r.status as MembershipLeafStatus,
+    candidateRoot: r.candidate_root as string,
+    createdAt: r.created_at as Date,
+    updatedAt: r.updated_at as Date,
+  };
+}
+
+function rowToMembershipTreeState(r: Record<string, unknown>): MembershipTreeState {
+  return {
+    root: r.root as string,
+    version: Number(r.version),
+    layers: r.layers as string[][],
+    updatedAt: r.updated_at as Date,
   };
 }
 
@@ -594,6 +778,153 @@ export class PostgresGatewayStore implements GatewayStore {
       out.set(r.commitment, Number(r.total));
     }
     return out;
+  }
+
+  async reserveMembershipLeaf(leaf: {
+    leafIndex: number;
+    commitment: string;
+    candidateRoot: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ${C.membershipLeaves} (leaf_index, commitment, status, candidate_root)
+       VALUES ($1, $2, 'pending', $3)`,
+      [leaf.leafIndex, leaf.commitment, leaf.candidateRoot],
+    );
+  }
+
+  async activateMembershipLeaf(leafIndex: number, root: string, layers: string[][]): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(
+        `UPDATE ${C.membershipLeaves}
+         SET status = 'active', updated_at = now()
+         WHERE leaf_index = $1 AND status = 'pending' AND candidate_root = $2
+         RETURNING leaf_index`,
+        [leafIndex, root],
+      );
+      if (updated.rows.length !== 1) {
+        throw new Error(`pending membership leaf/root mismatch: ${leafIndex}`);
+      }
+      await client.query(
+        `INSERT INTO ${C.membershipTreeState} AS state (tree_name, root, version, layers)
+         VALUES ('active_membership', $1, 1, $2)
+         ON CONFLICT (tree_name) DO UPDATE
+           SET root = EXCLUDED.root, version = state.version + 1,
+             layers = EXCLUDED.layers, updated_at = now()`,
+        [root, JSON.stringify(layers)],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async discardPendingMembershipLeaf(leafIndex: number): Promise<void> {
+    const result = await this.pool.query(
+      `DELETE FROM ${C.membershipLeaves}
+       WHERE leaf_index = $1 AND status = 'pending'
+       RETURNING leaf_index`,
+      [leafIndex],
+    );
+    if (result.rows.length !== 1) {
+      throw new Error(`pending membership leaf not found: ${leafIndex}`);
+    }
+  }
+
+  async removeMembershipLeaf(leafIndex: number, root: string, layers: string[][]): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(
+        `UPDATE ${C.membershipLeaves}
+         SET status = 'removed', updated_at = now()
+         WHERE leaf_index = $1 AND status = 'active'
+         RETURNING leaf_index`,
+        [leafIndex],
+      );
+      if (updated.rows.length !== 1) {
+        throw new Error(`active membership leaf not found: ${leafIndex}`);
+      }
+      await client.query(
+        `INSERT INTO ${C.membershipTreeState} AS state (tree_name, root, version, layers)
+         VALUES ('active_membership', $1, 1, $2)
+         ON CONFLICT (tree_name) DO UPDATE
+           SET root = EXCLUDED.root, version = state.version + 1,
+             layers = EXCLUDED.layers, updated_at = now()`,
+        [root, JSON.stringify(layers)],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async bootstrapMembershipTree(
+    leaves: Array<{ leafIndex: number; commitment: string }>,
+    state: { root: string; layers: string[][] },
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        `SELECT EXISTS (SELECT 1 FROM ${C.membershipLeaves}) AS has_leaves,
+                EXISTS (SELECT 1 FROM ${C.membershipTreeState}) AS has_state`,
+      );
+      if (existing.rows[0]?.has_leaves || existing.rows[0]?.has_state) {
+        throw new Error('membership tree bootstrap requires an empty durable store');
+      }
+      const indices = new Set<number>();
+      const commitments = new Set<string>();
+      for (const leaf of leaves) {
+        if (!Number.isInteger(leaf.leafIndex) || leaf.leafIndex < 0 || leaf.leafIndex >= 8
+          || indices.has(leaf.leafIndex) || commitments.has(leaf.commitment)) {
+          throw new Error('membership tree bootstrap is malformed');
+        }
+        indices.add(leaf.leafIndex);
+        commitments.add(leaf.commitment);
+        await client.query(
+          `INSERT INTO ${C.membershipLeaves} (leaf_index, commitment, status, candidate_root)
+           VALUES ($1, $2, 'active', $3)`,
+          [leaf.leafIndex, leaf.commitment, state.root],
+        );
+      }
+      await client.query(
+        `INSERT INTO ${C.membershipTreeState} (tree_name, root, version, layers)
+         VALUES ('active_membership', $1, 1, $2)`,
+        [state.root, JSON.stringify(state.layers)],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listMembershipLeaves(): Promise<MembershipLeaf[]> {
+    const result = await this.pool.query(
+      `SELECT leaf_index, commitment, status, candidate_root, created_at, updated_at
+       FROM ${C.membershipLeaves} ORDER BY leaf_index ASC`,
+    );
+    return result.rows.map((row) => rowToMembershipLeaf(row as Record<string, unknown>));
+  }
+
+  async getMembershipTreeState(): Promise<MembershipTreeState | null> {
+    const result = await this.pool.query(
+      `SELECT root, version, layers, updated_at FROM ${C.membershipTreeState}
+       WHERE tree_name = 'active_membership'`,
+    );
+    return result.rows.length > 0
+      ? rowToMembershipTreeState(result.rows[0] as Record<string, unknown>)
+      : null;
   }
 }
 

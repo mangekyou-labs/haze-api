@@ -4,7 +4,9 @@ export {
   recoverSecretK,
   skToField,
   FR_ORDER,
+  MEMBERSHIP_TREE_DEPTH,
   mimcHash,
+  deriveMembershipWitness,
   canonicalizeRequest,
   requestDigestToField,
   deriveTicketSignals,
@@ -18,6 +20,10 @@ export {
   generateMembershipRemovalProofSelfVerified,
   ProofSelfVerificationError,
 } from './proof.js';
+export type {
+  PublicMembershipSnapshot,
+  MembershipWitness,
+} from './crypto.js';
 export type {
   ProofResult,
   DepositCircuitResources,

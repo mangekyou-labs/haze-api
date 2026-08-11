@@ -10,7 +10,7 @@ import {
   proveGroth16,
   verifyGroth16Proof,
 } from './proof.js';
-import { generateSecretK, skToField } from './crypto.js';
+import { deriveMembershipWitness, generateSecretK, mimcHash, skToField } from './crypto.js';
 
 // Circuit artifacts are built by M1.0 (slow snarkjs bls12381 Groth16 setup).
 // These tests are skipped until the artifacts exist so the shared package
@@ -161,6 +161,39 @@ describe('generateRlnProofSelfVerified', () => {
         resources,
       );
       expect(result.publicSignals).toHaveLength(4); // [root, nullifier, x, y]
+      expect(result.publicSignals[2]).toBe('123');
+    },
+    180_000,
+  );
+
+  it.runIf(rlnReady)(
+    'self-verifies a second-leaf proof using a locally derived public snapshot witness',
+    async () => {
+      const firstSecret = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+      const secondSecret = Uint8Array.from({ length: 32 }, (_, index) => 255 - index);
+      const firstCommitment = await mimcHash([BigInt(skToField(firstSecret))]);
+      const secondCommitment = await mimcHash([BigInt(skToField(secondSecret))]);
+      const parent = await mimcHash([BigInt(firstCommitment), BigInt(secondCommitment)]);
+      const upper = await mimcHash([BigInt(parent), 0n]);
+      const root = await mimcHash([BigInt(upper), 0n]);
+      const witness = await deriveMembershipWitness(secondCommitment, {
+        root,
+        depth: 3,
+        leaves: [firstCommitment, secondCommitment, '0', '0', '0', '0', '0', '0'],
+      });
+
+      const result = await generateRlnProofSelfVerified(
+        {
+          secret_k: skToField(secondSecret),
+          ticket_index: '1',
+          request_digest: '123',
+          merkle_path_elements: witness.merklePathElements,
+          merkle_path_indices: witness.merklePathIndices,
+        },
+        rlnResources(JSON.parse(readFileSync(rlnVkPath, 'utf-8'))),
+      );
+
+      expect(result.publicSignals[0]).toBe(root);
       expect(result.publicSignals[2]).toBe('123');
     },
     180_000,

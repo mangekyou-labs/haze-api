@@ -329,3 +329,13 @@ Rollback triggers: health check failure ≥3 consecutive intervals, E2E smoke fa
 - Live fee-relay validation discovered inner slash/withdraw transactions need Soroban preparation before signing. `90caf21` (`fix(stellar): prepare fee-relayed transactions`) was pushed and deployments `dep-d9td9dc9v7es73bruc8g` (gateway) and `dep-d9td9dc9v7es73brucj0` (fee sponsor) reached `live`.
 - The gateway was intentionally restarted through the Render API as `dep-d9tdhsjncjis7391ec80` for durable-state validation; it reached `live` and persisted replay/settlement state.
 - Vercel production deployment `dpl_C95vNQJhKWoEoYwGsrcdvLBKFuk3` is Ready at `https://feature-zk-api-credits-qilcxlv6s-gadillacers-projects.vercel.app` (canonical alias: `https://feature-zk-api-credits-gadillacers-projects.vercel.app`). Its encrypted production environment includes gateway, Stripe, and auth values. Preview deployments deliberately do not have those values and visibly disable payment/gateway actions.
+
+## M5.4 Render bootstrap preflight (2026-08-11)
+
+- Replayed the live contract history to recover the exact seven-leaf snapshot
+  for the on-chain root
+  `34251567430187239947604452370786103718161372975737694109261755611773824646686`.
+- Configured the snapshot in the Render gateway's one-time
+  `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` environment variable.
+- The source revision, PostgreSQL migration, hosted health/root checks, and
+  funded sidecar request remain pending until the redeploy completes.

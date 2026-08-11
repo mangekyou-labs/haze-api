@@ -1,12 +1,15 @@
 // Provider Adapter interface — pluggable upstream layer
 // Design doc: v1 ships OpenRouter, v2+ adds financial/data adapters
 
+export type ProviderEndpoint = 'chat.completions' | 'responses';
+
 export interface ProviderAdapter {
   id: string;
 
   forwardRequest(
     userPayload: unknown,
     providerAuth: string,
+    endpoint?: ProviderEndpoint,
   ): Promise<Response>;
 
   computeCost?(userPayload: unknown): bigint;
@@ -28,8 +31,9 @@ export class OpenRouterAdapter implements ProviderAdapter {
   async forwardRequest(
     userPayload: unknown,
     providerAuth: string,
+    endpoint: ProviderEndpoint = 'chat.completions',
   ): Promise<Response> {
-    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/${endpoint}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${providerAuth}`,
@@ -53,10 +57,11 @@ export class MockProviderAdapter implements ProviderAdapter {
   async forwardRequest(
     userPayload: unknown,
     _providerAuth: string,
+    endpoint: ProviderEndpoint = 'chat.completions',
   ): Promise<Response> {
     const body = JSON.stringify({
       id: 'mock-response',
-      object: 'chat.completion',
+      object: endpoint === 'responses' ? 'response' : 'chat.completion',
       choices: [{
         message: {
           role: 'assistant',

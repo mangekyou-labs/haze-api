@@ -82,6 +82,74 @@ describe('MemoryGatewayStore (gateway durable state contract)', () => {
     expect(state.callCounts.get('comm-2')).toBe(1);
   });
 
+  it('persists a pending membership leaf before activating its root without touching call records', async () => {
+    await store.reserveMembershipLeaf({
+      leafIndex: 1,
+      commitment: 'member-2',
+      candidateRoot: 'root-after-member-2',
+    });
+
+    expect(await store.listMembershipLeaves()).toMatchObject([
+      {
+        leafIndex: 1,
+        commitment: 'member-2',
+        status: 'pending',
+        candidateRoot: 'root-after-member-2',
+      },
+    ]);
+    expect(await store.getMembershipTreeState()).toBeNull();
+    expect(await store.listAcceptedCalls()).toEqual([]);
+
+    const layers = [
+      ['0', 'member-2', '0', '0', '0', '0', '0', '0'],
+      ['node-0', '0', '0', '0'],
+      ['node-1', '0'],
+      ['root-after-member-2'],
+    ];
+    await store.activateMembershipLeaf(1, 'root-after-member-2', layers);
+
+    expect(await store.listMembershipLeaves()).toMatchObject([
+      { leafIndex: 1, status: 'active' },
+    ]);
+    expect(await store.getMembershipTreeState()).toMatchObject({
+      root: 'root-after-member-2',
+      version: 1,
+      layers,
+    });
+  });
+
+  it('marks a removed membership leaf and records the resulting root layers', async () => {
+    const activeLayers = [
+      ['member-1', '0', '0', '0', '0', '0', '0', '0'],
+      ['active-node-0', '0', '0', '0'],
+      ['active-node-1', '0'],
+      ['active-root'],
+    ];
+    await store.reserveMembershipLeaf({
+      leafIndex: 0,
+      commitment: 'member-1',
+      candidateRoot: 'active-root',
+    });
+    await store.activateMembershipLeaf(0, 'active-root', activeLayers);
+
+    const removedLayers = [
+      ['0', '0', '0', '0', '0', '0', '0', '0'],
+      ['removed-node-0', '0', '0', '0'],
+      ['removed-node-1', '0'],
+      ['removed-root'],
+    ];
+    await store.removeMembershipLeaf(0, 'removed-root', removedLayers);
+
+    expect(await store.listMembershipLeaves()).toMatchObject([
+      { leafIndex: 0, status: 'removed' },
+    ]);
+    expect(await store.getMembershipTreeState()).toMatchObject({
+      root: 'removed-root',
+      version: 2,
+      layers: removedLayers,
+    });
+  });
+
   it('lists accepted calls pending on-chain spend (settlement queue resumption)', async () => {
     await store.recordAcceptedCall(sampleCall({ proofHash: 'ph-pending' }), 'comm-1');
     await store.recordAcceptedCall(

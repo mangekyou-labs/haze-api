@@ -61,6 +61,31 @@ jobs:
       - name: Unit tests
         run: npm test
 
+  sidecar:
+    name: Proof-aware sidecar (packages/zk-credits-sidecar)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/zk-credits-sidecar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/zk-credits-sidecar/package-lock.json
+      - name: Build @zk-credits/shared package (file dependency)
+        working-directory: packages/zk-credits-shared
+        run: npm ci && npm run build
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Package contents
+        run: npm pack --dry-run
+
   fee-sponsor:
     name: Fee-sponsor service (services/fee-sponsor)
     runs-on: ubuntu-latest

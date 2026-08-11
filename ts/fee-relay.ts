@@ -7,7 +7,7 @@
 // used to sponsor an arbitrary transfer. Idempotent on the inner tx hash:
 // a retried inner tx is sponsored exactly once.
 
-import { TransactionBuilder, hash, Keypair, Networks, StrKey, xdr } from '@stellar/stellar-sdk';
+import { TransactionBuilder, hash, Keypair, Networks, StrKey, scValToNative, xdr } from '@stellar/stellar-sdk';
 import type { FeeSponsorStore } from './db/index.js';
 
 /** Methods the fee relay is allowed to sponsor. */
@@ -106,6 +106,52 @@ export function validateRelayRequest(
 
   const innerTxHash = hash(Buffer.from(innerTxXdr, 'base64')).toString('hex');
   return { method, innerTxHash };
+}
+
+/**
+ * Reads the root-removal values from the same signed inner transaction that
+ * the fee sponsor validates. The gateway uses this only to mirror a
+ * contract-accepted slash into its public membership snapshot.
+ */
+export function extractSlashTransition(
+  innerTxXdr: string,
+  contractId: string,
+): { commitment: string; currentRoot: string; nextRoot: string } {
+  const { method } = validateRelayRequest(innerTxXdr, contractId);
+  if (method !== 'slash') throw new InvalidRelayRequestError('expected a slash transaction');
+
+  const tx = TransactionBuilder.fromXDR(innerTxXdr, Networks.TESTNET);
+  const invoke = tx.operations[0] as unknown as {
+    func?: {
+      invokeContract?: () => { args?: () => xdr.ScVal[] };
+    };
+  };
+  const args = invoke.func?.invokeContract?.().args?.();
+  if (!args || args.length !== 4) {
+    throw new InvalidRelayRequestError('slash transaction must contain four contract arguments');
+  }
+
+  let pubSignals: unknown;
+  let commitment: unknown;
+  try {
+    pubSignals = scValToNative(args[1]!);
+    commitment = scValToNative(args[2]!);
+  } catch {
+    throw new InvalidRelayRequestError('slash transaction has malformed public signals');
+  }
+  if (!Array.isArray(pubSignals) || pubSignals.length !== 9) {
+    throw new InvalidRelayRequestError('slash transaction must contain nine public signals');
+  }
+  const normalizedSignals = pubSignals.map((signal) => String(signal));
+  const normalizedCommitment = String(commitment);
+  if (normalizedSignals[1] !== normalizedCommitment) {
+    throw new InvalidRelayRequestError('slash commitment does not match its public signals');
+  }
+  return {
+    commitment: normalizedCommitment,
+    currentRoot: normalizedSignals[3]!,
+    nextRoot: normalizedSignals[4]!,
+  };
 }
 
 /**

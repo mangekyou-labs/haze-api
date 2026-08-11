@@ -360,3 +360,74 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Reusing ticket zero for a different request returned `409 fork_detected`. A locally verified slash proof was submitted through `/v1/slash`; the fee sponsor accepted `slash` and the contract marked the deposit slashed.
 - A fresh 1-USDC test commitment was deposited through the transactional endpoint and then withdrawn with a locally self-verified membership-removal proof. The gateway co-signed the prepared envelope, the sponsor fee-bumped it, and the contract recorded `withdrawn`.
 - An explicit Render gateway restart was performed after accepting a fresh ticket. The exact tuple returned the same persisted provider-response hash after restart and its nullifier was confirmed spent on-chain. This covers durable accept, replay retrieval, worker resumption, and on-chain settlement.
+
+## M5.0 durable membership tree (2026-08-11; local implementation)
+
+- `ts/db/migrations/0008_membership_tree.sql` creates
+  `gateway.membership_tree_leaves` and `gateway.membership_tree_state`. Leaf
+  index, commitment, transition status, candidate root, and root version are
+  durable deposit/tree state; `gateway.accepted_calls` is unchanged and has no
+  membership join.
+- `submitDeposit()` now reserves one pending leaf before on-chain submission,
+  discards it on a rejected transaction, then atomically activates it with the
+  new root after success. `ts/membership-tree.ts` rebuilds the indexed tree at
+  startup, resolves exactly one chain-confirmed pending leaf, and fails closed
+  on any other root divergence. A pre-durable deployment can be initialized
+  exactly once with `MEMBERSHIP_TREE_BOOTSTRAP_LEAVES`; its local root must
+  equal the live Soroban root.
+- `GET /v1/membership-tree` returns `{ root, depth, leaves, layers,
+  generatedAt }`. `layers` is public deterministic Merkle data needed to
+  preserve a valid zero branch after a slash/withdrawal; query parameters do
+  not select a commitment or witness, and the caller derives its own path
+  locally. `ts/merkle.ts` now supports indexed restoration via `fromLeaves`,
+  `fromLayers`, `setLeaf`, and read-only leaf access.
+- `.gitignore` now explicitly retains the membership-removal WASM/zkey in
+  `circuits/` and the byte-identical browser copies. The release artifacts are
+  staged for source control; no dynamic circuit download is introduced.
+- This source slice is not deployed yet. The existing nonzero Render root must
+  be bootstrapped from an exact public `{ leaves, layers }` snapshot via
+  `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` before deployment; additive-only
+  `MEMBERSHIP_TREE_BOOTSTRAP_LEAVES` cannot represent a post-removal root. A
+  missing or mismatched snapshot intentionally stops startup.
+
+## M5.1–M5.3 proof-aware transport (2026-08-11; local implementation)
+
+- `@zk-credits/shared` now validates a public membership snapshot and derives
+  a caller's Merkle path locally. `web/src/lib/crypto.ts` fetches the
+  parameter-free snapshot with `no-store`, checks freshness, and uses that
+  same witness for both RLN and membership-removal proofs; the first-leaf zero
+  witness is removed.
+- The gateway shares one proof-bound spend pipeline for Chat Completions and
+  `POST /v1/responses`. OpenRouter forwarding selects the matching endpoint.
+  JSON responses and bounded SSE transcripts are durable replay records; an
+  oversized completed stream has a terminal `stream_replay_unavailable`
+  response rather than an indefinite pending retry.
+- `packages/zk-credits-sidecar` is an independently buildable Node package.
+  It stores only derived `secret_k` bytes in the system credential store,
+  supports a process-only headless mnemonic, verifies its pinned RLN WASM,
+  zkey, and verification-key SHA-256 manifest, serializes a mode-0600 local
+  ticket ledger, and binds only `127.0.0.1`. Its `zk-credits` executable
+  provides `import-mnemonic`, `serve`, and `env`; it forwards the original JSON
+  body with a fresh local proof and never sends its local bearer or secret to
+  Render.
+- `ts/fee-relay.ts` extracts the commitment/root transition from the same
+  signed slash XDR that the sponsor validates. The gateway applies that
+  transition to its durable membership snapshot only after the sponsor accepts
+  the slash, matching withdrawal removal behavior.
+- These local source changes are not deployed. The remaining M5.4 gate is
+  PostgreSQL/bootstrap migration, Render deployment, a real Responses call
+  through the sidecar, and the required interactive Chrome walkthrough.
+
+## M5.4 Render bootstrap preflight (2026-08-11)
+
+- Replayed the contract's `Deposited`, `Slashed`, and `Withdrawn` events and
+  decoded the historical transaction arguments to recover the exact current
+  seven-leaf public snapshot rather than reconstructing it from an inferred
+  membership list.
+- The recovered root is
+  `34251567430187239947604452370786103718161372975737694109261755611773824646686`;
+  its only nonzero leaf is the current on-chain commitment at index `0`.
+- Configured that snapshot as the one-time
+  `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` Render gateway environment variable.
+  The source commit and migration still require deployment before this
+  bootstrap can be validated against the hosted PostgreSQL database.
