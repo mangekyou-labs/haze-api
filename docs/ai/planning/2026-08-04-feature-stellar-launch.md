@@ -580,3 +580,29 @@ commit/push the validated indexed-ticket source and artifacts, redeploy both
 Render services from that commit, and re-run M4.1–M4.4. The deposit path also
 now stages and commits Merkle state only after the on-chain transaction
 succeeds; this regression must be included in that rollout.
+
+### Reconciliation (Dev-Implementation · M4 hosted validation · 2026-08-11)
+
+**Milestone status:** `M1 DONE` · `M2 DONE` · `M3 DONE` · `M4.1–M4.4 DONE`.
+
+- M4.1: two current four-signal tickets self-verified locally, matched the
+  deployed root, reached OpenRouter with HTTP 200 responses, returned a stored
+  response on exact retry, and settled both nullifiers on Soroban.
+- M4.2: gateway fork detection returned 409 with a genuine conflicting ticket;
+  the public fee sponsor executed a locally verified slash proof and the
+  contract marked the affected deposit slashed.
+- M4.3: an endpoint-funded fresh commitment completed gateway-mediated,
+  membership-proof-protected withdrawal through a fee bump and read back as
+  withdrawn on-chain.
+- M4.4: an explicit Render restart preserved the accepted response and the
+  restarted spend worker settled the ticket. The current implementation is
+  therefore validated for the durable acceptance/replay/settlement sequence.
+
+**External acceptance boundaries:** Chrome/Playwright reached the live GitHub
+OAuth entry screen, but completing OAuth requires a real user account and
+consent. Stripe production variables are configured, but a full hosted checkout
+requires a test-payment session; it was not repeated in this pass. Actual
+OpenRouter low-token requests succeeded, while account-wide provider tier and
+billing limits remain an operator-console check. Render edge cold starts/timeouts
+were observed and should be monitored before public traffic. These are
+operational/account tasks, not unverified protocol behavior.

@@ -279,3 +279,13 @@ statement:
 - [x] Soroban contract suite: 24/24 passed with `cargo +1.92.0 test`. The default local Cargo 1.79 remains too old for the Edition 2024/Soroban 26 dependency graph.
 - [ ] Hosted indexed-ticket acceptance is intentionally not claimed yet. The live Render gateway is still serving committed revision `42ef3d1`, whose five-signal endpoint rejects the current four-signal proofs before OpenRouter forwarding. The validated source revision must be pushed and redeployed before re-running two-ticket, exact-retry, fork/slash, withdrawal, and restart checks.
 - [x] Fee-relay envelope RED/GREEN: a live fee bump exposed that slash/withdraw envelopes were signed before Soroban preparation. The new contract-client regression first failed with no helper, then passes by asserting `prepareTransaction()` precedes the signer. Full gateway suite: 143 passed, 11 skipped; strict typecheck passed. The fix awaits its Render rollout before repeating the live slash.
+
+## Hosted M4 evidence (2026-08-11)
+
+- [x] Render deployment `dd38685`: both services live with the four-signal endpoint; live health and contract-status report the intended contract and active root.
+- [x] Two-ticket provider path: two fresh Groth16 proofs self-verified locally, matched the contract root, returned HTTP 200 with real provider responses, and each corresponding Soroban nullifier became spent. The exact first tuple returned its stored HTTP 200 response rather than issuing a second request.
+- [x] Fork/slash: a different request with ticket zero returned `409 fork_detected`; a locally verified nine-signal slash proof was accepted by the public fee relay after `90caf21` and the original deposit read back as `slashed`.
+- [x] Withdraw: a fresh 1-USDC test deposit returned 200 from `/v1/deposits`; its locally verified membership-removal proof returned 200 from `/v1/withdraw` with a fee-bump hash; the deposit read back as `withdrawn`.
+- [x] Restart durability: Render restart deployment `dep-d9tdhsjncjis7391ec80` reached `live`; an accepted ticket replay returned an identical SHA-256 response fingerprint after restart and the restarted worker's nullifier settlement was verified on Soroban.
+- [x] Chrome/Playwright observation: the Vercel preview and production deployments rendered the landing without console errors. Chrome clicked Get Started into the dashboard on preview; production reached the GitHub sign-in screen with its OAuth button visible and zero console errors.
+- [!] Operational caveat: Render's public edge intermittently timed out during the long live pass while the API reported the service `live`; retrying health checks recovered. Treat free-tier cold-start/edge availability as a launch-monitoring risk.

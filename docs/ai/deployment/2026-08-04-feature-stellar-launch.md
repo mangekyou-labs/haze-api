@@ -322,3 +322,10 @@ Rollback triggers: health check failure ≥3 consecutive intervals, E2E smoke fa
 - The Render gateway service tracks the `feature-stellar-launch` branch and its latest live deployment is `dep-d9tcin2d0e5s738rki1g` at committed revision `42ef3d1`.
 - That revision still expects the legacy five-signal epoch proof, whereas the configured live contract and current source use the four-signal indexed-ticket statement. A locally self-verified current proof reached the gateway and was correctly diagnosed as rejected by the legacy parser (`Expected 5 public signals, got 4`).
 - The source and current artifacts must be committed and pushed to that branch, then the Render API can create a new deployment. Do not treat a configuration-only redeploy of `42ef3d1` as an indexed-ticket launch deployment.
+
+## Indexed-ticket production rollout (2026-08-11)
+
+- `dd38685` (`feat(stellar): launch indexed-ticket credit flow`) was pushed to the Render-tracked branch. Auto-deployments `dep-d9td31uq1p3s73ang7q0` (gateway) and `dep-d9td31uq1p3s73ang7kg` (fee sponsor) reached `live`.
+- Live fee-relay validation discovered inner slash/withdraw transactions need Soroban preparation before signing. `90caf21` (`fix(stellar): prepare fee-relayed transactions`) was pushed and deployments `dep-d9td9dc9v7es73bruc8g` (gateway) and `dep-d9td9dc9v7es73brucj0` (fee sponsor) reached `live`.
+- The gateway was intentionally restarted through the Render API as `dep-d9tdhsjncjis7391ec80` for durable-state validation; it reached `live` and persisted replay/settlement state.
+- Vercel production deployment `dpl_C95vNQJhKWoEoYwGsrcdvLBKFuk3` is Ready at `https://feature-zk-api-credits-qilcxlv6s-gadillacers-projects.vercel.app` (canonical alias: `https://feature-zk-api-credits-gadillacers-projects.vercel.app`). Its encrypted production environment includes gateway, Stripe, and auth values. Preview deployments deliberately do not have those values and visibly disable payment/gateway actions.

@@ -352,3 +352,11 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 
 - Live slash validation reached the fee sponsor but the submitted fee bump was rejected as malformed. The inner Soroban transaction had been signed before `prepareTransaction()` added its simulation-derived resources and authorization entries.
 - `buildSlashEnvelope()` and `buildWithdrawEnvelope()` now share `prepareAndSignEnvelope()`: prepare first, then attach the inner source signature, then hand the resulting XDR to the fee-only sponsor.
+
+## Live M4 completion evidence (2026-08-11)
+
+- Render deployment `dd38685` activated the four-signal indexed-ticket gateway and matching artifacts. A follow-up prepared-envelope fix (`90caf21`) was then deployed to both gateway and fee sponsor.
+- One funded commitment produced two locally self-verified indexed-ticket calls to the real OpenRouter provider. Each returned HTTP 200 with a provider response; replaying the identical proof returned the stored response. Direct Soroban reads confirmed both nullifiers were spent by the asynchronous worker.
+- Reusing ticket zero for a different request returned `409 fork_detected`. A locally verified slash proof was submitted through `/v1/slash`; the fee sponsor accepted `slash` and the contract marked the deposit slashed.
+- A fresh 1-USDC test commitment was deposited through the transactional endpoint and then withdrawn with a locally self-verified membership-removal proof. The gateway co-signed the prepared envelope, the sponsor fee-bumped it, and the contract recorded `withdrawn`.
+- An explicit Render gateway restart was performed after accepting a fresh ticket. The exact tuple returned the same persisted provider-response hash after restart and its nullifier was confirmed spent on-chain. This covers durable accept, replay retrieval, worker resumption, and on-chain settlement.
