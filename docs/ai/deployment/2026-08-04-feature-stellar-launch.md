@@ -330,6 +330,20 @@ Rollback triggers: health check failure ≥3 consecutive intervals, E2E smoke fa
 - The gateway was intentionally restarted through the Render API as `dep-d9tdhsjncjis7391ec80` for durable-state validation; it reached `live` and persisted replay/settlement state.
 - Vercel production deployment `dpl_C95vNQJhKWoEoYwGsrcdvLBKFuk3` is Ready at `https://feature-zk-api-credits-qilcxlv6s-gadillacers-projects.vercel.app` (canonical alias: `https://feature-zk-api-credits-gadillacers-projects.vercel.app`). Its encrypted production environment includes gateway, Stripe, and auth values. Preview deployments deliberately do not have those values and visibly disable payment/gateway actions.
 
+## M5.4 Render deployment validation (2026-08-11)
+
+- Pushed revision `f0c1b77` to `feature-stellar-launch`.
+- Render gateway deployment `dep-d9tiaek9v7es73c0l7b0` and fee-sponsor
+  deployment `dep-d9tiaek9v7es73c0l75g` reached `live`.
+- Gateway `/health`, `/v1/contract-status`, and `/v1/membership-tree` returned
+  HTTP 200. The contract status and membership endpoint both reported root
+  `34251567430187239947604452370786103718161372975737694109261755611773824646686`.
+- Fee sponsor `/health` returned HTTP 200. The public Vercel Chrome/Playwright
+  walkthrough also returned HTTP 200 for `/`, `/sign-in`, `/onboarding`, and
+  `/recover` with the expected rendered content.
+- A funded sidecar `/v1/responses` request remains pending until the active
+  testnet commitment's recovery phrase is available.
+
 ## M5.4 Render bootstrap preflight (2026-08-11)
 
 - Replayed the live contract history to recover the exact seven-leaf snapshot

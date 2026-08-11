@@ -341,7 +341,8 @@ statement:
   deposit/slash/withdraw transitions.
 - [x] Set the one-time Render bootstrap environment variable without storing
   the Render credential in the repository.
-- [ ] Deploy the source revision, confirm gateway and fee-sponsor health, and
+- [x] Deploy revision `f0c1b77`, confirm gateway and fee-sponsor health, and
   verify the hosted membership endpoint returns the recovered root.
 - [ ] Complete a funded sidecar Responses request and the Chrome/Playwright
-  walkthrough.
+  walkthrough. The public Vercel walkthrough is complete; the funded sidecar
+  portion requires the recovery phrase for the active testnet commitment.

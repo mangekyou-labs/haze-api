@@ -429,5 +429,8 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
   its only nonzero leaf is the current on-chain commitment at index `0`.
 - Configured that snapshot as the one-time
   `MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT` Render gateway environment variable.
-  The source commit and migration still require deployment before this
-  bootstrap can be validated against the hosted PostgreSQL database.
+- Pushed source revision `f0c1b77`; the Render gateway and fee-sponsor
+  deployments reached `live`, and the hosted PostgreSQL bootstrap now returns
+  the recovered root through `/v1/membership-tree`.
+- The funded sidecar Responses call remains credential-gated: no recovery
+  phrase for the active on-chain commitment is present in this workspace.

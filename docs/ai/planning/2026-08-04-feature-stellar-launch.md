@@ -817,5 +817,6 @@ The exact public membership snapshot has been recovered by replaying the live
 contract's historical deposit, slash, and withdrawal transitions. Its root
 matches `get_current_root`, and the one-time Render bootstrap environment
 variable is configured with the full `{root, depth, leaves, layers}` payload.
-The next gate is deploying this source revision and validating the migration
-and bootstrap against the hosted PostgreSQL instance.
+Revision `f0c1b77` is deployed to both Render services, and the hosted
+PostgreSQL bootstrap/root checks pass. The remaining credential-dependent gate
+is one funded sidecar Responses request through an OpenAI-compatible client.
