@@ -27,9 +27,7 @@ FROM node:24-alpine
 WORKDIR /app
 
 # Copy shared package dist + node_modules + package.json + gateway with deps
-COPY --from=builder /app/packages/zk-credits-shared/package.json /app/packages/zk-credits-shared/package.json
-COPY --from=builder /app/packages/zk-credits-shared/dist /app/packages/zk-credits-shared/dist
-COPY --from=builder /app/packages/zk-credits-shared/node_modules /app/packages/zk-credits-shared/node_modules
+COPY --from=builder /app/packages/zk-credits-shared /app/packages/zk-credits-shared
 COPY --from=builder /app/ts/node_modules /app/ts/node_modules
 COPY --from=builder /app/ts /app/ts
 
