@@ -1,6 +1,6 @@
 {
   "name": "zk-credits",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Loopback proof-aware OpenAI transport for ZK Credits.",
   "type": "module",
   "engines": {
