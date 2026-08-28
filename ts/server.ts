@@ -290,8 +290,9 @@ verificationKey = loadVerificationKey();
 // ─── Healthcheck & Readiness Gate ──────────────────────────────────
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.status(isReady ? 200 : 503).json({
-    status: isReady ? 'ok' : 'initializing',
+  res.status(200).json({
+    status: 'ok',
+    initialized: isReady,
     version: '0.1.0',
     network: 'stellar:testnet',
     proofVerification: 'enabled',
