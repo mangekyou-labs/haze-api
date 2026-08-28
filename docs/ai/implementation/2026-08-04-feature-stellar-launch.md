@@ -561,7 +561,7 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Verified package contents via `npm pack --dry-run`: 44 packaged files including bundled `circuits/rln_nullifier_final.zkey`, `circuits/rln_nullifier.wasm`, `dist/anthropic-messages.js`, `dist/claude-launcher.js`, `dist/codex-sdk-options.js`, and `dist/zk-credits.js`.
 - Updated UI surfaces with clean pre-funded / funded separation: onboarding wizard done step and dashboard API-key section provide install/import guidance (`npm install --global zk-credits`, `zk-credits import-mnemonic`), while the active `DashboardStatus` component exclusively renders the multi-agent launch commands (`zk-credits cline`, `zk-credits claude`, `zk-credits setup codex`) upon active deposit confirmation.
 - Added TDD behavior tests in `web/e2e/agent-ui.spec.ts` (Playwright DOM verification) and `web/src/lib/agent-ui.test.ts`.
-- Linked `zk-credits@0.1.2` globally via `npm link`. Registry publish for `0.1.2` remains blocked on operator OTP.
+- Linked `zk-credits@0.1.2` globally via `npm link` and verified public npm registry publish (`version 0.1.2`, `dist-tags.latest 0.1.2`) with clean `npx zk-credits@0.1.2 --help` execution.
 
 ## Task 5.10 Fresh-user agent proof status (2026-08-28)
 
