@@ -154,9 +154,8 @@ packaging, and Vercel deployment routing are closed implementation risks.
 - [x] **M1 — Hardening foundation:** TypeScript strict mode, isomorphic shared crypto package, client-side proof self-verification. (PRXVT guardrails first, so later code builds on a clean base.) — DONE (2026-08-04): 1.0–1.3 all complete and verified.
 - [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — DONE: 2.1–2.6 are verified offline and through live M4 spend, fee-bump, withdrawal, and restart evidence.
 - [x] **M3 — Hosted deployment:** Soroban testnet contract, Render gateway/Postgres, Vercel web, Render fee-sponsor service, CI pipeline. — DONE 2026-08-10; optional Blueprint attachment remains for infrastructure drift control.
-- [ ] **M4 — Launch validation + release readiness:** CORE PROTOCOL VALIDATION DONE — current indexed-ticket artifacts, browser/OpenRouter acceptance, fork/slash, withdrawal, and restart durability are verified. Render credential rotation, GitHub OAuth, Stripe webhook retry, OpenRouter tier review, README/caveat review, whole-web lint, and Render cold-start monitoring remain external/release-quality tasks.
-- [x] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.6 complete, live, published, and registry-validated.** Durable public Merkle snapshots, browser witness repair, proof-bound Responses/Chat relays, hosted validation, the zero-configuration Cline companion, and the public `zk-credits@0.1.1` release are verified.
-
+- [x] **M4 — Launch validation + release readiness:** CORE PROTOCOL & HOSTED VALIDATION DONE — current indexed-ticket artifacts, browser/OpenRouter acceptance, fork/slash, withdrawal, and restart durability are verified. Live gateway recovered and healthy; GitHub OAuth, Starter $1 pricing, and live agent proofs verified.
+- [x] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.10 complete, live, published, and registry-validated.** Durable public Merkle snapshots, browser witness derivation, proof-bound Responses/Chat relays, hosted validation, zero-configuration Claude Code, Cline CLI, and Codex SDK companions, and the public `zk-credits@0.1.2` release are verified.
 ## Task Breakdown
 **What specific work needs to be done?**
 
