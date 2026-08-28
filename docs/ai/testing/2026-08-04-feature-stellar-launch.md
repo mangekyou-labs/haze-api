@@ -461,7 +461,8 @@ statement:
 - [x] Verified `zk-credits --help` output displays `cline`, `claude`, `setup codex`, `codex`, `import-mnemonic`, `serve`, `status`, `eval "$(zk-credits env)"`.
 - [x] Updated UI surfaces with clean pre-funded / funded separation: onboarding wizard done step and dashboard API-key section provide install/import guidance (`npm install --global zk-credits`, `zk-credits import-mnemonic`), while the active `DashboardStatus` component exclusively renders the multi-agent launch commands (`zk-credits cline`, `zk-credits claude`, `zk-credits setup codex`) upon active deposit confirmation.
 - [x] TDD behavior tests in `web/e2e/agent-ui.spec.ts` (2/2 passed) and `web/src/lib/agent-ui.test.ts` (3/3 passed) verify multi-agent commands rendered in DOM on active status and absent when unfunded.
-- [x] Published `zk-credits@0.1.2` to npm registry; verified `npm view zk-credits version` returns `0.1.2` and clean `npx zk-credits@0.1.2 --help` execution.
+- [x] Published `zk-credits@0.1.2` to npm registry; verified `npm view zk-credits version` returns `0.1.2`.
+- [x] Clean tarball verification: Performed isolated temp-prefix install (`npm install --prefix $TMPDIR zk-credits@0.1.2`), verified `$TMPDIR/node_modules/.bin/zk-credits --help`, verified presence of circuit artifacts (`rln_nullifier_final.zkey`, `rln_nullifier.wasm`), and verified ESM import of `zk-credits/codex` (`buildCodexSdkOptions`, `buildCodexThreadOptions`) with correct options derivation.
 
 ## Task 5.10 Fresh-user agent proof verification status (2026-08-28)
 
