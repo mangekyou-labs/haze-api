@@ -61,6 +61,29 @@ describe('reconstructMembershipTreeFromStore', () => {
     ]);
   });
 
+  it('reconstructs active tree state from legacy hex commitment representation', async () => {
+    const store = new MemoryGatewayStore();
+    const tree = new MerkleTree();
+    const hexCommitment = '0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c';
+    const root = (await tree.insert(BigInt(hexCommitment))).toString();
+
+    // Store holds legacy hex string, state holds computed layers
+    await store.reserveMembershipLeaf({
+      leafIndex: 0,
+      commitment: hexCommitment,
+      candidateRoot: root,
+    });
+    await store.activateMembershipLeaf(
+      0,
+      root,
+      tree.getLayers().map((layer) => layer.map(String)),
+    );
+
+    const restored = await reconstructMembershipTreeFromStore(store, root);
+    expect(restored.root().toString()).toBe(root);
+    expect(restored.getLeaf(0)).toBe(BigInt(hexCommitment));
+  });
+
   it('fails closed when persisted leaves cannot reproduce the active chain root', async () => {
     const store = new MemoryGatewayStore();
     await store.reserveMembershipLeaf({

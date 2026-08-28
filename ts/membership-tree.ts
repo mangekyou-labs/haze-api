@@ -54,7 +54,13 @@ async function buildActiveTree(
     if (!Number.isInteger(leaf.leafIndex) || leaf.leafIndex < 0 || leaf.leafIndex >= TREE_CAPACITY) {
       throw rootMismatch(`leaf index ${leaf.leafIndex} out of bounds`);
     }
-    if (tree.getLeaf(leaf.leafIndex).toString() !== leaf.commitment) {
+    let commitmentBigInt: bigint;
+    try {
+      commitmentBigInt = BigInt(leaf.commitment);
+    } catch {
+      throw rootMismatch(`leaf commitment "${leaf.commitment}" is not an integer`);
+    }
+    if (tree.getLeaf(leaf.leafIndex) !== commitmentBigInt) {
       throw rootMismatch(
         `tree leaf ${leaf.leafIndex} (${tree.getLeaf(leaf.leafIndex).toString()}) !== commitment (${leaf.commitment})`,
       );

@@ -841,15 +841,17 @@ export async function submitDeposit(
     throw new Error('gateway_key_not_configured');
   }
 
+  const canonicalCommitment = BigInt(commitment).toString();
+
   return withDepositLock(async () => {
     const candidateTree = merkleTree.clone();
     const leafIndex = candidateTree.getLeaves().indexOf(0n);
     if (leafIndex < 0) throw new Error('Tree is full');
-    const newRoot = await candidateTree.insert(BigInt(commitment));
+    const newRoot = await candidateTree.insert(BigInt(canonicalCommitment));
 
     await gatewayStore.reserveMembershipLeaf({
       leafIndex,
-      commitment,
+      commitment: canonicalCommitment,
       candidateRoot: newRoot.toString(),
     });
 
@@ -858,7 +860,7 @@ export async function submitDeposit(
     try {
       txHash = await contractModule.deposit(
         gatewaySecretKey,
-        commitment,
+        canonicalCommitment,
         newRoot.toString(),
         amount.toString(),
       );
