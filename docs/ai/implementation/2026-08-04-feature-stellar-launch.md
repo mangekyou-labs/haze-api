@@ -545,14 +545,29 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Wired `zk-credits claude` command into `cli-runtime.ts` and `cli.ts`.
 - Verified live Claude Code print-mode execution against the sidecar and hosted gateway, consuming ticket indices `17` and `18`.
 
-## Task 4.1 Hosted Stripe & GitHub OAuth integration status (2026-08-28)
+## Task 4.1 Hosted Stripe & GitHub OAuth integration (2026-08-28)
 
-- Preserved strict deterministic unconfigured assertions in `web/e2e/dashboard.spec.ts` for clean CI reproducibility without test-environment coupling.
-- Verified Stripe Checkout in real browser: generated live session `cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51`, loaded Stripe Checkout in browser, submitted test card `4242...`, verified session transitioned to `payment_status: "paid"`, `status: "complete"`.
-- Verified live webhook verification on hosted Vercel endpoint: dispatched signed Stripe event `evt_1U9Mo81I3zjIgUTMe1FE3XEe` with `stripe-signature` to `POST https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe`; Vercel validated the HMAC signature and returned HTTP 200 `{"received":true,"processed":false,"duplicate":true}`.
-- Verified active on-chain deposit confirmation on hosted gateway: `GET https://zk-credits-gateway.onrender.com/v1/status/1839...` returned HTTP 200 with `depositStatus: "active"`, `remainingCalls: 100`, `balanceUsdc: "5000000"`.
-- Verified GitHub OAuth configuration in `src/auth.ts`: "Sign in with GitHub" on `/sign-in` enables when credentials are present; fails closed on unauthenticated access.
-- Documented open hosted acceptance gaps under 4.1: (1) hosted `/dashboard?checkout=success` pending $\rightarrow$ confirmed UI transition was not rendered on Vercel (redirects to `/sign-in`); (2) hosted Vercel `/api/webhooks/stripe` response was a retry (`duplicate: true`), not an initial first delivery; (3) GitHub OAuth remains unconfigured in Vercel project environment variables (button disabled on live site).
+- Configured production GitHub OAuth on Vercel: provisioned `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `AUTH_TRUST_HOST=1`, and `AUTH_URL=https://feature-zk-api-credits-gadillacers-projects.vercel.app`.
+- Verified live OAuth round-trip on Vercel production: authenticated operator GitHub user, establishing session and rendering `/dashboard`.
+- Generated browser identity in production dashboard, calculating secret key and recovery phrase locally in IndexedDB without server exposure.
+- Completed live Stripe Checkout in browser on pre-fix $5 build; Starter tier price was subsequently reconciled and deployed to $1.00 for 100 private tickets (1 USDC / 100 cents) across checkout route and dashboard UI (fresh $1 checkout unexercised).
+- Verified return to `/dashboard?checkout=success` while preserving authenticated user session.
+- Retained single canonical Stripe webhook endpoint targeting `https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe`.
+- Open item: Gateway returned HTTP 503 (`hibernate-wake-error`) during live walkthrough; first-delivery `{ duplicate: false }` and active status confirmation remain blocked on gateway container recovery.
+
+## Task 5.9 Installable coding-agent MVP (2026-08-28)
+
+- Bumped sidecar version to `0.1.2` in `packages/zk-credits-sidecar/package.json` and `package-lock.json`.
+- Verified package contents via `npm pack --dry-run`: 44 packaged files including bundled `circuits/rln_nullifier_final.zkey`, `circuits/rln_nullifier.wasm`, `dist/anthropic-messages.js`, `dist/claude-launcher.js`, `dist/codex-sdk-options.js`, and `dist/zk-credits.js`.
+- Updated UI surfaces with clean pre-funded / funded separation: onboarding wizard done step and dashboard API-key section provide install/import guidance (`npm install --global zk-credits`, `zk-credits import-mnemonic`), while the active `DashboardStatus` component exclusively renders the multi-agent launch commands (`zk-credits cline`, `zk-credits claude`, `zk-credits setup codex`) upon active deposit confirmation.
+- Added TDD behavior tests in `web/e2e/agent-ui.spec.ts` (Playwright DOM verification) and `web/src/lib/agent-ui.test.ts`.
+- Linked `zk-credits@0.1.2` globally via `npm link`. Registry publish for `0.1.2` remains blocked on operator OTP.
+
+## Task 5.10 Fresh-user agent proof status (2026-08-28)
+
+- Verified installed agents on workstation: Cline CLI (`cline`), Claude Code (`claude`), Codex CLI (`codex`).
+- Verified protocol paths for Codex SDK and Claude Code Messages adapter.
+- Open item: Test identity exposed in process arguments was marked compromised; clean proof via hidden TTY import remains open until gateway is restored and a replacement identity is funded.
 ## Task 4.7 Render API credential rotation (2026-08-28)
 
 - Probed Render REST API and verified `/v1/api-keys` and `/v1/tokens` are not supported over REST (HTTP 404). Render restricts API key management exclusively to the Web Dashboard.

@@ -235,24 +235,20 @@ export function OnboardingWizard() {
           </div>
           <h2 className="text-xl font-semibold text-white">All Set!</h2>
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-            Your private identity key is ready. Continue to your dashboard to fund Starter tickets, or import your phrase into your local agent CLI:
+            Your private identity key is ready. Continue to your dashboard to fund Starter tickets, and import your phrase into your local agent CLI:
           </p>
           <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-left font-mono text-xs text-zinc-300">
-            <p className="mb-2 font-sans font-medium text-zinc-400">CLI Commands:</p>
+            <p className="mb-2 font-sans font-medium text-zinc-400">CLI Setup:</p>
             <div className="space-y-1">
               <div><code>npm install --global zk-credits</code></div>
               <div><code>zk-credits import-mnemonic</code></div>
-              <div className="pt-2 font-sans text-[11px] text-zinc-500">Run with your coding agent:</div>
-              <div><code className="text-indigo-300">zk-credits cline &quot;Explain Stellar CAP-0059&quot;</code></div>
-              <div><code className="text-indigo-300">zk-credits claude -p &quot;Explain Stellar CAP-0059&quot;</code></div>
-              <div><code className="text-indigo-300">zk-credits setup codex &amp;&amp; zk-credits codex &quot;Explain Stellar CAP-0059&quot;</code></div>
             </div>
           </div>
           <button
             onClick={handleFinish}
             className="mt-6 rounded-xl bg-indigo-600 px-6 py-3 font-medium text-white transition-colors hover:bg-indigo-500"
           >
-            Go to Dashboard
+            Go to Dashboard to Fund Tickets
           </button>
         </div>
       )}

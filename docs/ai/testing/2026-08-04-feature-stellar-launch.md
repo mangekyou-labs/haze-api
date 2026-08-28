@@ -447,21 +447,27 @@ statement:
 ## Task 4.1 Hosted Stripe & GitHub OAuth verification status (2026-08-28)
 
 - [x] Deterministic CI baseline: `web/e2e/dashboard.spec.ts` retains strict deterministic assertions for unconfigured integration states; Playwright E2E suite passes 14/14 with isolated test environment.
-- [x] Stripe API test connectivity: Initialized Stripe SDK with operator-configured `STRIPE_SECRET_KEY`. Verified `stripe.balance.retrieve()` returns HTTP 200 with `livemode: false` and currency `usd`.
-- [x] Live Stripe checkout payment in browser:
-  - Created live checkout session `cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51` with `tier: 'starter'` and `success_url` pointing to `https://feature-zk-api-credits-gadillacers-projects.vercel.app/dashboard?checkout=success`.
-  - Loaded checkout URL in browser, populated test card `4242 4242 4242 4242`, expiration `12/34`, CVC `123`, cardholder name `Demo User`, and submitted payment.
-  - Verified Stripe API status updated to `payment_status: "paid"`, `status: "complete"`, `payment_intent: "pi_3U9Mo71I3zjIgUTM0Ssr3MNS"`.
-- [x] Live Vercel webhook endpoint delivery & retry:
-  - Retrieved real Stripe event `evt_1U9Mo81I3zjIgUTMe1FE3XEe` from Stripe API.
-  - Signed payload with `STRIPE_WEBHOOK_SECRET` via `stripe.webhooks.generateTestHeaderString`.
-  - Sent `POST https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe` with `stripe-signature` header: Vercel verified the signature, relayed to gateway, and returned HTTP 200 `{"received":true,"processed":false,"duplicate":true}` (confirming both signature verification on Vercel and idempotency on the gateway).
-- [x] Live Gateway status confirmation:
-  - Queried `GET https://zk-credits-gateway.onrender.com/v1/status/18392400176021343575686504278220200007490597768258067808547211916758327342062` directly.
-  - Returned HTTP 200 `{"commitment":"1839...","callsThisEpoch":0,"epochQuota":100,"remainingCalls":100,"balanceUsdc":"5000000","depositStatus":"active"}`.
-- [x] Hosted Vercel auth behavior: Verified `/dashboard` and `/api/dashboard/status` fail closed (HTTP 401 / redirect to `/sign-in`) when unauthenticated. Verified `/sign-in` renders disabled "Sign in with GitHub" until `GITHUB_CLIENT_*` is provisioned in Vercel project environment variables.
-- [ ] Open hosted acceptance gaps under 4.1: (1) hosted `/dashboard?checkout=success` pending $\rightarrow$ confirmed UI was not rendered on Vercel (redirects to `/sign-in`); (2) hosted Vercel `/api/webhooks/stripe` response was a retry (`duplicate: true`), not an initial first delivery; (3) GitHub OAuth remains unconfigured in Vercel project environment variables (button disabled on live site).
-- [x] Full test gates: `npm test` passed 27/27 unit tests; `npm run lint` and `npm run typecheck` passed with 0 errors.
+- [x] GitHub OAuth configuration: Provisioned `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `AUTH_TRUST_HOST=1`, and `AUTH_URL=https://feature-zk-api-credits-gadillacers-projects.vercel.app` on Vercel Production.
+- [x] Live GitHub OAuth sign-in verified: Navigated to hosted `/sign-in`, clicked enabled "Sign in with GitHub", authorized OAuth App in browser, and successfully redirected to `/dashboard` with authenticated session.
+- [x] Browser identity generation verified: Derived secret key and recovery phrase locally in browser IndexedDB without server exposure.
+- [x] Stripe Checkout in browser: Completed hosted checkout payment in browser with test card `4242...` on pre-fix $5 build; Starter package price was subsequently reconciled and deployed to $1.00 for 100 private tickets (1 USDC / 100 cents) across checkout route and dashboard UI (replacement $1 checkout unexercised).
+- [x] Stripe webhook endpoint: Retained single canonical endpoint targeting `https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe`.
+- [ ] Open / Gateway-blocked items: (1) First-delivery `{ duplicate: false }` and active/100 gateway status on the newly funded commitment were blocked by gateway HTTP 503 (`hibernate-wake-error` / container restart); (2) dashboard pending -> confirmed status polling requires active gateway response.
+
+## Task 5.9 Installable coding-agent MVP verification (2026-08-28)
+
+- [x] Bumped `packages/zk-credits-sidecar/package.json` and `package-lock.json` to version `0.1.2`.
+- [x] Validated `npm pack --dry-run`: 44 packaged files including pinned `circuits/rln_nullifier_final.zkey`, `circuits/rln_nullifier.wasm`, `dist/anthropic-messages.js`, `dist/claude-launcher.js`, `dist/codex-sdk-options.js`, and `dist/zk-credits.js`.
+- [x] Verified `zk-credits --help` output displays `cline`, `claude`, `setup codex`, `codex`, `import-mnemonic`, `serve`, `status`, `eval "$(zk-credits env)"`.
+- [x] Updated UI surfaces with clean pre-funded / funded separation: onboarding wizard done step and dashboard API-key section provide install/import guidance (`npm install --global zk-credits`, `zk-credits import-mnemonic`), while the active `DashboardStatus` component exclusively renders the multi-agent launch commands (`zk-credits cline`, `zk-credits claude`, `zk-credits setup codex`) upon active deposit confirmation.
+- [x] TDD behavior tests in `web/e2e/agent-ui.spec.ts` (2/2 passed) and `web/src/lib/agent-ui.test.ts` (3/3 passed) verify multi-agent commands rendered in DOM on active status and absent when unfunded.
+- [ ] Publish status: npm registry publish for `0.1.2` remains blocked on operator OTP.
+
+## Task 5.10 Fresh-user agent proof verification status (2026-08-28)
+
+- [x] Installed agents verified on workstation: Cline CLI (`cline`), Claude Code (`claude`), Codex CLI (`codex`).
+- [x] Verified protocol paths: Codex SDK and Claude Code Messages adapter test suites pass locally.
+- [ ] Open / Compromised: Initial test mnemonic was exposed in CLI arguments and marked compromised; clean fresh-user proof with hidden TTY import remains open until gateway is active and replacement identity is funded.
 ## Task 4.7 Render API credential rotation verification (2026-08-28)
 
 - [x] Verified current Render service health: `GET https://zk-credits-gateway.onrender.com/health` (HTTP 200 `status: ok`, `proofVerification: enabled`) and `GET https://zk-credits-fee-sponsor.onrender.com/health` (HTTP 200 `status: ok`).
