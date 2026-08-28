@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { launchCodexProcess } from './codex-launcher.js';
 import { launchClineProcess } from './cline-launcher.js';
+import { launchClaudeProcess } from './claude-launcher.js';
 import {
   isCodexProfileInstalled,
   resolveCodexHome,
@@ -87,6 +88,7 @@ async function readHiddenMnemonic(): Promise<string> {
 function printHelp(): void {
   console.log(`Usage:
   zk-credits cline [cline arguments...]
+  zk-credits claude [claude arguments...]
   zk-credits setup codex [--model <model>]
   zk-credits codex [codex arguments...]
   zk-credits status
@@ -94,12 +96,11 @@ function printHelp(): void {
   zk-credits serve [--port <port>]
   eval "$(zk-credits env)"
 
-"zk-credits cline" is the zero-configuration coding-agent path: it starts the
-sidecar, configures an isolated OpenAI-compatible Cline profile, and forwards
-all Cline arguments. The Codex companion remains available through setup codex.
+"zk-credits cline" and "zk-credits claude" configure and launch coding agents
+against the proof-aware loopback sidecar. The Codex companion remains available
+through setup codex.
 Set ZK_CREDITS_MNEMONIC only for a headless process; it is not persisted.`);
 }
-
 async function serve(args: readonly string[]): Promise<void> {
   const port = readPort(args);
   const statePaths = sidecarStatePaths(stateDirectory());
@@ -180,6 +181,12 @@ async function main(): Promise<void> {
     launchCodex: (codexArgs) => launchCodexProcess(codexArgs),
     launchCline: (clineArgs, localToken) => launchClineProcess({
       args: clineArgs,
+      loopbackBaseUrl: loopbackBaseUrl(),
+      localToken,
+      stateDirectory: sidecarHome,
+    }),
+    launchClaude: (claudeArgs, localToken) => launchClaudeProcess({
+      args: claudeArgs,
       loopbackBaseUrl: loopbackBaseUrl(),
       localToken,
       stateDirectory: sidecarHome,

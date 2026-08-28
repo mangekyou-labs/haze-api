@@ -56,3 +56,8 @@ target/
 .vscode/
 .idea/
 .vercel
+
+# Testing
+.playwright-cli/
+*.png
+.claude/

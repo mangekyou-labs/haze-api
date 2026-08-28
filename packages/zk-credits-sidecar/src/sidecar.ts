@@ -1,8 +1,15 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import {
+  anthropicErrorType,
+  createAnthropicStreamTransformer,
+  translateAnthropicToOpenAi,
+  translateOpenAiToAnthropic,
+  type AnthropicMessagesRequest,
+  type OpenAiChatResponse,
+} from './anthropic-messages.js';
 import { codexModelsResponse } from './codex-profile.js';
 import { TicketLedger } from './ticket-ledger.js';
-
 const MAX_REQUEST_BYTES = 2_000_000;
 
 export interface ProofGeneratorInput {
@@ -35,6 +42,17 @@ function isLoopbackAddress(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
+function extractLocalToken(req: IncomingMessage): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  const apiKeyHeader = req.headers['x-api-key'];
+  if (typeof apiKeyHeader === 'string') {
+    return apiKeyHeader.trim();
+  }
+  return null;
+}
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(body));
@@ -102,23 +120,148 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       sendJson(res, 200, { service: 'zk-credits-sidecar', status: 'ok' });
       return;
     }
+    const token = extractLocalToken(req);
+
     if (req.method === 'GET' && pathname === '/v1/models') {
-      if (req.headers.authorization !== `Bearer ${options.localToken}`) {
+      if (token !== options.localToken) {
         sendJson(res, 401, { error: 'invalid_local_token' });
         return;
       }
       sendJson(res, 200, codexModelsResponse());
       return;
     }
+
+    if (req.method === 'POST' && pathname === '/v1/messages') {
+      if (token !== options.localToken) {
+        sendJson(res, 401, { error: 'invalid_local_token' });
+        return;
+      }
+      try {
+        const body = await readJsonBody(req);
+        const anthropicReq = body.parsed as AnthropicMessagesRequest;
+        const openAiReq = translateAnthropicToOpenAi(anthropicReq);
+        const rawOpenAiBody = JSON.stringify(openAiReq);
+
+        const reservation = await options.ledger.reserve(openAiReq);
+        const proof = await options.proofGenerator({
+          ticketIndex: reservation.index,
+          request: openAiReq,
+        });
+        const upstream = await gatewayFetch(`${gatewayBaseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${options.compatibilityKey}`,
+            'Content-Type': 'application/json',
+            'X-ZK-Proof': proofHeader(proof),
+          },
+          body: rawOpenAiBody,
+        });
+
+        if (upstream.status >= 200 && upstream.status < 300 && upstream.status !== 202) {
+          await options.ledger.consume(reservation.requestDigest);
+        }
+
+        if (!upstream.ok) {
+          const rawText = await upstream.text();
+          let errorMsg =
+            rawText.trim() || `Gateway returned HTTP ${upstream.status}`;
+          try {
+            const errJson: unknown = JSON.parse(rawText);
+            if (errJson && typeof errJson === 'object') {
+              if ('error' in errJson && typeof errJson.error === 'string') {
+                errorMsg = errJson.error;
+              } else if (
+                'error' in errJson &&
+                errJson.error &&
+                typeof errJson.error === 'object' &&
+                'message' in errJson.error &&
+                typeof errJson.error.message === 'string'
+              ) {
+                errorMsg = errJson.error.message;
+              } else if (
+                'message' in errJson &&
+                typeof errJson.message === 'string'
+              ) {
+                errorMsg = errJson.message;
+              }
+            }
+          } catch {
+            // rawText is preserved as errorMsg
+          }
+          sendJson(res, upstream.status, {
+            type: 'error',
+            error: {
+              type: anthropicErrorType(upstream.status),
+              message: errorMsg,
+            },
+          });
+          return;
+        }
+
+        if (openAiReq.stream) {
+          res.writeHead(upstream.status, {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          });
+          if (!upstream.body) {
+            res.end();
+            return;
+          }
+          const transformer = createAnthropicStreamTransformer({
+            model: openAiReq.model,
+          });
+          const reader = upstream.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('data: ')) {
+                const dataStr = trimmed.slice(6);
+                if (dataStr === '[DONE]') continue;
+                try {
+                  const parsedChunk = JSON.parse(dataStr);
+                  const sseEvents = transformer.transformChunk(parsedChunk);
+                  for (const evt of sseEvents) res.write(evt);
+                } catch {
+                  // ignore non-JSON chunk
+                }
+              }
+            }
+          }
+          const finishEvents = transformer.finish();
+          for (const evt of finishEvents) res.write(evt);
+          res.end();
+        } else {
+          const openAiRes = (await upstream.json()) as OpenAiChatResponse;
+          const anthropicRes = translateOpenAiToAnthropic(openAiRes);
+          sendJson(res, upstream.status, anthropicRes);
+        }
+      } catch (error: unknown) {
+        if (!res.headersSent) {
+          const message = error instanceof Error ? error.message : 'Loopback request failed';
+          sendJson(res, 502, { error: 'sidecar_request_failed', message });
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+      }
+      return;
+    }
+
     if (req.method !== 'POST' || (pathname !== '/v1/chat/completions' && pathname !== '/v1/responses')) {
       sendJson(res, 404, { error: 'unsupported_openai_path' });
       return;
     }
-    if (req.headers.authorization !== `Bearer ${options.localToken}`) {
+    if (token !== options.localToken) {
       sendJson(res, 401, { error: 'invalid_local_token' });
       return;
     }
-
     try {
       const body = await readJsonBody(req);
       const reservation = await options.ledger.reserve(body.parsed);

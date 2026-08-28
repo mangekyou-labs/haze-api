@@ -10,9 +10,14 @@ export function SiteFooter() {
           models) &mdash; testnet only, no real money.
         </p>
         <p>
-          Honest caveats: single-contributor dev-only trusted setup; one
-          gateway operator can observe call timing patterns; browser proving
-          adds latency; your network identity is not hidden.
+          Honest caveats: 100-ticket specialization (Starter package);
+          variable-cost refunds deferred (fixed per-call pricing);
+          single-contributor dev-only trusted setup; custodial
+          gateway-mediated withdrawal (gateway can block by disappearing, but
+          membership-removal proof prevents unilateral redirect); async
+          per-call on-chain audit; one gateway operator can observe call timing
+          patterns; browser proving adds latency; your network identity / IP is
+          not hidden.
         </p>
       </div>
     </footer>

@@ -32,14 +32,26 @@ export function BuyCreditsSection({
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [commitment, setCommitment] = useState<string | null>(null);
-  const [checkoutState, setCheckoutState] = useState<
+  const [checkoutOverride, setCheckoutOverride] = useState<
+    'confirmed' | 'gateway-unavailable' | null
+  >(null);
+
+  const checkoutParam = searchParams.get('checkout');
+  const derivedState:
     | 'idle'
     | 'pending'
     | 'confirmed'
     | 'cancelled'
     | 'missing-identity'
-    | 'gateway-unavailable'
-  >('idle');
+    | 'gateway-unavailable' =
+    checkoutParam === 'cancelled'
+      ? 'cancelled'
+      : checkoutParam === 'success'
+        ? commitment
+          ? 'pending'
+          : 'missing-identity'
+        : 'idle';
+  const checkoutState = checkoutOverride ?? derivedState;
 
   useEffect(() => {
     const loadCommitment = () => {
@@ -53,14 +65,7 @@ export function BuyCreditsSection({
 
   useEffect(() => {
     const result = searchParams.get('checkout');
-    if (result === 'cancelled') {
-      setCheckoutState('cancelled');
-      return;
-    }
-    if (result !== 'success') return;
-
-    setCheckoutState(commitment ? 'pending' : 'missing-identity');
-    if (!commitment) return;
+    if (result !== 'success' || !commitment || checkoutOverride) return;
 
     let stopped = false;
     let attempts = 0;
@@ -73,12 +78,12 @@ export function BuyCreditsSection({
           { cache: 'no-store' },
         );
         if (res.status === 502 || res.status === 503) {
-          setCheckoutState('gateway-unavailable');
+          setCheckoutOverride('gateway-unavailable');
         }
         if (res.ok) {
           const data = await res.json();
           if (data.depositStatus === 'active') {
-            setCheckoutState('confirmed');
+            setCheckoutOverride('confirmed');
             window.dispatchEvent(new Event('zk-credits-status-refresh'));
             return;
           }
@@ -93,7 +98,7 @@ export function BuyCreditsSection({
     return () => {
       stopped = true;
     };
-  }, [commitment, searchParams]);
+  }, [commitment, searchParams, checkoutOverride]);
 
   const handleCheckout = async (tierId: string) => {
     if (tierId !== 'starter') return;
@@ -120,7 +125,7 @@ export function BuyCreditsSection({
       }
 
       if (data.url) {
-        window.location.href = data.url;
+        window.location.assign(data.url);
       }
     } catch {
       setError('Network error — please try again');

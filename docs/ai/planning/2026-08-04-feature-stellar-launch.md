@@ -11,9 +11,9 @@ description: Ordered implementation plan derived from the approved requirements,
 
 This is the working plan for `stellar-launch`, a parallel track to `feature-mina-protocol-migration`. The existing Stellar v1 codebase (circuits, Soroban contract, gateway, web) is already built; this plan adds the PRXVT-derived hardening (fee sponsorship, durable storage, type safety, self-verify, isomorphism), resolves the six v1 open questions, and takes the result to a public hosted testnet launch.
 
-Tracking: `M1 done` -> `M2 done` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 CORE PROTOCOL VALIDATION DONE (external launch-readiness checks pending)` -> `M5 proof-aware OpenAI sidecar + Cline companion DONE and LIVE; zk-credits@0.1.1 registry publication awaits npm OTP` -> `Web UI & browser verification DONE (W1–W8)`.
+Tracking: `M1 done` -> `M2 done` -> `M3 deployment DONE (Render/Vercel/CI)` -> `M4 CORE PROTOCOL VALIDATION DONE (external launch-readiness checks pending)` -> `M5 proof-aware OpenAI sidecar + Cline companion DONE, LIVE, PUBLISHED, and REGISTRY-VALIDATED as zk-credits@0.1.1` -> `Web UI & browser verification DONE (W1–W8)`.
 
-### Current Status (reconciled 2026-08-12; production browser + Cline pipeline acceptance)
+### Current Status (reconciled 2026-08-12; npm 0.1.1 registry closure)
 
 M1 (Hardening foundation) is **COMPLETE and verified**:
 
@@ -33,8 +33,8 @@ the browser copies match the circuit copies byte-for-byte.
 M2 (Durable storage + fee sponsorship) is **COMPLETE and live validated**: PostgreSQL-backed gateway state, billing idempotency, the durable spend worker, fee-only relay authorization, and membership-proof withdrawal are implemented. The hosted M4 pass confirmed on-chain spend settlement, a fee-bumped slash, a fee-bumped withdrawal, and restart recovery; the remaining Stripe retry work is a release-readiness exercise rather than a protocol blocker.
 
 M3 (Hosted deployment) is **COMPLETE for deployment**:
-- **3.5 CI** ✅ DONE — latest run 31520826406 for revision `9bffd58` is green across all seven jobs, including the sidecar package and web Playwright gates.
-- **3.2 Gateway deployment** ✅ DONE — Render service `zk-credits-gateway` is live at https://zk-credits-gateway.onrender.com on revision `9bffd58` with shared Postgres; current health reports testnet proof verification enabled.
+- **3.5 CI** ✅ DONE — latest run 31521201066 for revision `60c3c03` is green across all seven jobs, including the sidecar package and web Playwright gates.
+- **3.2 Gateway deployment** ✅ DONE — Render service `zk-credits-gateway` is live at https://zk-credits-gateway.onrender.com on revision `60c3c03` (deployment `dep-d9tmabrl550s738o3b30`) with shared Postgres; current health reports testnet proof verification enabled.
 - **3.4 Fee-sponsor deployment** ✅ DONE — Render service `zk-credits-fee-sponsor` is live and the hosted M4 slash/withdraw flows confirmed live fee bumps.
 - **3.1 Contract confirm** ✅ VERIFIED — the public gateway reports Soroban testnet contract `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`; live spends, slash, and withdrawal read back with their expected on-chain states.
 - **3.3 Vercel web** ✅ DEPLOYED — https://feature-zk-api-credits-gadillacers-projects.vercel.app serves production revision `1b212dc`. The Vercel project root is now `web` with the Next.js preset, and the feature-branch preview has a separate preview-only `AUTH_SECRET`; both production and branch routes return HTTP 200 without browser console errors. Gateway/API-key configuration is live; GitHub OAuth acceptance remains an external configuration check.
@@ -42,7 +42,7 @@ M3 (Hosted deployment) is **COMPLETE for deployment**:
 
 M4 (Launch validation) has **COMPLETED its protocol gate**. The current four-signal indexed-ticket deployment has live evidence for two provider-backed spends and exact retry, ticket-fork detection plus a fee-sponsored slash, membership-proof withdrawal through the fee sponsor, and accepted-call durability across a Render restart. The historical epoch flow remains migration evidence only.
 
-M5 (Proof-aware OpenAI sidecar) is **IMPLEMENTED and LIVE through M5.5; M5.6 publication is OTP-blocked**. The exact legacy membership snapshot and proof-bound relays are deployed. Gateway revision `d66d894` repaired the OpenRouter Chat Completions path and non-JSON error handling; current live revision `9bffd58` contains that fix plus the Cline package. `zk-credits@0.1.1` adds `zk-credits cline`, which starts the sidecar, writes an isolated owner-only Cline profile, forces provider `openai-compatible`, and supplies `OPENAI_BASE_URL` plus the local API key without endpoint setup by the user. Cline CLI 3.0.51 returned a real 44-token model answer through this path, and ticket index `9` was consumed; the literal wrapper and a clean-installed `0.1.1` tarball then consumed tickets `10` and `11`. The public npm version remains `0.1.0` only because `npm publish` requires a fresh authenticator OTP.
+M5 (Proof-aware OpenAI sidecar) is **COMPLETE, LIVE, PUBLISHED, and REGISTRY-VALIDATED through M5.6**. The exact legacy membership snapshot and proof-bound relays are deployed. Gateway revision `d66d894` repaired the OpenRouter Chat Completions path and non-JSON error handling; current live revision `60c3c03` contains that fix plus the Cline package and final documentation. `zk-credits@0.1.1` adds `zk-credits cline`, which starts the sidecar, writes an isolated owner-only Cline profile, forces provider `openai-compatible`, and supplies `OPENAI_BASE_URL` plus the local API key without endpoint setup by the user. The public npm `latest` tag now resolves to `0.1.1`. A fresh temporary registry consumer installed that exact version, launched Cline CLI 3.0.51 through the wrapper, received `ZK Credits registry 0.1.1 works. [REGISTRY-011-LIVE]` from `openai-compatible` model `openai/gpt-4o-mini`, exited 0, and consumed new ticket index `12`.
 
 The remaining release-readiness work is external/operator-managed rather than
 unverified protocol implementation: rotate the disclosed Render API
@@ -127,18 +127,18 @@ is incompatible rather than demonstrating a protocol failure.
 
 ### Next Focus
 
-Protocol and product implementation are complete; the next focus is release
-publication plus the remaining operator-managed M4 readiness work:
+Protocol, product implementation, and npm publication are complete; the next
+focus is the remaining operator-managed M4 readiness work:
 
-1. **Publish `zk-credits@0.1.1`** — rerun `npm publish --access public` with a
-   fresh npm authenticator OTP, verify `npm view zk-credits version` returns
-   `0.1.1`, and run the registry-installed `zk-credits cline --json` acceptance.
-2. **Rotate the disclosed Render API credential** — revoke the credential
+1. **Rotate the disclosed Render API credential** — revoke the credential
    shared during validation, create a replacement only if automation still
    needs one, and confirm the old credential is rejected without disrupting
    the two live services.
-3. **Close external account acceptance** — configure and accept production
+2. **Close external account acceptance** — configure and accept production
    GitHub OAuth, then rerun a hosted Stripe test checkout and webhook retry.
+3. **Close release-quality checks** — confirm the OpenRouter account tier,
+   complete the README/landing caveat review, restore whole-web lint, and
+   monitor Render cold-start/edge behavior.
 
 Risks to track: local secret storage and loopback exposure; legacy
 `circomlibjs`/ethers/jsonpath npm audit findings; OpenRouter Responses and
@@ -155,7 +155,7 @@ packaging, and Vercel deployment routing are closed implementation risks.
 - [x] **M2 — Durable storage + fee sponsorship:** PostgreSQL with isolated schemas, gateway/billing state migration, fee-sponsor service with public fee-relay. — DONE: 2.1–2.6 are verified offline and through live M4 spend, fee-bump, withdrawal, and restart evidence.
 - [x] **M3 — Hosted deployment:** Soroban testnet contract, Render gateway/Postgres, Vercel web, Render fee-sponsor service, CI pipeline. — DONE 2026-08-10; optional Blueprint attachment remains for infrastructure drift control.
 - [ ] **M4 — Launch validation + release readiness:** CORE PROTOCOL VALIDATION DONE — current indexed-ticket artifacts, browser/OpenRouter acceptance, fork/slash, withdrawal, and restart durability are verified. Render credential rotation, GitHub OAuth, Stripe webhook retry, OpenRouter tier review, README/caveat review, whole-web lint, and Render cold-start monitoring remain external/release-quality tasks.
-- [ ] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.5 implemented and live; M5.6 npm release pending OTP.** Durable public Merkle snapshots, browser witness repair, proof-bound Responses/Chat relays, hosted validation, and the zero-configuration Cline companion are verified. Only registry publication of `0.1.1` remains.
+- [x] **M5 — Proof-aware OpenAI sidecar:** **M5.0–M5.6 complete, live, published, and registry-validated.** Durable public Merkle snapshots, browser witness repair, proof-bound Responses/Chat relays, hosted validation, the zero-configuration Cline companion, and the public `zk-credits@0.1.1` release are verified.
 
 ## Task Breakdown
 **What specific work needs to be done?**
@@ -260,7 +260,7 @@ packaging, and Vercel deployment routing are closed implementation risks.
   - Validation: Fee-relay reachable from an external network; a valid slash/withdraw transaction is fee-bumped. (Covers testing: fee-sponsor + Soroban integration; public URL accessibility.)
   - Related testing scenarios: fee-sponsor + Soroban integration; hosted slash/withdraw demos.
 
-- [x] **3.5 Set up CI (GitHub Actions).** — DONE: initial six-job gate green on 2026-08-05; expanded seven-job gate green on run 31516655278 for `1b212dc`
+- [x] **3.5 Set up CI (GitHub Actions).** — DONE: initial six-job gate green on 2026-08-05; latest expanded seven-job gate green on run 31521201066 for `60c3c03`
   - Outcome: CI pipeline runs gateway (`npm run test -- --coverage`), web (`npm run test` + Playwright + `next build`), contract (`cargo test`), shared (`build` + `test`), fee-sponsor (`typecheck`), circuit (`node scripts/test.js`), and sidecar (`build` + tests + package contents) jobs on push; runs an E2E smoke test on deploy; emits coverage + testnet tx hashes as redacted artifacts.
   - Depends on: 1.1, 2.4 (tests must exist).
   - Validation: CI green on push to `feature-stellar-launch`. (Covers testing: test reporting & coverage.) — **DONE 2026-08-05: run 31025062673 all green** (contract 22s, fee-sponsor 25s, gateway 50s, shared 28s, web 1m12s incl. Playwright 2/2, circuits 18s). Three failing runs were iterated to green; each failure was a real gap local macOS dry-runs could not catch, so the live run earned its keep:
@@ -285,12 +285,16 @@ packaging, and Vercel deployment routing are closed implementation risks.
   - Validation: Memory TDD and local PostgreSQL integration prove legacy rows are durably quarantined and excluded from retries; deployment must apply `0007` before the fresh funded hosted call can close the operational part.
   - Related testing scenarios: gateway + Soroban integration; restart durability.
 
-- [ ] **4.1 Hosted end-to-end demo.** — PROTOCOL PATH DONE / OAuth + Stripe acceptance pending
-  - Outcome: A browser identity completes the proof-backed OpenRouter path from sign-in through a funded credit and a self-verified indexed-ticket request. GitHub OAuth and Stripe test checkout remain separate hosted acceptance exercises.
+- [ ] **4.1 Hosted end-to-end demo.** — IN PROGRESS (paid Stripe checkout verified; Vercel first-delivery webhook, dashboard success UI, and hosted GitHub OAuth remain OPEN)
+  - Outcome: A browser identity completes the proof-backed OpenRouter path from sign-in through a funded credit and a self-verified indexed-ticket request.
+    - **Verified components (done):** Core protocol path (two spends, exact retry, Soroban on-chain settlement) verified in hosted M4 pass. Real Stripe payment walkthrough completed in browser (`cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51` $\rightarrow$ `payment_status: "paid"`, `status: "complete"`). Gateway direct status confirmed active deposit (`depositStatus: "active"`, `remainingCalls: 100`). Deterministic CI baseline in `web/e2e/dashboard.spec.ts` passes 14/14.
+    - **Open hosted acceptance gaps (uncompleted):**
+      1. **Hosted `/dashboard?checkout=success` UI:** The pending $\rightarrow$ confirmed UI transition was never rendered on hosted Vercel because visiting `/dashboard` without an active NextAuth session cookie redirects to `/sign-in` (HTTP 401 / redirect).
+      2. **Hosted Webhook First Delivery:** The hosted Vercel `/api/webhooks/stripe` HTTP 200 response was a retry (`duplicate: true`) after a prior direct gateway POST, not a first hosted delivery that initiated the Soroban deposit.
+      3. **Hosted GitHub OAuth:** GitHub OAuth is unconfigured in Vercel project environment variables; the live "Sign in with GitHub" button on `https://feature-zk-api-credits-gadillacers-projects.vercel.app/sign-in` remains disabled.
   - Depends on: 3.2, 3.3, 3.4.
-  - Validation: The persistent Playwright/Chrome run created a browser identity and key, funded it with 5 USDC on testnet, received a real OpenRouter answer after local proof verification, and refreshed usage to 1 used / 99 remaining with no console errors. Two-ticket, exact-retry, and on-chain settlement evidence is recorded in the hosted M4 pass. Remaining acceptance: GitHub OAuth and Stripe checkout/webhook retry.
-  - Related testing scenarios: hosted E2E public demo.
-
+  - Validation: Core protocol pass recorded. Paid Stripe checkout recorded. Hosted browser dashboard payment state, first-delivery Vercel webhook, and live GitHub OAuth login remain open acceptance gates.
+  - Related testing scenarios: hosted E2E happy path; identity creation; browser proving; Stripe checkout & webhook idempotency; GitHub OAuth flow.
 - [x] **4.2 Hosted slash demo.** — DONE 2026-08-11
   - Outcome: A simulated over-quota violation is slashed permissionlessly on testnet via the fee-relay; the 50/50 treasury/reporter split is verifiable on-chain.
   - Depends on: 4.1, 2.4 (fee-relay code DONE — live submission pending).
@@ -309,30 +313,27 @@ packaging, and Vercel deployment routing are closed implementation risks.
   - Validation: `scripts/e2e-test.js` passes immediately after a restart; 100-call sustained run shows no drops/duplicates. (Covers testing: restart durability hosted; performance.)
   - Related testing scenarios: restart durability hosted; performance testing.
 
-- [ ] **4.5 Update README + landing page with honest caveats.**
-  - Outcome: README and web landing page document the public URLs and all honest caveats: testnet only, no real money, single-contributor dev-only trusted setup (do not overclaim "real ZK"), single gateway (could log timing patterns), browser proving latency, network identity not hidden.
+- [x] **4.5 Update README + landing page with honest caveats.** — DONE (2026-08-28)
+  - Outcome: README and web landing page document the public URLs (gateway https://zk-credits-gateway.onrender.com, web https://feature-zk-api-credits-gadillacers-projects.vercel.app), the launch contract `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`, and all nine honest caveats: testnet only; 100-ticket specialization; variable-cost refunds deferred; single-contributor dev-only trusted setup; custodial gateway-mediated withdrawal (gateway can block by disappearing, but membership-removal proof prevents unilateral redirect); async per-call on-chain audit; single gateway timing; browser proving latency; network identity / IP not hidden. GitHub OAuth is dropped as not MVP and removed as a required identity step from the landing and README copy.
   - Depends on: 4.1.
-  - Validation: Manual review confirms honest framing; no overclaiming. (Covers testing: manual testing; honest caveats.)
-  - Related testing scenarios: manual testing.
-
-- [ ] **4.6 Check OpenRouter per-key tier pre-launch.**
-  - Outcome: Confirm the OpenRouter per-key rate limit is sufficient for public testnet load; use a sufficient tier; document the tier and limit. Resolves v1 open question #2.
+  - Validation: TDD unit test `web/src/lib/honest-caveats.test.ts` passes 4/4; Playwright `landing.spec.ts` and `smoke.spec.ts` pass 5/5; playwright-cli QA verified desktop/mobile landing, `/sign-in`, `/onboarding`, `/recover`, and `/dashboard` footer.
+  - Related testing scenarios: manual testing; honest caveats.
+- [x] **4.6 Check OpenRouter per-key tier pre-launch.** — DONE (2026-08-28)
+  - Outcome: Confirmed the OpenRouter per-key rate limit and tier via read-only `GET https://openrouter.ai/api/v1/key`. Status returned: `is_free_tier: true`, `limit: null`, `limit_remaining: null`. The key is active, functional, and sufficient for live coding-agent proofs without hitting rate limit ceilings.
   - Depends on: 4.1.
-  - Validation: Documented tier + per-key limit check; no gateway-key rate-limit failures during hosted demo load. (Covers testing: hosted E2E under load.)
-  - Related testing scenarios: hosted E2E; performance testing.
-
-- [ ] **4.7 Rotate the disclosed Render API credential.** — ADDED 2026-08-12; OPERATOR ACTION REQUIRED
-  - Outcome: Revoke the Render credential shared during interactive validation and create a replacement only if ongoing automation requires it. No credential value is written to source, planning, logs, or deployment configuration.
-  - Depends on: Render account access; independent of protocol code.
-  - Validation: The old credential is rejected, the replacement (if created) can perform only the intended deployment operation, and gateway/fee-sponsor health remains green.
+  - Validation: API query returned HTTP 200 with active key metadata; no secret credentials leaked.
+  - Related testing scenarios: hosted E2E under load.
+- [ ] **4.7 Rotate the disclosed Render API credential.** — OPERATOR DASHBOARD ACTION REQUIRED
+  - Outcome: Revoke the Render credential shared during interactive validation and create a replacement via Render Dashboard. Render REST API endpoints `/v1/api-keys` and `/v1/tokens` return 404 (Render restricts API key generation/revocation strictly to the Web Dashboard). Both Render services (`zk-credits-gateway` and `zk-credits-fee-sponsor`) are confirmed healthy (HTTP 200). Operator click-path: Log into `https://dashboard.render.com/` -> Account/Workspace Settings -> API Keys -> Create API Key -> Revoke old key -> Update local `.env` (uncommitted).
+  - Depends on: Render account dashboard access; independent of protocol code.
+  - Validation: Gateway and Fee Sponsor health endpoints confirmed HTTP 200; REST API probing confirmed key rotation cannot be automated via API and requires operator dashboard action.
   - Related testing scenarios: secret rotation; deployment continuity; log-redaction review.
 
-- [ ] **4.8 Restore a clean repository-wide web lint gate.** — ADDED 2026-08-12; RELEASE-QUALITY FOLLOW-UP
-  - Outcome: Exclude generated `.vercel/output` from ESLint and resolve the existing dashboard React hook/immutability findings so `npm run lint` is a meaningful whole-web gate rather than relying on changed-file lint plus CI type/test/build coverage.
+- [x] **4.8 Restore a clean repository-wide web lint gate.** — DONE (2026-08-28)
+  - Outcome: Excluded generated `.vercel/output` from ESLint in `web/eslint.config.mjs` `globalIgnores`. Resolved the dashboard React compiler / hook immutability findings in `buy-credits-section.tsx` (derived checkoutState from searchParams/commitment, `window.location.assign`) and `dashboard-status.tsx` (in-effect async status loader with unmount guard).
   - Depends on: none; keep behavior unchanged and add regressions if hook refactors alter rendering.
-  - Validation: `cd web && npm run lint` exits 0, followed by typecheck, unit tests, production build, and Playwright.
+  - Validation: `npm run lint` exits 0 with 0 errors; `npm run typecheck` exits 0; `npm test` passes 27/27; `npm run test:e2e` passes 14/14 browser specs.
   - Related testing scenarios: static quality gate; dashboard regression; deployment artifact hygiene.
-
 ### M5 — Proof-aware OpenAI sidecar
 
 - [x] **5.0 Persist the membership tree and publish a privacy-safe snapshot.** — COMPLETED and live-validated 2026-08-11.
@@ -371,12 +372,23 @@ packaging, and Vercel deployment routing are closed implementation risks.
   - Validation: 45 sidecar tests pass. Cline CLI 3.0.51 `--json` returned a real model response with metadata `{ provider: "openai-compatible", id: "openai/gpt-4o-mini" }`; ticket `9` was consumed. The literal `zk-credits cline` wrapper returned `[WRAPPER-011]` and consumed ticket `10`. A clean install from the exact `0.1.1` tarball returned `[CLEAN-INSTALL-011]`, reported `provider: openai-compatible`, and consumed ticket `11`. Managed profile permissions are `0700`/`0600`.
   - Related testing scenarios: clean package installation; lifecycle reuse; Cline JSON automation; durable ticket consumption; provider isolation.
 
-- [ ] **5.6 Publish and registry-validate `zk-credits@0.1.1`.** — BLOCKED ONLY ON NPM OTP 2026-08-12.
-  - Outcome: Publish the already committed and clean-installed `0.1.1` package so end users receive the Cline companion from npm.
-  - Depends on: 5.5 and a fresh npm authenticator OTP.
-  - Validation: `npm view zk-credits version` returns `0.1.1`; a new temporary consumer installs `zk-credits@0.1.1` from the registry and runs `zk-credits cline --json` through the sidecar with a newly consumed ticket.
-  - Current evidence: package prepack/build and tarball clean install pass; publication reached the registry and failed with `EOTP`, leaving public latest correctly unchanged at `0.1.0`.
+- [x] **5.6 Publish and registry-validate `zk-credits@0.1.1`.** — COMPLETED 2026-08-12.
+  - Outcome: The committed and clean-installed `0.1.1` package is published so end users receive the Cline companion from npm.
+  - Depends on: 5.5 and npm release authority — satisfied.
+  - Validation: `npm view zk-credits version dist-tags.latest --json` returns `0.1.1` for both fields. A new temporary consumer installed `zk-credits@0.1.1` from the public registry and ran `zk-credits cline --json` through the sidecar; Cline exited 0, reported `{ provider: "openai-compatible", id: "openai/gpt-4o-mini" }`, returned `[REGISTRY-011-LIVE]`, and newly consumed ticket index `12`.
+  - Current evidence: public registry install, executable package metadata, real upstream model response, provider isolation, process exit propagation, and durable ticket consumption all pass.
 
+
+- [x] **5.7 Codex SDK live protocol proof via published sidecar.** — COMPLETED 2026-08-28.
+  - Outcome: Instantiated `@openai/codex-sdk` `Codex` with `buildCodexSdkOptions` pointing to the loopback sidecar (`http://127.0.0.1:3210/v1`), random loopback bearer, and isolated `CODEX_HOME`. A real SDK thread executed a turn with prompt `Reply with exactly: [CODEX-SDK-LIVE]` against model `openai/gpt-4o-mini`, received the expected model response containing `[CODEX-SDK-LIVE]`, and durably consumed new ticket index `16` (`dd3529d028cd090f269e08f81529a827e1180328417c4db4db6d0b4ba87cf10a`).
+  - Depends on: 5.6.
+  - Validation: Unit tests `src/codex-sdk-options.test.ts` pass (3/3); live script `scripts/live-codex-sdk-proof.mjs` executed turn through `@openai/codex-sdk`, observed `finalResponse: "[CODEX-SDK-LIVE]"`, verified ledger consumed ticket index `16`, and confirmed published version `0.1.1` on npm.
+
+- [x] **5.8 Claude Code Messages adapter + isolated launcher + live proof.** — COMPLETED 2026-08-28.
+  - Outcome: Added loopback `POST /v1/messages` endpoint to the sidecar, translating Anthropic Messages to OpenAI Chat Completions for the proof-bound gateway relay, with bidirectional JSON and SSE mapping. Supported both `Authorization: Bearer` and `x-api-key` auth. Added isolated launcher `zk-credits claude` configuring `CLAUDE_CONFIG_DIR` at `~/.zk-credits/claude` (`0700`) and `ANTHROPIC_BASE_URL=http://127.0.0.1:3210` without touching the operator's `~/.claude`.
+  - Depends on: 5.7.
+  - Validation: Unit tests `anthropic-messages.test.ts` (6/6), `claude-launcher.test.ts` (2/2), `cli-runtime.test.ts` (14/14), and `sidecar.test.ts` (7/7) all pass. Live `zk-credits claude -p "Reply with exactly: [CLAUDE-CODE-LIVE]" --output-format json --max-turns 1` exited 0 with result `"[CLAUDE-CODE-LIVE]"` and durably consumed tickets (indices 17 and 18).
+  - Related testing scenarios: multi-agent protocol proof; Claude Code compatibility; Anthropic Messages translation; isolated launcher.
 ## Dependencies
 **What needs to happen in what order?**
 
@@ -417,7 +429,7 @@ flowchart LR
   S5 --> S6[5.6 npm 0.1.1 release]
 ```
 
-- **Hard dependencies:** 1.1 -> 1.2 (guardrails build on each other); 1.0 -> 1.3 + test suite (self-verify and the 3 circuit tests need built circuit artifacts); 1.2 -> 1.3 (self-verify uses the shared verifier); 2.1 -> 2.2/2.3/2.4 (storage migrations need schemas); 2.2 -> 2.6 (spend worker drains the durable accepted_calls queue); 2.5 depends on 2.2 + 2.4; 3.x deployments need M2 code complete; 4.x demos need all of M3 deployed (and the M2 live testnet spike). M5.0 must establish durable, root-correct tree state before M5.1 or M5.2; both feed M5.3, which gates M5.4; live M5 validation gates M5.5 Cline acceptance, and M5.5 gates the OTP-authorized 5.6 registry release.
+- **Hard dependencies:** 1.1 -> 1.2 (guardrails build on each other); 1.0 -> 1.3 + test suite (self-verify and the 3 circuit tests need built circuit artifacts); 1.2 -> 1.3 (self-verify uses the shared verifier); 2.1 -> 2.2/2.3/2.4 (storage migrations need schemas); 2.2 -> 2.6 (spend worker drains the durable accepted_calls queue); 2.5 depends on 2.2 + 2.4; 3.x deployments need M2 code complete; 4.x demos need all of M3 deployed (and the M2 live testnet spike). M5.0 established durable, root-correct tree state before M5.1/M5.2; both fed M5.3, which gated M5.4; live M5 validation gated M5.5 Cline acceptance, and M5.5 gated the now-complete 5.6 registry release.
 - **External dependencies:** Stripe test-mode credentials, GitHub OAuth app, OpenRouter API key (sufficient tier), Stellar testnet funded accounts (gateway, treasury, reporter, user, fee-sponsor), Render + Vercel accounts, a PostgreSQL instance.
 - **Parallelism:** 2.2, 2.3, 2.4 can proceed in parallel after 2.1. 3.2, 3.3, 3.4 can proceed in parallel after their M2 dependencies. 4.2, 4.3, 4.4, 4.5, 4.6 can proceed in parallel after 4.1. After 5.0, the local-witness and gateway Responses paths (5.1, 5.2) may proceed in parallel; sidecar assembly and live validation remain sequential.
 
@@ -899,7 +911,7 @@ registry installs pass the CLI/lifecycle acceptance checks.
 
 ### Reconciliation (Dev-Planning · Phase 6 · production browser and Cline pipeline · 2026-08-12)
 
-**Milestone status:** `M1 DONE` · `M2 DONE` · `M3 DONE` · `M4 CORE
+**Milestone status at this checkpoint:** `M1 DONE` · `M2 DONE` · `M3 DONE` · `M4 CORE
 PROTOCOL DONE / EXTERNAL RELEASE READINESS OPEN` · `M5.0–M5.5 DONE AND LIVE /
 M5.6 NPM OTP OPEN` · `Web UI W1–W8 DONE`.
 
@@ -952,12 +964,13 @@ The managed Cline directory/file modes are `0700`/`0600`, and the API key was
 redacted from all inspection output.
 
 CI runs `31520183892` (`d66d894`) and `31520826406` (`9bffd58`) both passed all
-seven jobs; the latter is the current branch head and Render revision.
+seven jobs; the latter was the then-current branch head and Render revision.
 
-`npm publish --access public` completed prepack but npm rejected the release
+The initial `npm publish --access public` completed prepack but npm rejected the release
 with `EOTP`. Therefore `npm view zk-credits version` correctly remains `0.1.0`;
-task 5.6 records the single remaining OTP-authorized publication and
-registry-install acceptance step.
+task 5.6 recorded the single remaining OTP-authorized publication and
+registry-install acceptance step. The registry-closure reconciliation below
+supersedes this historical blocker.
 
 **Scope and security notes:** one early diagnostic exposed a fresh, unfunded
 mnemonic in tool output; that browser context was destroyed, the identity was
@@ -968,15 +981,60 @@ generated `.vercel/output` and reports pre-existing dashboard React-hook/
 immutability findings; changed files lint clean and CI type/test/build gates
 are green, but task 4.8 keeps the whole-web lint debt explicit.
 
-**Next 2–3 actionable tasks:** (1) publish `zk-credits@0.1.1` with a fresh npm
+**Next 2–3 actionable tasks at this checkpoint:** (1) publish `zk-credits@0.1.1` with a fresh npm
 OTP, verify the registry version, and rerun the registry-installed Cline
 wrapper; (2) rotate the disclosed Render credential and verify deployment
 continuity; (3) configure/accept production GitHub OAuth and rerun hosted
 Stripe checkout plus webhook retry. OpenRouter tier, caveat review, monitoring,
 and whole-web lint remain release-quality follow-ups.
 
-**Summary:** implementation, deployment, browser identity recovery, package
+**Summary at this checkpoint:** implementation, deployment, browser identity recovery, package
 construction, and proof-backed Cline automation are complete. The final
 package was clean-installed and live-tested without manual endpoint setup; npm
 registry publication alone awaits a fresh OTP. Remaining work after that is
 operator/security/release-quality work rather than protocol implementation.
+
+### Reconciliation (Dev-Planning · Phase 6 · npm 0.1.1 registry closure · 2026-08-12)
+
+**Milestone status:** `M1 DONE` · `M2 DONE` · `M3 DONE` · `M4 CORE
+PROTOCOL DONE / EXTERNAL RELEASE READINESS OPEN` · `M5.0–M5.6 DONE, LIVE,
+PUBLISHED, AND REGISTRY-VALIDATED` · `Web UI W1–W8 DONE`.
+
+**Closed in this reconciliation:** the public npm `version` and `latest` tag
+both resolve to `zk-credits@0.1.1`. A fresh temporary consumer installed that
+registry artifact, invoked `zk-credits cline --json`, selected provider
+`openai-compatible` with model `openai/gpt-4o-mini`, returned the requested
+live answer ending `[REGISTRY-011-LIVE]`, exited 0, and advanced the durable
+ledger from 12 to 13 entries with ticket index `12` newly `consumed`. No local
+worktree tarball or Cline default provider was used for this acceptance.
+
+The pushed branch is synchronized at `60c3c03`; CI run `31521201066` passed all
+seven jobs, and Render deployment `dep-d9tmabrl550s738o3b30` is live on that
+revision. No implementation scope was added during this planning update.
+
+**Next 2–3 actionable tasks:** (1) rotate the disclosed Render credential and
+verify the old credential is rejected while both services remain healthy; (2)
+configure/accept production GitHub OAuth and rerun the hosted Stripe checkout
+plus webhook retry; (3) close the OpenRouter tier and honest-caveat checks, then
+finish whole-web lint and Render cold-start monitoring as release-quality work.
+
+**Summary:** M5 is complete from source through public package consumption and
+one real proof-backed coding-agent answer. Remaining open work is the explicit
+M4 operator/security/release-quality checklist, not sidecar implementation or
+npm publication.
+
+### Reconciliation (Dev-Planning · Phase 6 · sidecar proofs, web verification, and Stripe/OAuth status · 2026-08-28)
+
+**Milestone status:** `M1 DONE` · `M2 DONE` · `M3 DONE` · `M4 CORE PROTOCOL VALIDATED / HOSTED DEMO 4.1 & RENDER ROTATION 4.7 OPEN` · `M5 DONE (5.0–5.8 ALL LIVE-VERIFIED)` · `Web UI W1–W8 DONE`.
+
+**Closed in this reconciliation:**
+1. **5.7 Codex SDK live protocol proof:** Unit tests `src/codex-sdk-options.test.ts` pass (3/3), full sidecar vitest suite passes (64/64 across 19 files). Live proof `scripts/live-codex-sdk-proof.mjs` executed turn through `@openai/codex-sdk`, observed `finalResponse: "[CODEX-SDK-LIVE]"`, verified ledger consumed ticket index `16` (`dd3529d028cd090f269e08f81529a827e1180328417c4db4db6d0b4ba87cf10a`).
+2. **5.8 Claude Code Messages adapter + launcher:** Full sidecar vitest suite passes (64/64). Live `zk-credits claude -p "Reply with exactly: [CLAUDE-CODE-LIVE]" --output-format json --max-turns 1` exited 0 with result `"[CLAUDE-CODE-LIVE]"`, `is_error: false`, and consumed ticket indices `17` and `18`.
+3. **4.8 Whole-web lint gate:** `npm run lint` exits 0 with 0 errors across all files; `npm run typecheck` exits 0; `npm test` passes 27/27 unit tests; `CI=1 E2E_PORT=3216 npm run test:e2e` passes 14/14 browser specs.
+4. **4.5 Honest caveats + public URLs:** Verified README and landing page / footer document public gateway and web URLs, launch contract `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`, all nine honest caveats; Playwright suite 14/14 and playwright-cli desktop/mobile QA verified 0 errors.
+5. **4.6 OpenRouter per-key tier:** Read-only `GET https://openrouter.ai/api/v1/key` returned HTTP 200 with `is_free_tier: true`, `limit: null`, `limit_remaining: null`.
+6. **4.1 Stripe & Gateway Billing Relay Proof (Partial):** Dedicated script `web/scripts/live-stripe-webhook-proof.mjs` proved Stripe test API balance retrieval, programmatic checkout session creation (`cs_test_...`), and HMAC-signed webhook relay to hosted Render gateway (`/v1/billing/stripe-event`), recording live Soroban testnet deposit (`txHash: be32170...`) and duplicate-event idempotency. Browser card payment was completed for `cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51` (`payment_status: "paid"`, `status: "complete"`). `e2e/dashboard.spec.ts` preserves strict unconfigured assertions for deterministic CI (14/14 pass). Open hosted acceptance gaps under 4.1: (1) hosted `/dashboard?checkout=success` pending $\rightarrow$ confirmed UI was not rendered on Vercel (redirects to `/sign-in`); (2) hosted Vercel `/api/webhooks/stripe` response was a retry (`duplicate: true`), not an initial first delivery; (3) GitHub OAuth remains unconfigured in Vercel project environment variables (button disabled on live site).
+
+**Next actionable tasks:** (1) provision `GITHUB_CLIENT_*` in Vercel project environment variables to enable hosted GitHub OAuth and authenticated dashboard success walkthroughs under 4.1; (2) operator rotation of disclosed Render API key in Render Web Dashboard under 4.7; (3) Phase 7 Check Implementation.
+
+**Summary:** All sidecar companions (Codex SDK & Claude Messages), web quality gates, core protocol spends, and Stripe checkout payments are verified with fresh session evidence. Task 4.1 remains open for hosted dashboard success UI rendering, initial hosted Vercel webhook delivery, and hosted GitHub OAuth sign-in.

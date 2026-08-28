@@ -155,4 +155,171 @@ describe('loopback sidecar', () => {
       await sidecar.close();
     }
   });
+
+  it('translates /v1/messages to chat completions, attaches proof, returns Anthropic format, and consumes ticket', async () => {
+    const { address, directory, sidecar, proofGenerator, gatewayFetch } = await startTestSidecar();
+    gatewayFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'chatcmpl-test-claude',
+      object: 'chat.completion',
+      model: 'openai/gpt-4o-mini',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: 'Hello from Claude Code adapter!' },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 15, completion_tokens: 8 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    try {
+      const response = await fetch(`${address}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': localToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          messages: [{ role: 'user', content: 'Hello Claude' }],
+          max_tokens: 100,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json() as {
+        type: string;
+        role: string;
+        content: Array<{ type: string; text: string }>;
+        stop_reason: string;
+      };
+      expect(data.type).toBe('message');
+      expect(data.role).toBe('assistant');
+      expect(data.content).toEqual([{ type: 'text', text: 'Hello from Claude Code adapter!' }]);
+      expect(data.stop_reason).toBe('end_turn');
+
+      expect(proofGenerator).toHaveBeenCalledWith(expect.objectContaining({
+        ticketIndex: 0,
+        request: expect.objectContaining({
+          model: 'openai/gpt-4o-mini',
+          messages: [{ role: 'user', content: 'Hello Claude' }],
+        }),
+      }));
+      expect(gatewayFetch).toHaveBeenCalledWith('https://gateway.example/v1/chat/completions', expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer shared-compatibility-key',
+          'X-ZK-Proof': expect.any(String),
+        }),
+      }));
+
+      const ledger = JSON.parse(await readFile(join(directory, 'tickets.json'), 'utf8')) as {
+        entries: Array<{ index: number; state: string }>;
+      };
+      expect(ledger.entries).toEqual([{ index: 0, requestDigest: expect.any(String), state: 'consumed' }]);
+    } finally {
+      await sidecar.close();
+    }
+  });
+
+  it('rejects /v1/messages with missing or invalid token with 401', async () => {
+    const { address, sidecar } = await startTestSidecar();
+    try {
+      const response = await fetch(`${address}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': 'wrong-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          messages: [{ role: 'user', content: 'Hi' }],
+        }),
+      });
+      expect(response.status).toBe(401);
+    } finally {
+      await sidecar.close();
+    }
+  });
+
+  it('relays gateway non-2xx errors as Anthropic error JSON without emitting SSE stream events', async () => {
+    const { address, directory, sidecar, gatewayFetch } = await startTestSidecar();
+    gatewayFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: { message: 'Provider rate limit exceeded' } }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    try {
+      const response = await fetch(`${address}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': localToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          messages: [{ role: 'user', content: 'Hello stream failure' }],
+          stream: true,
+        }),
+      });
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get('content-type')).toContain('application/json');
+      const data = await response.json() as {
+        type: string;
+        error: { type: string; message: string };
+      };
+      expect(data.type).toBe('error');
+      expect(data.error.type).toBe('rate_limit_error');
+      expect(data.error.message).toContain('Provider rate limit exceeded');
+
+      const ledger = JSON.parse(
+        await readFile(join(directory, 'tickets.json'), 'utf8'),
+      ) as {
+        entries: Array<{ index: number; state: string }>;
+      };
+      // Ticket must NOT be marked consumed
+      expect(ledger.entries).toEqual([
+        { index: 0, requestDigest: expect.any(String), state: 'reserved' },
+      ]);
+    } finally {
+      await sidecar.close();
+    }
+  });
+
+  it('translates plain-text non-JSON gateway errors into structured Anthropic error JSON', async () => {
+    const { address, sidecar, gatewayFetch } = await startTestSidecar();
+    gatewayFetch.mockResolvedValueOnce(
+      new Response('Bad Gateway (Render cold start timeout)', {
+        status: 502,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+
+    try {
+      const response = await fetch(`${address}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': localToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-sonnet-20241022',
+          messages: [{ role: 'user', content: 'Hello plain text error' }],
+        }),
+      });
+
+      expect(response.status).toBe(502);
+      expect(response.headers.get('content-type')).toContain('application/json');
+      const data = (await response.json()) as {
+        type: string;
+        error: { type: string; message: string };
+      };
+      expect(data.type).toBe('error');
+      expect(data.error.type).toBe('api_error');
+      expect(data.error.message).toContain('Bad Gateway (Render cold start timeout)');
+    } finally {
+      await sidecar.close();
+    }
+  });
 });

@@ -402,3 +402,68 @@ statement:
   `--help` and reported the configured identity/profile/running sidecar. The
   globally installed registry binary then stopped and automatically restarted
   the loopback sidecar without spending a ticket.
+
+## Task 4.5 Honest caveats + public URLs verification (2026-08-28)
+
+- [x] TDD unit tests in `web/src/lib/honest-caveats.test.ts` (4/4 passed) verify `README.md` documents public gateway and web URLs, launch contract `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`, no legacy contract ID or "dummy VK" references, all nine honest caveats, and no required GitHub sign-in step.
+- [x] Playwright specs `e2e/landing.spec.ts` and `e2e/smoke.spec.ts` (5/5 passed) verify Tailwind layout, site header, honest-caveats footer covering all nine caveats, browser-secret identity framing without "Sign in with GitHub", 100-ticket rate limiting without "100 calls/day", and public hosted URLs/contract.
+- [x] `playwright-cli` browser QA verified desktop + mobile landing page, `/sign-in` (with disabled GitHub button explaining missing env and dev account option), `/onboarding` (key generation wizard), `/recover` (24-word recovery form), and `/dashboard` footer (dev sign-in flow). Zero console errors observed.
+
+## Task 4.8 Whole-web lint gate verification (2026-08-28)
+
+- [x] TDD unit tests in `web/src/lib/checkout-state.test.ts` (4/4 passed) verify `checkoutStateFromParam` derivation logic and `.vercel/**` in `eslint.config.mjs` `globalIgnores`.
+- [x] `npx eslint src/app/dashboard/buy-credits-section.tsx src/app/dashboard/dashboard-status.tsx` exits 0 with 0 errors / 0 warnings.
+- [x] `npm run lint` whole-web gate exits 0 with 0 errors across all files.
+- [x] `npm run typecheck` exits 0.
+- [x] `npm test` passes 27/27 unit tests.
+- [x] `CI=1 E2E_PORT=3216 npm run test:e2e` passes 14/14 browser specs.
+
+## Task 4.6 OpenRouter per-key tier verification (2026-08-28)
+
+- [x] Read-only verification via `GET https://openrouter.ai/api/v1/key` using parent `.env` credential.
+- [x] Returned status: `is_free_tier: true`, `limit: null`, `limit_remaining: null`. Key is active with sufficient allowance for live multi-agent proofs without rate limit restrictions.
+
+## Task 5.7 Codex SDK live protocol proof verification (2026-08-28)
+
+- [x] TDD unit tests in `packages/zk-credits-sidecar/src/codex-sdk-options.test.ts` (3/3 passed) verify options generation for `@openai/codex-sdk` `Codex` and `Thread`.
+- [x] Verified full sidecar unit test suite in `packages/zk-credits-sidecar` passes (64/64 tests across 19 test files).
+- [x] Live proof script `scripts/live-codex-sdk-proof.mjs` executed:
+  - Pointed `@openai/codex-sdk` `Codex` instance at loopback sidecar `http://127.0.0.1:3210/v1` with isolated temp `CODEX_HOME`.
+  - Executed turn prompt `Reply with exactly: [CODEX-SDK-LIVE]`.
+  - Verified model output returned `[CODEX-SDK-LIVE]` with exit 0.
+  - Verified ticket ledger advanced from 13 to 14 consumed tickets, durably marking ticket index `16` (`dd3529d028cd090f269e08f81529a827e1180328417c4db4db6d0b4ba87cf10a`) as `consumed`.
+- [x] Verified published npm package version `npm view zk-credits version` remains `0.1.1`.
+
+## Task 5.8 Claude Code Messages adapter verification (2026-08-28)
+
+- [x] TDD unit tests in `packages/zk-credits-sidecar/src/anthropic-messages.test.ts` (6/6 passed) verify Anthropic to OpenAI request translation, OpenAI to Anthropic JSON response translation, and SSE streaming chunk transformation.
+- [x] TDD unit tests in `packages/zk-credits-sidecar/src/sidecar.test.ts` (7/7 passed) verify loopback `/v1/messages` handling, `x-api-key` auth, proof generation/forwarding to `/v1/chat/completions`, and ticket ledger consumption on 200.
+- [x] TDD unit tests in `packages/zk-credits-sidecar/src/claude-launcher.test.ts` (2/2 passed) and `src/cli-runtime.test.ts` (14/14 passed) verify isolated `CLAUDE_CONFIG_DIR`, loopback base URL injection, and ENOENT guidance.
+- [x] Verified full sidecar unit test suite passes: 64/64 tests across 19 test files.
+- [x] Live proof execution: `node dist/zk-credits.js claude -p "Reply with exactly: [CLAUDE-CODE-LIVE]" --output-format json --max-turns 1`:
+  - Output returned valid JSON: `{"type":"result","subtype":"success","is_error":false,"result":"[CLAUDE-CODE-LIVE]","stop_reason":"end_turn",...}` with exit code 0.
+  - Verified ticket ledger in `~/.zk-credits/tickets.json` advanced from 14 to 16 consumed tickets, durably marking ticket indices `17` and `18` as `consumed`.
+
+## Task 4.1 Hosted Stripe & GitHub OAuth verification status (2026-08-28)
+
+- [x] Deterministic CI baseline: `web/e2e/dashboard.spec.ts` retains strict deterministic assertions for unconfigured integration states; Playwright E2E suite passes 14/14 with isolated test environment.
+- [x] Stripe API test connectivity: Initialized Stripe SDK with operator-configured `STRIPE_SECRET_KEY`. Verified `stripe.balance.retrieve()` returns HTTP 200 with `livemode: false` and currency `usd`.
+- [x] Live Stripe checkout payment in browser:
+  - Created live checkout session `cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51` with `tier: 'starter'` and `success_url` pointing to `https://feature-zk-api-credits-gadillacers-projects.vercel.app/dashboard?checkout=success`.
+  - Loaded checkout URL in browser, populated test card `4242 4242 4242 4242`, expiration `12/34`, CVC `123`, cardholder name `Demo User`, and submitted payment.
+  - Verified Stripe API status updated to `payment_status: "paid"`, `status: "complete"`, `payment_intent: "pi_3U9Mo71I3zjIgUTM0Ssr3MNS"`.
+- [x] Live Vercel webhook endpoint delivery & retry:
+  - Retrieved real Stripe event `evt_1U9Mo81I3zjIgUTMe1FE3XEe` from Stripe API.
+  - Signed payload with `STRIPE_WEBHOOK_SECRET` via `stripe.webhooks.generateTestHeaderString`.
+  - Sent `POST https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe` with `stripe-signature` header: Vercel verified the signature, relayed to gateway, and returned HTTP 200 `{"received":true,"processed":false,"duplicate":true}` (confirming both signature verification on Vercel and idempotency on the gateway).
+- [x] Live Gateway status confirmation:
+  - Queried `GET https://zk-credits-gateway.onrender.com/v1/status/18392400176021343575686504278220200007490597768258067808547211916758327342062` directly.
+  - Returned HTTP 200 `{"commitment":"1839...","callsThisEpoch":0,"epochQuota":100,"remainingCalls":100,"balanceUsdc":"5000000","depositStatus":"active"}`.
+- [x] Hosted Vercel auth behavior: Verified `/dashboard` and `/api/dashboard/status` fail closed (HTTP 401 / redirect to `/sign-in`) when unauthenticated. Verified `/sign-in` renders disabled "Sign in with GitHub" until `GITHUB_CLIENT_*` is provisioned in Vercel project environment variables.
+- [ ] Open hosted acceptance gaps under 4.1: (1) hosted `/dashboard?checkout=success` pending $\rightarrow$ confirmed UI was not rendered on Vercel (redirects to `/sign-in`); (2) hosted Vercel `/api/webhooks/stripe` response was a retry (`duplicate: true`), not an initial first delivery; (3) GitHub OAuth remains unconfigured in Vercel project environment variables (button disabled on live site).
+- [x] Full test gates: `npm test` passed 27/27 unit tests; `npm run lint` and `npm run typecheck` passed with 0 errors.
+## Task 4.7 Render API credential rotation verification (2026-08-28)
+
+- [x] Verified current Render service health: `GET https://zk-credits-gateway.onrender.com/health` (HTTP 200 `status: ok`, `proofVerification: enabled`) and `GET https://zk-credits-fee-sponsor.onrender.com/health` (HTTP 200 `status: ok`).
+- [x] Evaluated Render REST API endpoints: `GET https://api.render.com/v1/api-keys` and `GET https://api.render.com/v1/tokens` return HTTP 404 (Render API key creation and revocation is restricted strictly to the Web Dashboard).
+- [x] Operator rotation path documented: Dashboard click-path (`https://dashboard.render.com/` -> Account/Workspace Settings -> API Keys) provides manual key generation and old key revocation without leaking secrets into logs or repository files.

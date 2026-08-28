@@ -4,20 +4,20 @@ import { SiteFooter } from '@/components/site-footer';
 
 const STEPS = [
   {
-    title: 'Sign in & fund',
-    body: 'Sign in with GitHub and buy credits via Stripe (test mode).',
+    title: 'Generate browser secret',
+    body: 'Your browser generates a private secret key backed up by a 24-word recovery phrase (never leaves your device).',
   },
   {
-    title: 'Generate your secret',
-    body: 'Your browser generates a secret key that never leaves your device.',
+    title: 'Fund on testnet',
+    body: 'Deposit testnet USDC to register your commitment in the BLS12-381 Merkle tree.',
   },
   {
     title: 'Prove, don’t reveal',
-    body: 'Call LLMs through the gateway with ZK-RLN proofs.',
+    body: 'Call LLMs through the gateway with client-side ZK-RLN proofs (100 tickets per deposit).',
   },
   {
     title: 'Stay unlinked',
-    body: 'The gateway cannot link your calls to your deposit.',
+    body: 'The gateway verifies your proof and forwards to OpenRouter without linking to your deposit.',
   },
 ];
 
@@ -83,15 +83,53 @@ export default function Home() {
               <h2 className="font-semibold text-zinc-100">Privacy</h2>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
                 ZK-RLN proofs verified on-chain via Stellar&apos;s native
-                BLS12-381 (CAP-0059). The gateway sees your proof but cannot
-                determine which deposit funded your call.
+                BLS12-381 (CAP-0059). The gateway sees your proof and binds the
+                request body, but cannot determine which deposit funded your
+                call.
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <h2 className="font-semibold text-zinc-100">Rate Limiting</h2>
+              <h2 className="font-semibold text-zinc-100">
+                Rate Limiting &amp; Slashing
+              </h2>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                100 calls/day (configurable). Over-quota double-spend triggers
-                a slash: 50% to protocol treasury, 50% to the reporter.
+                100 tickets per deposit (indices 0..99). Over-quota
+                double-spend reveals the secret key and triggers an on-chain
+                slash: 50% to protocol treasury, 50% to the reporter.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+              <h2 className="font-semibold text-zinc-100">
+                Hosted Infrastructure
+              </h2>
+              <div className="mt-2 space-y-1 text-sm leading-relaxed text-zinc-400">
+                <p>
+                  <span className="font-medium text-zinc-300">Gateway:</span>{' '}
+                  <a
+                    href="https://zk-credits-gateway.onrender.com/health"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-xs text-indigo-400 hover:underline"
+                  >
+                    https://zk-credits-gateway.onrender.com
+                  </a>
+                </p>
+                <p className="break-all font-mono text-xs text-zinc-400">
+                  <span className="font-sans font-medium text-zinc-300">
+                    Contract:
+                  </span>{' '}
+                  CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT
+                </p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+              <h2 className="font-semibold text-zinc-100">Honest Caveats</h2>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                Testnet only &middot; 100-ticket specialization &middot;
+                Variable-cost refunds deferred &middot; Single-contributor
+                setup &middot; Gateway-mediated withdrawal &middot; Async
+                settlement audit &middot; Single gateway timing &middot; Browser
+                proving latency &middot; IP not hidden.
               </p>
             </div>
           </div>

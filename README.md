@@ -2,21 +2,26 @@
 
 Anonymous RLN-rate-limited API credits for coding agents on Stellar.
 
+## Public Deployments
+
+- **Web Application:** https://feature-zk-api-credits-gadillacers-projects.vercel.app
+- **Gateway API:** https://zk-credits-gateway.onrender.com
+- **Soroban Testnet Contract:** `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`
+
 ## What It Is
 
-A privacy gateway between base-URL-configurable coding agents and LLM APIs (OpenRouter, 400+ models). Developers buy anonymous credits with a card; a local sidecar adds a ZK-RLN proof to each LLM request; ticket forks slash deposits on-chain.
+A privacy gateway between base-URL-configurable coding agents and LLM APIs (OpenRouter, 400+ models). Developers buy anonymous credits with testnet USDC; a local sidecar adds a ZK-RLN proof to each LLM request; ticket forks slash deposits on-chain.
 
 **The gateway cannot link a call to a deposit.** ZK enforced.
 
 ## How It Works
 
-1. Developer signs in with GitHub, buys $5 credits via Stripe
-2. Browser generates `secret_k` + commitment, stores key in IndexedDB
+1. Developer generates a private browser secret (`secret_k`) backed up by a 24-word recovery phrase, funds with testnet USDC
+2. Browser generates `secret_k` + commitment, stores key in local storage / IndexedDB
 3. Gateway mints on-chain USDC deposit referencing the commitment
-4. Agent calls `OPENAI_BASE_URL` with a ZK proof in the header
+4. Agent calls `OPENAI_BASE_URL` with a ZK proof in the header (100 private tickets `0..99` per deposit)
 5. Gateway verifies proof (off-chain), forwards to OpenRouter, returns response
 6. Over-quota: nullifier collision → RLN math extracts `secret_k` → slash on-chain
-
 ## Quick Start
 
 ### Prerequisites
@@ -117,22 +122,20 @@ node scripts/e2e-test.js
 node scripts/slash-demo.js
 ```
 
-## Use ZK Credits with Cline CLI
+## Use ZK Credits with Coding Agents
 
 The first-party sidecar keeps `secret_k`, the recovery phrase, the Merkle
 witness, ticket index, and loopback bearer on the developer machine. Render
 receives only the shared compatibility bearer and a fresh body-bound ZK proof.
-It supports both Chat Completions and the Responses API. Cline uses Chat
-Completions through an isolated `openai-compatible` provider profile.
+It supports Chat Completions, Responses, and Anthropic Messages endpoints.
 
-The companion requires Node.js 20 or newer and the Cline CLI. Install both:
+The published `0.1.1` release on npm provides `zk-credits cline` and `zk-credits codex`:
 
 ```bash
-npm install --global cline
 npm install --global zk-credits
 ```
 
-Contributors can instead install it from this checkout:
+To use the latest checkout features (including `zk-credits claude` and `zk-credits/codex` SDK exports):
 
 ```bash
 cd packages/zk-credits-sidecar
@@ -140,8 +143,7 @@ npm ci
 npm run build
 npm link
 ```
-
-Run Cline through ZK Credits with one command:
+### 1. Cline CLI
 
 ```bash
 zk-credits cline "summarize this repository"
@@ -149,26 +151,46 @@ zk-credits cline "summarize this repository"
 zk-credits cline --json "audit this package"
 ```
 
-On first use, the command prompts for the funded identity's 24-word recovery
-phrase on a non-echoing terminal if it is not already in the operating-system
-credential store. It then reuses or starts the sidecar, writes an owner-only
-Cline profile below `~/.zk-credits`, and launches Cline with provider
-`openai-compatible`, `OPENAI_BASE_URL=http://127.0.0.1:3210/v1`, and the random
-local API key. It does not use Cline's default model provider or modify the
-user's normal `~/.cline` profile.
+Launches Cline with an isolated `openai-compatible` provider profile pointing to
+the loopback sidecar (`http://127.0.0.1:3210/v1`) without modifying `~/.cline`.
+Live-validated with Cline CLI 3.0.51.
 
-This flow is live-validated with Cline CLI 3.0.51: a headless `--json` request
-used provider `openai-compatible`, returned a real upstream model answer, and
-durably consumed its proof ticket through the hosted Render verifier.
+### 2. Codex CLI and Codex SDK
 
-The existing Codex companion remains available for users who want it:
+Interactive CLI launcher:
 
 ```bash
 zk-credits setup codex
-zk-credits codex
+zk-credits codex "summarize this repository"
 ```
 
-For another OpenAI-compatible client, the lower-level flow remains available:
+TypeScript SDK (`@openai/codex-sdk`):
+
+```ts
+import { Codex } from '@openai/codex-sdk';
+import { buildCodexSdkOptions, buildCodexThreadOptions } from 'zk-credits/codex';
+
+const codex = new Codex(buildCodexSdkOptions({ loopbackBaseUrl: 'http://127.0.0.1:3210', token, codexHome }));
+const thread = codex.startThread(buildCodexThreadOptions({ model: 'openai/gpt-4o-mini' }));
+const result = await thread.run('Reply with: [CODEX-SDK-LIVE]');
+```
+
+Live-validated with `@openai/codex-sdk` and Codex CLI 0.150.1.
+
+### 3. Claude Code CLI
+
+```bash
+zk-credits claude -p "summarize this repository"
+# Any standard Claude Code arguments also work:
+zk-credits claude --output-format json --max-turns 1 "audit this package"
+```
+
+Launches Claude Code with an isolated `CLAUDE_CONFIG_DIR` (`~/.zk-credits/claude`)
+and `ANTHROPIC_BASE_URL=http://127.0.0.1:3210`, routing Anthropic Messages requests
+through the sidecar's proof-bound Chat Completions gateway adapter.
+Live-validated with Claude Code CLI 2.1.144.
+
+### 4. Other OpenAI-Compatible Clients
 
 ```bash
 zk-credits serve
@@ -176,7 +198,6 @@ eval "$(zk-credits env)"
 # OPENAI_BASE_URL=http://127.0.0.1:3210/v1
 # OPENAI_API_KEY=<random-loopback-token>
 ```
-
 `ZK_CREDITS_MNEMONIC` is for a headless process only and is not persisted by
 that path. The package verifies its pinned WASM, proving key, and
 verification-key SHA-256 manifest before it proves; it never downloads proving
@@ -252,10 +273,7 @@ a plugin, intercept TLS, or replace the user's default agent profile.
 
 ## Contract
 
-**Existing testnet deployment (legacy artifact set; not launch acceptance):** `CCJG427D5B2KCLQC4GNSUXLZU7T3455T763EEIX44DNLCUMLXYKGEE4R`
-
-The launch contract must be redeployed after the fresh BLS12-381 ceremony so
-its dedicated verification keys match the current circuits.
+**Launch testnet deployment:** `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`
 
 Functions:
 - `deposit(depositor, commitment, new_root, amount)` — Register commitment + transfer USDC
@@ -265,14 +283,16 @@ Functions:
 
 ## Honest Caveats
 
-1. **Custodial testnet flow:** Gateway co-signs the fee-sponsored withdrawal, so a disappearing gateway can still block withdrawal. It cannot unilaterally withdraw after the launch redeploy: the contract also requires the browser-secret membership-removal proof.
-2. **Testnet only:** No real money. USDC is testnet faucet. Trusted setup is single-contributor dev-only.
-3. **Single gateway:** Cross-gateway unlinkability is v2. v1 has one gateway — it can't link cryptographically, but could log timing patterns.
-4. **Browser proving:** ~1.5s first call per session, cached after. Acceptable for demo, needs optimization for production.
-5. **Network identity:** v1 hides payment identity, not IP. Tor/client-side relay is v2.
-6. **On-chain VK:** Contract deployed with dummy VK. Gateway verifies off-chain with real VK. Full on-chain verification needs BLS12-381 point serialization.
-7. **Client compatibility:** `zk-credits cline` manages an isolated Cline OpenAI-compatible profile automatically; the Codex companion remains supported. Other clients must accept a custom OpenAI-compatible base URL.
-
+1. **Testnet only:** No real money. USDC is testnet faucet.
+2. **100-ticket specialization:** The Starter package is specialized to exactly 100 private ticket indices (`0..99`) per deposit.
+3. **Variable-cost refunds deferred:** Fixed ticket price per call; variable-cost refunds for smaller model responses are deferred to v2.
+4. **Single-contributor trusted setup:** Groth16 BLS12-381 ceremony is single-contributor dev-only.
+5. **Custodial gateway-mediated withdrawal:** Gateway co-signs the fee-sponsored withdrawal. The gateway can block by disappearing, but the gateway cannot unilaterally redirect funds because the contract requires the browser-secret membership-removal proof.
+6. **Async per-call on-chain audit:** The gateway verifies ZK proofs off-chain for zero-latency forwarding, then asynchronously submits proofs to Soroban `spend()` for durable on-chain audit.
+7. **Single gateway timing:** v1 has one gateway — it cannot link calls cryptographically to deposits, but a single gateway operator could observe request timing patterns.
+8. **Browser proving latency:** Proving in the browser adds latency (~1.5s first call per session, cached after).
+9. **Network identity / IP not hidden:** v1 hides payment and deposit identity, not network IP. Tor/client-side relay is v2.
+10. **Client compatibility:** First-party zero-configuration companions are live-validated for `zk-credits cline` (Cline CLI), Codex SDK / `zk-credits codex`, and `zk-credits claude` (Claude Code print-mode). Other clients must accept a custom OpenAI-compatible base URL.
 ## Tech Stack
 
 | Component | Technology |

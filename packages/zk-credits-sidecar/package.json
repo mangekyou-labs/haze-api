@@ -9,6 +9,12 @@
   "bin": {
     "zk-credits": "dist/zk-credits.js"
   },
+  "exports": {
+    "./codex": {
+      "types": "./dist/codex-sdk-options.d.ts",
+      "import": "./dist/codex-sdk-options.js"
+    }
+  },
   "files": [
     "dist",
     "circuits"
@@ -27,6 +33,7 @@
     "snarkjs": "^0.7.6"
   },
   "devDependencies": {
+    "@openai/codex-sdk": "^0.150.1",
     "@types/node": "^24.13.3",
     "@zk-credits/shared": "file:../zk-credits-shared",
     "esbuild": "^0.28.2",

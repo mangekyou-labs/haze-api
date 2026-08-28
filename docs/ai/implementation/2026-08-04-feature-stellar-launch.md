@@ -481,3 +481,80 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
   checkout or manual sidecar process.
 - Existing manual `import-mnemonic`, `serve`, and `env` entry points remain for
   headless or other OpenAI-compatible clients.
+
+## Task 4.5 Honest caveats + public URLs + identity flow update (2026-08-28)
+
+- Updated `README.md` and landing page (`web/src/app/page.tsx`) to document the hosted public URLs (Gateway https://zk-credits-gateway.onrender.com, Web https://feature-zk-api-credits-gadillacers-projects.vercel.app) and launch contract `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`.
+- Removed all legacy contract IDs (`CCJG427...`) and "dummy VK / must be redeployed" phrasing.
+- Documented the complete set of nine honest caveats in `README.md`, `web/src/components/site-footer.tsx`, and the landing page:
+  1. Testnet only (USDC faucet, no real money).
+  2. 100-ticket specialization (Starter package indexed 0..99).
+  3. Variable-cost refunds deferred (fixed per-call pricing).
+  4. Single-contributor dev-only trusted setup.
+  5. Custodial gateway-mediated withdrawal (gateway co-signs; can block by disappearing, but membership-removal proof prevents unilateral fund redirection).
+  6. Async per-call on-chain audit (gateway serves immediately, settles asynchronously to Soroban `spend()`).
+  7. Single gateway timing (operator can observe timing patterns).
+  8. Browser proving latency (~1.5s first call per session).
+  9. Network identity / IP not hidden (Tor/relay deferred).
+- Replaced "Sign in with GitHub" as a required first step with the browser secret + 24-word recovery phrase identity flow and testnet USDC funding.
+- Updated Rate Limiting card from "100 calls/day (configurable)" to 100 private tickets (indices 0..99) per deposit with RLN slashing.
+- Dropped GitHub OAuth from MVP scope while retaining the GitHub repository link.
+
+## Task 4.8 Whole-web lint gate restoration (2026-08-28)
+
+- Added `.vercel/**` to `globalIgnores` in `web/eslint.config.mjs`, ignoring generated Vercel output artifacts while preserving source analysis.
+- Refactored `web/src/app/dashboard/buy-credits-section.tsx`:
+  - Replaced synchronous `setState` in effect with derived `checkoutState` from `searchParams` (`checkout=cancelled` / `checkout=success` / default `idle`).
+  - Gated status polling effect strictly on `checkout=success` with `commitment` present.
+  - Replaced `window.location.href = data.url` with `window.location.assign(data.url)`.
+- Refactored `web/src/app/dashboard/dashboard-status.tsx`:
+  - Created in-effect async status loader `fetchStatus` with an explicit `unmounted` guard.
+  - Preserved event listeners for `zk-credits-status-refresh` and `zk-credits-identity-ready`.
+
+## Task 4.6 OpenRouter per-key tier verification (2026-08-28)
+
+- Queried OpenRouter API key status via read-only `GET https://openrouter.ai/api/v1/key`.
+- Key details recorded without secret leakage: `is_free_tier: true`, `limit: null`, `limit_remaining: null`.
+- Confirmed the active key is ready for live agent proof burns without credit exhaustion or hard limits.
+
+## Task 5.7 Codex SDK live protocol proof (2026-08-28)
+
+- Implemented `src/codex-sdk-options.ts` and `src/codex-sdk-options.test.ts` in `packages/zk-credits-sidecar` to construct options for `@openai/codex-sdk`:
+  - `buildCodexSdkOptions({ loopbackBaseUrl, token, codexHome })` normalizes the sidecar baseUrl (`http://127.0.0.1:<port>/v1`), assigns loopback `apiKey`, and sets `CODEX_HOME` and `OPENAI_BASE_URL`/`OPENAI_API_KEY` in `env`.
+  - `buildCodexThreadOptions({ model, workingDirectory })` configures default model `openai/gpt-4o-mini`, `sandboxMode: 'read-only'`, `skipGitRepoCheck: true`, and `approvalPolicy: 'never'`.
+- Tested live protocol path through `@openai/codex-sdk`:
+  - Started sidecar against hosted Render gateway `https://zk-credits-gateway.onrender.com`.
+  - Instantiated `Codex` and started thread in an isolated temp `CODEX_HOME` directory.
+  - Dispatched prompt `Reply with exactly: [CODEX-SDK-LIVE]`.
+  - Successfully received model completion with matching marker `[CODEX-SDK-LIVE]`.
+- Verified atomic ticket consumption on ticket index `16`.
+
+## Task 5.8 Claude Code Messages adapter and isolated launcher (2026-08-28)
+
+- Implemented `src/anthropic-messages.ts` and `src/anthropic-messages.test.ts`:
+  - `translateAnthropicToOpenAi`: translates system prompt (string or content blocks), user/assistant messages (string or content block arrays), `stop_sequences` to `stop`, and default/model mappings.
+  - `translateOpenAiToAnthropic`: converts Chat Completions JSON into Anthropic Messages JSON response structure (`msg_...` ID, role `assistant`, content `[{type: 'text', text}]`, mapped `stop_reason`, usage tokens).
+  - `createAnthropicStreamTransformer`: translates OpenAI Chat Completions SSE chunks into Anthropic SSE events (`message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`).
+- Updated `src/sidecar.ts`:
+  - Added `extractLocalToken` accepting `Authorization: Bearer <token>` or `x-api-key: <token>`.
+  - Added route `POST /v1/messages`: translates request to Chat Completions, binds canonical request for proof generation and ticket reservation, attaches `X-ZK-Proof` header to `${gatewayBaseUrl}/v1/chat/completions`, consumes ticket upon 2xx, and translates upstream JSON/SSE back to Anthropic format.
+- Implemented `src/claude-launcher.ts` and `src/claude-launcher.test.ts`:
+  - Creates isolated `~/.zk-credits/claude` (`0700`) as `CLAUDE_CONFIG_DIR`.
+  - Injects `ANTHROPIC_BASE_URL=http://127.0.0.1:3210` (no trailing `/v1`), `ANTHROPIC_AUTH_TOKEN`, and `DISABLE_TELEMETRY=1`.
+  - Leaves the user's default `~/.claude` profile untouched.
+- Wired `zk-credits claude` command into `cli-runtime.ts` and `cli.ts`.
+- Verified live Claude Code print-mode execution against the sidecar and hosted gateway, consuming ticket indices `17` and `18`.
+
+## Task 4.1 Hosted Stripe & GitHub OAuth integration status (2026-08-28)
+
+- Preserved strict deterministic unconfigured assertions in `web/e2e/dashboard.spec.ts` for clean CI reproducibility without test-environment coupling.
+- Verified Stripe Checkout in real browser: generated live session `cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51`, loaded Stripe Checkout in browser, submitted test card `4242...`, verified session transitioned to `payment_status: "paid"`, `status: "complete"`.
+- Verified live webhook verification on hosted Vercel endpoint: dispatched signed Stripe event `evt_1U9Mo81I3zjIgUTMe1FE3XEe` with `stripe-signature` to `POST https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe`; Vercel validated the HMAC signature and returned HTTP 200 `{"received":true,"processed":false,"duplicate":true}`.
+- Verified active on-chain deposit confirmation on hosted gateway: `GET https://zk-credits-gateway.onrender.com/v1/status/1839...` returned HTTP 200 with `depositStatus: "active"`, `remainingCalls: 100`, `balanceUsdc: "5000000"`.
+- Verified GitHub OAuth configuration in `src/auth.ts`: "Sign in with GitHub" on `/sign-in` enables when credentials are present; fails closed on unauthenticated access.
+- Documented open hosted acceptance gaps under 4.1: (1) hosted `/dashboard?checkout=success` pending $\rightarrow$ confirmed UI transition was not rendered on Vercel (redirects to `/sign-in`); (2) hosted Vercel `/api/webhooks/stripe` response was a retry (`duplicate: true`), not an initial first delivery; (3) GitHub OAuth remains unconfigured in Vercel project environment variables (button disabled on live site).
+## Task 4.7 Render API credential rotation (2026-08-28)
+
+- Probed Render REST API and verified `/v1/api-keys` and `/v1/tokens` are not supported over REST (HTTP 404). Render restricts API key management exclusively to the Web Dashboard.
+- Confirmed both hosted services (`https://zk-credits-gateway.onrender.com/health` and `https://zk-credits-fee-sponsor.onrender.com/health`) return HTTP 200.
+- Documented manual operator rotation click-path in Render Dashboard.

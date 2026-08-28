@@ -20,60 +20,72 @@ export function DashboardStatus() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadStatus();
-    const refresh = () => void loadStatus();
+    let unmounted = false;
+    const fetchStatus = async () => {
+      try {
+        const dbReq = indexedDB.open('zk-credits-crypto', 1);
+        dbReq.onupgradeneeded = () => dbReq.result.createObjectStore('keys');
+        dbReq.onsuccess = async () => {
+          if (unmounted) return;
+          const db = dbReq.result;
+          const tx = db.transaction('keys', 'readonly');
+          const store = tx.objectStore('keys');
+          const commitment = await new Promise<string | null>((resolve) => {
+            const req = store.get('commitment');
+            req.onsuccess = () => resolve(req.result ?? null);
+            req.onerror = () => resolve(null);
+          });
+
+          if (!commitment) {
+            if (!unmounted) setLoading(false);
+            return;
+          }
+
+          const res = await fetch(
+            `/api/dashboard/status?commitment=${encodeURIComponent(commitment)}`,
+          );
+          if (!res.ok) {
+            if (!unmounted) {
+              setError('Failed to load status');
+              setLoading(false);
+            }
+            return;
+          }
+          const data = (await res.json()) as StatusData;
+          const ticketState = await new TicketLedger().getState();
+          const used = ticketState.consumed.length + ticketState.skipped.length;
+          const reserved = ticketState.reserved.length;
+          if (!unmounted) {
+            setStatus({
+              ...data,
+              callsThisEpoch: used,
+              epochQuota: STARTER_TICKET_COUNT,
+              remainingCalls: Math.max(
+                0,
+                STARTER_TICKET_COUNT - used - reserved,
+              ),
+            });
+            setLoading(false);
+          }
+        };
+        dbReq.onerror = () => {
+          if (!unmounted) setLoading(false);
+        };
+      } catch {
+        if (!unmounted) setLoading(false);
+      }
+    };
+
+    void fetchStatus();
+    const refresh = () => void fetchStatus();
     window.addEventListener('zk-credits-status-refresh', refresh);
     window.addEventListener('zk-credits-identity-ready', refresh);
     return () => {
+      unmounted = true;
       window.removeEventListener('zk-credits-status-refresh', refresh);
       window.removeEventListener('zk-credits-identity-ready', refresh);
     };
   }, []);
-
-  async function loadStatus() {
-    try {
-      const dbReq = indexedDB.open('zk-credits-crypto', 1);
-      dbReq.onupgradeneeded = () => dbReq.result.createObjectStore('keys');
-      dbReq.onsuccess = async () => {
-        const db = dbReq.result;
-        const tx = db.transaction('keys', 'readonly');
-        const store = tx.objectStore('keys');
-        const commitment = await new Promise<string | null>((resolve) => {
-          const req = store.get('commitment');
-          req.onsuccess = () => resolve(req.result ?? null);
-          req.onerror = () => resolve(null);
-        });
-
-        if (!commitment) {
-          setLoading(false);
-          return;
-        }
-
-        const res = await fetch(`/api/dashboard/status?commitment=${encodeURIComponent(commitment)}`);
-        if (!res.ok) {
-          setError('Failed to load status');
-          setLoading(false);
-          return;
-        }
-        const data = (await res.json()) as StatusData;
-        const ticketState = await new TicketLedger().getState();
-        const used = ticketState.consumed.length + ticketState.skipped.length;
-        const reserved = ticketState.reserved.length;
-        setStatus({
-          ...data,
-          callsThisEpoch: used,
-          epochQuota: STARTER_TICKET_COUNT,
-          remainingCalls: Math.max(0, STARTER_TICKET_COUNT - used - reserved),
-        });
-        setLoading(false);
-      };
-      dbReq.onerror = () => {
-        setLoading(false);
-      };
-    } catch (e) {
-      setLoading(false);
-    }
-  }
 
   if (loading) {
     return (

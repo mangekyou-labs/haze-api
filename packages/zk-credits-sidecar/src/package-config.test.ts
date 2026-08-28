@@ -6,6 +6,7 @@ describe('sidecar package distribution', () => {
     const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
       name?: string;
       bin?: Record<string, string>;
+      exports?: Record<string, { types: string; import: string }>;
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
       engines?: Record<string, string>;
@@ -14,6 +15,10 @@ describe('sidecar package distribution', () => {
 
     expect(packageJson.name).toBe('zk-credits');
     expect(packageJson.bin?.['zk-credits']).toBe('dist/zk-credits.js');
+    expect(packageJson.exports?.['./codex']).toEqual({
+      types: './dist/codex-sdk-options.d.ts',
+      import: './dist/codex-sdk-options.js',
+    });
     expect(packageJson.dependencies?.['@zk-credits/shared']).toBeUndefined();
     expect(packageJson.dependencies).toMatchObject({
       '@scure/bip39': expect.any(String),

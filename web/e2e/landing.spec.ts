@@ -24,7 +24,7 @@ test('landing renders styled (Tailwind active), not raw unstyled HTML', async ({
   expect(bodyBg).not.toBe('rgb(255, 255, 255)');
 });
 
-test('landing has a site header and an honest-caveats footer', async ({
+test('landing has a site header and an honest-caveats footer covering all 9 caveats', async ({
   page,
 }) => {
   await page.goto('/');
@@ -37,7 +37,31 @@ test('landing has a site header and an honest-caveats footer', async ({
 
   const footer = page.getByTestId('site-footer');
   await expect(footer).toBeVisible();
-  await expect(footer).toContainText(/testnet/i);
-  await expect(footer).toContainText(/trusted setup/i);
-  await expect(footer).toContainText(/no real money/i);
+  await expect(footer).toContainText(/testnet only/i);
+  await expect(footer).toContainText(/100-ticket/i);
+  await expect(footer).toContainText(/variable-cost/i);
+  await expect(footer).toContainText(/single-contributor.*trusted setup/i);
+  await expect(footer).toContainText(/gateway-mediated withdrawal/i);
+  await expect(footer).toContainText(/async.*on-chain audit|async per-call/i);
+  await expect(footer).toContainText(/timing patterns/i);
+  await expect(footer).toContainText(/browser proving/i);
+  await expect(footer).toContainText(/network identity/i);
+});
+
+test('landing copy uses browser secret identity, not GitHub sign-in as required step', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  const main = page.locator('main');
+  await expect(main).not.toContainText('100 calls/day');
+  await expect(main).not.toContainText('Sign in with GitHub');
+
+  // Confirms identity path is browser secret + mnemonic / testnet funding
+  await expect(main).toContainText(/browser secret|recovery phrase|mnemonic/i);
+  await expect(main).toContainText(/100 tickets|100-ticket/i);
+
+  // Confirms public deployment info
+  await expect(main).toContainText('https://zk-credits-gateway.onrender.com');
+  await expect(main).toContainText('CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT');
 });

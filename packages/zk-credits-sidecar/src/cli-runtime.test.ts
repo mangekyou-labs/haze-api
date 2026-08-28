@@ -20,6 +20,7 @@ function dependencies(
     isSidecarHealthy: async () => true,
     launchCodex: async () => 0,
     launchCline: async () => 0,
+    launchClaude: async () => 0,
     ...overrides,
   };
 }
@@ -176,6 +177,50 @@ describe('CLI commands', () => {
 
     expect(importMnemonic).toHaveBeenCalledWith(mnemonic);
     expect(launchCline).toHaveBeenCalledOnce();
+    expect(write.mock.calls.flat().join('\n')).not.toContain(mnemonic);
+  });
+
+  it('starts the sidecar and launches Claude with the active local token', async () => {
+    const ensureSidecar = vi.fn(async () => 'private-claude-token');
+    const launchClaude = vi.fn(async () => 0);
+    const write = vi.fn();
+
+    await expect(
+      runCliCommand(
+        ['claude', '-p', 'explain this repository'],
+        dependencies({ ensureSidecar, launchClaude, write }),
+      ),
+    ).resolves.toBe(0);
+
+    expect(ensureSidecar).toHaveBeenCalledOnce();
+    expect(launchClaude).toHaveBeenCalledWith(
+      ['-p', 'explain this repository'],
+      'private-claude-token',
+    );
+    expect(write.mock.calls.flat().join('\n')).not.toContain(
+      'private-claude-token',
+    );
+  });
+
+  it('imports a missing identity before the first Claude launch', async () => {
+    const mnemonic = 'private recovery phrase that must remain hidden';
+    const importMnemonic = vi.fn(async () => undefined);
+    const launchClaude = vi.fn(async () => 0);
+    const write = vi.fn();
+
+    await runCliCommand(
+      ['claude', 'hello'],
+      dependencies({
+        isIdentityConfigured: async () => false,
+        readMnemonic: async () => mnemonic,
+        importMnemonic,
+        launchClaude,
+        write,
+      }),
+    );
+
+    expect(importMnemonic).toHaveBeenCalledWith(mnemonic);
+    expect(launchClaude).toHaveBeenCalledOnce();
     expect(write.mock.calls.flat().join('\n')).not.toContain(mnemonic);
   });
 });
