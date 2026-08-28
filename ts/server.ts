@@ -43,9 +43,18 @@ const MAX_SSE_REPLAY_BYTES = Number(process.env.MAX_SSE_REPLAY_BYTES ?? 1_000_00
 // Tests/local dev default to the memory store; production startup picks the
 // Postgres store via initGatewayStore(). Handlers only talk to this contract,
 // never to Maps/arrays directly.
+let isReady = true;
+
+export function setIsReady(ready: boolean): void {
+  isReady = ready;
+}
+
+export function getIsReady(): boolean {
+  return isReady;
+}
+
 let gatewayStore: GatewayStore = new MemoryGatewayStore();
 let billingStore: BillingStore = new MemoryBillingStore();
-
 export function setGatewayStore(store: GatewayStore): void {
   gatewayStore = store;
 }
@@ -149,15 +158,16 @@ export async function initDurableGatewayStore(
     },
     Number(process.env.SPEND_WORKER_INTERVAL_MS ?? '10000'),
   );
+  setIsReady(true);
   return store;
 }
 
 export async function resetGatewayStoreForTests(): Promise<void> {
+  setIsReady(true);
   setGatewayStore(new MemoryGatewayStore());
   setBillingStore(new MemoryBillingStore());
   merkleTree.replaceWith(new MerkleTree());
 }
-
 // ─── Config ──────────────────────────────────────────────────────
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
@@ -277,17 +287,27 @@ registerAdapter(mock);
 
 verificationKey = loadVerificationKey();
 
-// ─── Healthcheck ─────────────────────────────────────────────────
+// ─── Healthcheck & Readiness Gate ──────────────────────────────────
 
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
+  res.status(isReady ? 200 : 503).json({
+    status: isReady ? 'ok' : 'initializing',
     version: '0.1.0',
     network: 'stellar:testnet',
     proofVerification: 'enabled',
   });
 });
 
+app.use('/v1', (_req: Request, res: Response, next) => {
+  if (!isReady) {
+    res.status(503).json({
+      error: 'gateway_initializing',
+      message: 'Gateway durable stores and on-chain tree verification are initializing',
+    });
+    return;
+  }
+  next();
+});
 // Public, parameter-free snapshot. Clients derive their own path locally;
 // this route deliberately has no commitment/candidate-leaf lookup semantics.
 app.get('/v1/membership-tree', (_req: Request, res: Response) => {
@@ -1061,20 +1081,23 @@ const isMain = typeof require !== 'undefined' && typeof module !== 'undefined'
   : (process.argv[1] ? path.resolve(process.argv[1]).includes('server') : false);
 
 if (isMain) {
+  setIsReady(false);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`ZK-API Credits Gateway listening on port ${PORT}`);
+    console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
+    console.log(`Starter package: ${STARTER_TICKET_COUNT} indexed tickets`);
+    console.log('Proof verification: enabled');
+  });
+
   initDurableGatewayStore()
+    .then(() => {
+      console.log('Durable storage: postgresql (gateway schema)');
+      console.log('Gateway durable stores and tree verification completed: READY');
+    })
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : 'unknown';
       console.error('FATAL: database unavailable — refusing to start with non-durable state:', message);
-      process.exit(1);
-    })
-    .then(() => {
-      app.listen(PORT, '0.0.0.0', () => {
-        console.log(`ZK-API Credits Gateway running on port ${PORT}`);
-        console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
-        console.log(`Starter package: ${STARTER_TICKET_COUNT} indexed tickets`);
-        console.log('Proof verification: enabled');
-        console.log('Durable storage: postgresql (gateway schema)');
-      });
+      server.close(() => process.exit(1));
     });
 }
 
