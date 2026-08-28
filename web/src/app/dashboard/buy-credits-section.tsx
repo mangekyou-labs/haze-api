@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 const TIERS = [
-  { id: 'starter', label: 'Starter', amount: '$5', calls: '100 private tickets', available: true },
+  { id: 'starter', label: 'Starter', amount: '$1', calls: '100 private tickets', available: true },
   { id: 'pro', label: 'Pro', amount: '$20', calls: 'Future package', available: false },
   { id: 'enterprise', label: 'Enterprise', amount: '$50', calls: 'Future package', available: false },
 ];
