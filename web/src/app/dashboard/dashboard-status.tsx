@@ -150,6 +150,19 @@ export function DashboardStatus() {
           <p className="text-xs text-zinc-400">shared bearer + per-call proof</p>
         </div>
       </div>
+      {status.depositStatus === 'active' && (
+        <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 font-mono text-xs text-zinc-300">
+          <p className="mb-2 font-sans font-medium text-zinc-300">Run with your coding agent:</p>
+          <div className="space-y-1">
+            <div><code>npm install --global zk-credits</code></div>
+            <div><code>zk-credits import-mnemonic</code></div>
+            <div className="pt-1.5 font-sans text-[11px] text-zinc-500">Launch command:</div>
+            <div><code className="text-indigo-300">zk-credits cline &quot;Explain Stellar CAP-0059&quot;</code></div>
+            <div><code className="text-indigo-300">zk-credits claude -p &quot;Explain Stellar CAP-0059&quot;</code></div>
+            <div><code className="text-indigo-300">zk-credits setup codex &amp;&amp; zk-credits codex &quot;Explain Stellar CAP-0059&quot;</code></div>
+          </div>
+        </div>
+      )}
 
       {status.depositStatus === 'slashed' && (
         <div className="mt-4 rounded-lg border border-red-900/60 bg-red-950/50 p-3">

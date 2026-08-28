@@ -177,7 +177,19 @@ export function ApiKeySection({
           </div>
         </div>
       )}
-
+      {existingCommitment && !mnemonic && (
+        <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs text-zinc-300">
+          <p className="mb-1.5 font-sans font-medium text-zinc-400">Agent Quick Start:</p>
+          <div className="space-y-1">
+            <div><code>npm install --global zk-credits</code></div>
+            <div><code>zk-credits import-mnemonic</code></div>
+            <div className="pt-1 font-sans text-[11px] text-zinc-500">Run with your agent:</div>
+            <div><code className="text-indigo-300">zk-credits cline &quot;Explain Stellar CAP-0059&quot;</code></div>
+            <div><code className="text-indigo-300">zk-credits claude -p &quot;Explain Stellar CAP-0059&quot;</code></div>
+            <div><code className="text-indigo-300">zk-credits setup codex &amp;&amp; zk-credits codex &quot;Explain Stellar CAP-0059&quot;</code></div>
+          </div>
+        </div>
+      )}
       {apiKey ? (
         <div className="space-y-4">
           <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
