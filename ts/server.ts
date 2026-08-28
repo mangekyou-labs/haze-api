@@ -87,7 +87,10 @@ export const merkleTree = new MerkleTree();
 export async function initDurableGatewayStore(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<GatewayStore> {
-  const migrationsDir = path.resolve(import.meta.dirname!, 'db', 'migrations');
+  const currentDir = typeof __dirname !== 'undefined'
+    ? __dirname
+    : (import.meta.dirname || (import.meta.url ? path.dirname(new URL(import.meta.url).pathname) : process.cwd()));
+  const migrationsDir = path.resolve(currentDir, 'db', 'migrations');
   const pool = createPool(env);
   await runMigrations(pool, migrationsDir);
   const store = new PostgresGatewayStore(pool);
@@ -190,7 +193,10 @@ function hasSpendableDeposit(deposit: DepositState | null): boolean {
 let verificationKey: object;
 
 function loadVerificationKey(): object {
-  const circuitsDir = process.env.CIRCUITS_DIR || path.resolve(import.meta.dirname!, '..', 'circuits');
+  const currentDir = typeof __dirname !== 'undefined'
+    ? __dirname
+    : (import.meta.dirname || (import.meta.url ? path.dirname(new URL(import.meta.url).pathname) : process.cwd()));
+  const circuitsDir = process.env.CIRCUITS_DIR || path.resolve(currentDir, '..', 'circuits');
   const vkPath = path.join(circuitsDir, 'verification_key_rln.json');
   if (!fs.existsSync(vkPath)) {
     console.error('FATAL: Verification key not found at', vkPath);
