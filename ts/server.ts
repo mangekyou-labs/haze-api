@@ -1061,21 +1061,20 @@ const isMain = typeof require !== 'undefined' && typeof module !== 'undefined'
   : (process.argv[1] ? path.resolve(process.argv[1]).includes('server') : false);
 
 if (isMain) {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`ZK-API Credits Gateway running on port ${PORT}`);
-    console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
-    console.log(`Starter package: ${STARTER_TICKET_COUNT} indexed tickets`);
-    console.log('Proof verification: enabled');
-  });
-
   initDurableGatewayStore()
-    .then(() => {
-      console.log('Durable storage: postgresql (gateway schema)');
-    })
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : 'unknown';
-      console.error('FATAL: database initialization error:', message);
-      server.close(() => process.exit(1));
+      console.error('FATAL: database unavailable — refusing to start with non-durable state:', message);
+      process.exit(1);
+    })
+    .then(() => {
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`ZK-API Credits Gateway running on port ${PORT}`);
+        console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);
+        console.log(`Starter package: ${STARTER_TICKET_COUNT} indexed tickets`);
+        console.log('Proof verification: enabled');
+        console.log('Durable storage: postgresql (gateway schema)');
+      });
     });
 }
 
