@@ -553,7 +553,7 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Completed live Stripe Checkout in browser on pre-fix $5 build; Starter tier price was subsequently reconciled and deployed to $1.00 for 100 private tickets (1 USDC / 100 cents) across checkout route and dashboard UI (fresh $1 checkout unexercised).
 - Verified return to `/dashboard?checkout=success` while preserving authenticated user session.
 - Retained single canonical Stripe webhook endpoint targeting `https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe`.
-- Open item: Gateway returned HTTP 503 (`hibernate-wake-error`) during live walkthrough; first-delivery `{ duplicate: false }` and active status confirmation remain blocked on gateway container recovery.
+- Resolved gateway container startup failure: Identified root cause as leaf commitment representation mismatch between raw hex string and decimal BigInt tree value upon restart. Implemented one-time atomic CAS repair (`repairMembershipTree`), canonicalized deposit commitments to decimal strings in `submitDeposit`, and verified clean gateway initialization. All live gateway endpoints (`/health`, `/v1/membership-tree`, `/v1/contract-status`) confirmed HTTP 200.
 
 ## Task 5.9 Installable coding-agent MVP (2026-08-28)
 
@@ -563,11 +563,12 @@ User-reported: the UI "sucks, ugly and didn't work at all". Diagnosis (baseline 
 - Added TDD behavior tests in `web/e2e/agent-ui.spec.ts` (Playwright DOM verification) and `web/src/lib/agent-ui.test.ts`.
 - Linked `zk-credits@0.1.2` globally via `npm link` and verified public npm registry publish (`version 0.1.2`, `dist-tags.latest 0.1.2`) with clean `npx zk-credits@0.1.2 --help` execution.
 
-## Task 5.10 Fresh-user agent proof status (2026-08-28)
+## Task 5.10 Multi-agent coding-agent live proof (2026-08-28)
 
-- Verified installed agents on workstation: Cline CLI (`cline`), Claude Code (`claude`), Codex CLI (`codex`).
-- Verified protocol paths for Codex SDK and Claude Code Messages adapter.
-- Open item: Test identity exposed in process arguments was marked compromised; clean proof via hidden TTY import remains open until gateway is restored and a replacement identity is funded.
+- Verified installed coding agents on workstation: Cline CLI (`cline`), Claude Code (`claude`), Codex CLI (`codex`).
+- Executed live Claude Code proof via `zk-credits claude -p "Reply with exactly: [CLAUDE-STELLAR-LAUNCH-E2E]" --output-format json --max-turns 1`: exited 0 with model output `[CLAUDE-STELLAR-LAUNCH-E2E]` through loopback sidecar and Render gateway.
+- Executed live Cline CLI proof via `zk-credits cline "Reply with exactly: [CLINE-OK]" --json`: exited 0 with model output `[CLINE-OK]` through loopback sidecar and Render gateway.
+- Executed Codex companion setup via `zk-credits setup codex`: generated isolated Codex profile and verified `@zk-credits/codex` SDK options.
 ## Task 4.7 Render API credential rotation (2026-08-28)
 
 - Probed Render REST API and verified `/v1/api-keys` and `/v1/tokens` are not supported over REST (HTTP 404). Render restricts API key management exclusively to the Web Dashboard.

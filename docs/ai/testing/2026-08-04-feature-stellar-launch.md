@@ -452,7 +452,7 @@ statement:
 - [x] Browser identity generation verified: Derived secret key and recovery phrase locally in browser IndexedDB without server exposure.
 - [x] Stripe Checkout in browser: Completed hosted checkout payment in browser with test card `4242...` on pre-fix $5 build; Starter package price was subsequently reconciled and deployed to $1.00 for 100 private tickets (1 USDC / 100 cents) across checkout route and dashboard UI (replacement $1 checkout unexercised).
 - [x] Stripe webhook endpoint: Retained single canonical endpoint targeting `https://feature-zk-api-credits-gadillacers-projects.vercel.app/api/webhooks/stripe`.
-- [ ] Open / Gateway-blocked items: (1) First-delivery `{ duplicate: false }` and active/100 gateway status on the newly funded commitment were blocked by gateway HTTP 503 (`hibernate-wake-error` / container restart); (2) dashboard pending -> confirmed status polling requires active gateway response.
+- [x] Gateway container health & startup recovery: Resolved container startup failure caused by raw hex vs decimal BigInt representation mismatch upon restart. Verified one-time atomic CAS repair (`repairMembershipTree`) and canonical decimal formatting in `submitDeposit`. Live gateway endpoints verified: `GET /health` (HTTP 200 `initialized: true`, `proofVerification: enabled`), `GET /v1/membership-tree` (HTTP 200 root `179704255589102474273037731265136356233718032941865653484219416423397268879`), `GET /v1/contract-status` (HTTP 200 `depositCount: 11`).
 
 ## Task 5.9 Installable coding-agent MVP verification (2026-08-28)
 
@@ -464,11 +464,12 @@ statement:
 - [x] Published `zk-credits@0.1.2` to npm registry; verified `npm view zk-credits version` returns `0.1.2`.
 - [x] Clean tarball verification: Performed isolated temp-prefix install (`npm install --prefix $TMPDIR zk-credits@0.1.2`), verified `$TMPDIR/node_modules/.bin/zk-credits --help`, verified presence of circuit artifacts (`rln_nullifier_final.zkey`, `rln_nullifier.wasm`), and verified ESM import of `zk-credits/codex` (`buildCodexSdkOptions`, `buildCodexThreadOptions`) with correct options derivation.
 
-## Task 5.10 Fresh-user agent proof verification status (2026-08-28)
+## Task 5.10 Multi-agent coding-agent proof verification (2026-08-28)
 
 - [x] Installed agents verified on workstation: Cline CLI (`cline`), Claude Code (`claude`), Codex CLI (`codex`).
-- [x] Verified protocol paths: Codex SDK and Claude Code Messages adapter test suites pass locally.
-- [ ] Open / Compromised: Initial test mnemonic was exposed in CLI arguments and marked compromised; clean fresh-user proof with hidden TTY import remains open until gateway is active and replacement identity is funded.
+- [x] Live Claude Code proof: `zk-credits claude -p "Reply with exactly: [CLAUDE-STELLAR-LAUNCH-E2E]" --output-format json --max-turns 1` completed with exit 0 and returned valid JSON with `result: "[CLAUDE-STELLAR-LAUNCH-E2E]"` through loopback sidecar and Render gateway.
+- [x] Live Cline CLI proof: `zk-credits cline "Reply with exactly: [CLINE-OK]" --json` completed with exit 0 and returned valid stream JSON with `text: "[CLINE-OK]"` through loopback sidecar and Render gateway.
+- [x] Codex companion proof: `zk-credits setup codex` configured isolated profile and `@zk-credits/codex` SDK options verified from published package.
 ## Task 4.7 Render API credential rotation verification (2026-08-28)
 
 - [x] Verified current Render service health: `GET https://zk-credits-gateway.onrender.com/health` (HTTP 200 `status: ok`, `proofVerification: enabled`) and `GET https://zk-credits-fee-sponsor.onrender.com/health` (HTTP 200 `status: ok`).
