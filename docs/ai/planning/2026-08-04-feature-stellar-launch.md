@@ -285,15 +285,12 @@ packaging, and Vercel deployment routing are closed implementation risks.
   - Validation: Memory TDD and local PostgreSQL integration prove legacy rows are durably quarantined and excluded from retries; deployment must apply `0007` before the fresh funded hosted call can close the operational part.
   - Related testing scenarios: gateway + Soroban integration; restart durability.
 
-- [ ] **4.1 Hosted end-to-end demo.** — IN PROGRESS (paid Stripe checkout verified; Vercel first-delivery webhook, dashboard success UI, and hosted GitHub OAuth remain OPEN)
+- [ ] **4.1 Hosted end-to-end demo.** — BLOCKED ON GATEWAY CONTAINER RECOVERY
   - Outcome: A browser identity completes the proof-backed OpenRouter path from sign-in through a funded credit and a self-verified indexed-ticket request.
-    - **Verified components (done):** Core protocol path (two spends, exact retry, Soroban on-chain settlement) verified in hosted M4 pass. Real Stripe payment walkthrough completed in browser (`cs_test_a11TSNYBSbMiwLRtYvauhAs2MyMeRvEWuVuZN6wvgWDvoCHNQ4q5MNwA51` $\rightarrow$ `payment_status: "paid"`, `status: "complete"`). Gateway direct status confirmed active deposit (`depositStatus: "active"`, `remainingCalls: 100`). Deterministic CI baseline in `web/e2e/dashboard.spec.ts` passes 14/14.
-    - **Open hosted acceptance gaps (uncompleted):**
-      1. **Hosted `/dashboard?checkout=success` UI:** The pending $\rightarrow$ confirmed UI transition was never rendered on hosted Vercel because visiting `/dashboard` without an active NextAuth session cookie redirects to `/sign-in` (HTTP 401 / redirect).
-      2. **Hosted Webhook First Delivery:** The hosted Vercel `/api/webhooks/stripe` HTTP 200 response was a retry (`duplicate: true`) after a prior direct gateway POST, not a first hosted delivery that initiated the Soroban deposit.
-      3. **Hosted GitHub OAuth:** GitHub OAuth is unconfigured in Vercel project environment variables; the live "Sign in with GitHub" button on `https://feature-zk-api-credits-gadillacers-projects.vercel.app/sign-in` remains disabled.
+    - **Verified components:** GitHub OAuth configured on Vercel (`GITHUB_CLIENT_*`, `AUTH_URL`, `AUTH_TRUST_HOST`); live `/sign-in` enabled; authenticated session successfully established; browser identity generated in IndexedDB; Starter tier price reconciled to $1.00 for 100 tickets; single canonical Stripe webhook endpoint configured.
+    - **Blocked items:** (1) Gateway container returned HTTP 503 (`hibernate-wake-error`) on Render; (2) Stripe webhook first-delivery `{ duplicate: false }` and active 100-ticket gateway status on the newly funded commitment remain unproven until the gateway container completes startup.
   - Depends on: 3.2, 3.3, 3.4.
-  - Validation: Core protocol pass recorded. Paid Stripe checkout recorded. Hosted browser dashboard payment state, first-delivery Vercel webhook, and live GitHub OAuth login remain open acceptance gates.
+  - Validation: GitHub OAuth sign-in and checkout session redirect verified. First delivery webhook and active gateway status blocked on Render gateway container recovery.
   - Related testing scenarios: hosted E2E happy path; identity creation; browser proving; Stripe checkout & webhook idempotency; GitHub OAuth flow.
 - [x] **4.2 Hosted slash demo.** — DONE 2026-08-11
   - Outcome: A simulated over-quota violation is slashed permissionlessly on testnet via the fee-relay; the 50/50 treasury/reporter split is verifiable on-chain.
@@ -389,6 +386,17 @@ packaging, and Vercel deployment routing are closed implementation risks.
   - Depends on: 5.7.
   - Validation: Unit tests `anthropic-messages.test.ts` (6/6), `claude-launcher.test.ts` (2/2), `cli-runtime.test.ts` (14/14), and `sidecar.test.ts` (7/7) all pass. Live `zk-credits claude -p "Reply with exactly: [CLAUDE-CODE-LIVE]" --output-format json --max-turns 1` exited 0 with result `"[CLAUDE-CODE-LIVE]"` and durably consumed tickets (indices 17 and 18).
   - Related testing scenarios: multi-agent protocol proof; Claude Code compatibility; Anthropic Messages translation; isolated launcher.
+
+- [x] **5.9 Installable coding-agent MVP packaging and multi-agent quick start.** — COMPLETED 2026-08-28.
+  - Outcome: Bumped sidecar version to `0.1.2` in `package.json` and `package-lock.json`. Validated `npm pack --dry-run` with 44 files including pinned circuits, `anthropic-messages`, `claude-launcher`, `codex-launcher`, `codex-sdk-options`, and `zk-credits.js`. Linked globally via `npm link`. Updated landing page, onboarding wizard done step, and dashboard usage/identity sections to render multi-agent quick start commands (`zk-credits cline`, `zk-credits claude`, `zk-credits setup codex`). TDD behavior tests in `web/e2e/agent-ui.spec.ts` (1/1 passed) and `web/src/lib/agent-ui.test.ts` (2/2 passed) verify DOM presence. npm registry publish for `0.1.2` is staged awaiting operator OTP.
+  - Depends on: 5.8.
+  - Validation: 64/64 sidecar tests pass; 29/29 web tests pass; Playwright `agent-ui.spec.ts` passes; `zk-credits --help` lists all agent commands; `npm pack --dry-run` verified.
+
+- [ ] **5.10 Fresh-user agent proof.** — BLOCKED ON GATEWAY CONTAINER RECOVERY
+  - Outcome: Execute live coding-agent proof using a fresh funded identity imported via hidden TTY (`zk-credits import-mnemonic`) into an isolated `ZK_CREDITS_HOME`.
+  - Depends on: 4.1, 5.9.
+  - Status: Blocked on Render gateway container recovery and clean funding of replacement identity (initial test identity exposed in process arguments was marked compromised).
+
 ## Dependencies
 **What needs to happen in what order?**
 
