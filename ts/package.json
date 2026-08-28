@@ -12,7 +12,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@noble/hashes": "^2.2.0",
     "@scure/base": "^2.2.0",

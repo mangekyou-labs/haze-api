@@ -1056,7 +1056,11 @@ app.post('/v1/withdraw', async (req: Request, res: Response) => {
 
 // ─── Start ───────────────────────────────────────────────────────
 
-if (require.main === module) {
+const isMain = typeof require !== 'undefined' && typeof module !== 'undefined'
+  ? require.main === module
+  : (process.argv[1] ? path.resolve(process.argv[1]).includes('server') : false);
+
+if (isMain) {
   initDurableGatewayStore()
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : 'unknown';
