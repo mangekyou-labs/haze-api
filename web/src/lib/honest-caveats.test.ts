@@ -49,7 +49,8 @@ describe('README and honest caveats spec', () => {
     expect(readme).toMatch(/network identity.*not hidden|IP.*not hidden/i);
   });
 
-  it('does not state GitHub sign-in as the required identity step', () => {
-    expect(readme).not.toMatch(/1\.\s+Developer signs in with GitHub/i);
+  it('documents GitHub sign-in as hosted gate and 24-word phrase as proving identity', () => {
+    expect(readme).toMatch(/Sign in with GitHub/i);
+    expect(readme).toMatch(/24-word recovery phrase|import-mnemonic/i);
   });
 });

@@ -48,18 +48,18 @@ test('landing has a site header and an honest-caveats footer covering all 9 cave
   await expect(footer).toContainText(/network identity/i);
 });
 
-test('landing copy uses browser secret identity, not GitHub sign-in as required step', async ({
+test('landing copy describes GitHub sign-in, browser secret identity, and testnet funding', async ({
   page,
 }) => {
   await page.goto('/');
 
   const main = page.locator('main');
   await expect(main).not.toContainText('100 calls/day');
-  await expect(main).not.toContainText('Sign in with GitHub');
+  await expect(main).toContainText(/Sign in/i);
 
   // Confirms identity path is browser secret + mnemonic / testnet funding
   await expect(main).toContainText(/browser secret|recovery phrase|mnemonic/i);
-  await expect(main).toContainText(/100 tickets|100-ticket/i);
+  await expect(main).toContainText(/100 tickets|100-ticket|Starter/i);
 
   // Confirms public deployment info
   await expect(main).toContainText('https://zk-credits-gateway.onrender.com');

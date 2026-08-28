@@ -133,13 +133,11 @@ export function ApiKeySection({
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-      <h2 className="mb-2 text-lg font-semibold text-zinc-100">Shared API Compatibility Key</h2>
+      <h2 className="mb-2 text-lg font-semibold text-zinc-100">
+        Identity Mnemonic &amp; Compatibility Bearer
+      </h2>
       <p className="mb-4 text-sm text-zinc-400">
-        Use this shared transport key as your{' '}
-        <code className="rounded bg-zinc-800 px-1 font-mono text-zinc-200">
-          OPENAI_API_KEY
-        </code>{' '}
-        when calling the gateway. Each request still requires its own ZK ticket proof; this key is not linked to your deposit.
+        Your private identity stays local: your browser derives your secret key and 24-word phrase to generate client-side ZK-RLN proofs. The gateway also provides a shared compatibility bearer for HTTP OpenAI client transports, but only valid ZK proofs authorize LLM calls.
       </p>
 
       {error && (
@@ -155,39 +153,56 @@ export function ApiKeySection({
         </div>
       )}
 
-      {mnemonic && !apiKey && (
-        <div className="mb-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4">
-          <p className="mb-2 font-semibold text-amber-300">
-            Backup your recovery phrase
+      {mnemonic && (
+        <div className="mb-6 space-y-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4">
+          <p className="font-semibold text-amber-300">
+            1. Local Recovery Phrase (Agent Identity)
           </p>
-          <p className="mb-3 text-sm text-amber-200/80">
-            Write down these 24 words. They are the only way to recover your
-            credits if you lose browser access.
+          <p className="text-sm text-amber-200/80">
+            Write down these 24 words. Import them into your local agent CLI with <code className="rounded bg-zinc-900/80 px-1 font-mono text-zinc-100">zk-credits import-mnemonic</code>. Your secret key never leaves your machine.
           </p>
           <div className="break-all rounded-lg border border-zinc-700 bg-zinc-950 p-3 font-mono text-sm text-zinc-100">
             {mnemonic}
+          </div>
+          <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
+            <p className="mb-1 text-zinc-400 font-sans font-medium">Agent Quick Start:</p>
+            <code>
+              npm install --global zk-credits
+              <br />
+              zk-credits import-mnemonic
+              <br />
+              zk-credits cline &quot;Explain Stellar CAP-0059&quot;
+            </code>
           </div>
         </div>
       )}
 
       {apiKey ? (
-        <div className="space-y-3">
-          <div className="break-all rounded-lg border border-zinc-700 bg-zinc-950 p-3 font-mono text-sm text-zinc-100">
-            {apiKey}
+        <div className="space-y-4">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+            <p className="mb-2 font-semibold text-zinc-200">
+              2. Shared Compatibility Bearer (Transport Only)
+            </p>
+            <p className="mb-3 text-xs text-zinc-400">
+              This bearer is shared across all users for HTTP compatibility. It does <span className="font-semibold text-zinc-200">not</span> identify you or authorize spend — only your local ZK ticket proofs authorize LLM requests.
+            </p>
+            <div className="break-all rounded-lg border border-zinc-700 bg-zinc-950 p-3 font-mono text-sm text-zinc-100">
+              {apiKey}
+            </div>
+            <div className="mt-3 flex gap-3">
+              <button
+                onClick={() => navigator.clipboard.writeText(apiKey)}
+                className="text-xs text-indigo-400 transition-colors hover:text-indigo-300"
+              >
+                Copy bearer key
+              </button>
+            </div>
           </div>
-          <p className="text-xs text-amber-400/90">
-            Copy this key now. You will not be able to see it again.
-          </p>
-          <button
-            onClick={() => navigator.clipboard.writeText(apiKey)}
-            className="text-sm text-indigo-400 transition-colors hover:text-indigo-300"
-          >
-            Copy to clipboard
-          </button>
-          <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950 p-3 text-sm font-mono text-zinc-200">
-            <p className="mb-1 font-semibold">Setup snippet:</p>
+
+          <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3 text-xs font-mono text-zinc-300">
+            <p className="mb-1 font-sans font-semibold text-zinc-300">Loopback sidecar environment (for standard OpenAI clients):</p>
             <code>
-              export OPENAI_BASE_URL={GATEWAY_BASE}/v1
+              export OPENAI_BASE_URL=http://127.0.0.1:8080/v1
               <br />
               export OPENAI_API_KEY={apiKey}
             </code>
@@ -202,8 +217,8 @@ export function ApiKeySection({
           {loading
             ? 'Generating...'
             : existingCommitment
-              ? 'Generate New API Key'
-              : 'Generate API Key'}
+              ? 'View / Regenerate Identity & Key'
+              : 'Generate Identity & Key'}
         </button>
       )}
 

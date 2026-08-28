@@ -235,8 +235,7 @@ export function OnboardingWizard() {
           </div>
           <h2 className="text-xl font-semibold text-white">All Set!</h2>
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-            Your key has been generated and backed up. You can now create API
-            keys and start using the gateway.
+            Your private identity key is ready. Continue to your dashboard to fund Starter tickets and import your phrase into your local agent CLI (<code className="rounded bg-zinc-800 px-1 font-mono text-zinc-200">zk-credits import-mnemonic</code>).
           </p>
           <button
             onClick={handleFinish}

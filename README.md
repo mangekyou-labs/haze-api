@@ -16,13 +16,52 @@ A privacy gateway between base-URL-configurable coding agents and LLM APIs (Open
 
 ## How It Works
 
-1. Developer generates a private browser secret (`secret_k`) backed up by a 24-word recovery phrase, funds with testnet USDC
-2. Browser generates `secret_k` + commitment, stores key in local storage / IndexedDB
-3. Gateway mints on-chain USDC deposit referencing the commitment
-4. Agent calls `OPENAI_BASE_URL` with a ZK proof in the header (100 private tickets `0..99` per deposit)
-5. Gateway verifies proof (off-chain), forwards to OpenRouter, returns response
-6. Over-quota: nullifier collision → RLN math extracts `secret_k` → slash on-chain
-## Quick Start
+1. Developer signs in with GitHub on the web app, generates a private browser secret (`secret_k`) backed up by a 24-word recovery phrase, and funds Starter ($1.00 for 100 tickets) with testnet USDC/card
+2. Browser stores `secret_k` + commitment locally (never sent to any server)
+3. Gateway mints on-chain USDC deposit referencing the commitment into the Merkle tree
+4. Developer imports the 24-word recovery phrase into their local agent environment via `zk-credits import-mnemonic` (stored in OS keychain)
+5. Agent calls LLMs through the local loopback sidecar with client-side ZK-RLN proofs (100 private tickets `0..99` per deposit)
+6. Gateway verifies proof (off-chain), forwards to OpenRouter, returns response
+7. Over-quota: nullifier collision → RLN math extracts `secret_k` → slash on-chain
+
+## Quick Start (Coding Agents)
+
+Get started in 2 minutes without building from source:
+
+### 1. Web App Setup
+1. Open https://feature-zk-api-credits-gadillacers-projects.vercel.app
+2. **Sign in with GitHub** to access the dashboard.
+3. Click **Generate Identity & Key** and write down your **24-word recovery phrase**.
+4. In **Buy Credits**, purchase the Starter package ($1.00 for 100 private tickets).
+
+### 2. Install CLI & Import Identity
+```bash
+npm install --global zk-credits
+zk-credits import-mnemonic
+# Enter your 24-word phrase when prompted (saved securely to OS keychain)
+```
+
+### 3. Run with your Coding Agent
+
+#### Cline CLI
+```bash
+zk-credits cline "summarize this repository"
+```
+
+#### Claude Code CLI
+```bash
+zk-credits claude -p "summarize this repository"
+```
+
+#### Codex CLI & Codex SDK
+```bash
+zk-credits setup codex
+zk-credits codex "summarize this repository"
+```
+
+---
+
+## Developers: Building from Source
 
 ### Prerequisites
 
@@ -46,7 +85,6 @@ cd web && npm install && cd ..
 # Circuits
 cd circuits && npm install && cd ..
 ```
-
 ### 2. Environment
 
 ```bash

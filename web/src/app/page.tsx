@@ -4,20 +4,20 @@ import { SiteFooter } from '@/components/site-footer';
 
 const STEPS = [
   {
-    title: 'Generate browser secret',
-    body: 'Your browser generates a private secret key backed up by a 24-word recovery phrase (never leaves your device).',
+    title: '1. Sign in & generate secret',
+    body: 'Sign in with GitHub. Your browser generates a private secret key backed up by a 24-word recovery phrase (never leaves your device).',
   },
   {
-    title: 'Fund on testnet',
-    body: 'Deposit testnet USDC to register your commitment in the BLS12-381 Merkle tree.',
+    title: '2. Fund Starter on testnet',
+    body: 'Purchase Starter ($1.00 for 100 tickets) with testnet USDC/card to register your commitment in the on-chain Merkle tree.',
   },
   {
-    title: 'Prove, don’t reveal',
-    body: 'Call LLMs through the gateway with client-side ZK-RLN proofs (100 tickets per deposit).',
+    title: '3. Import to local CLI',
+    body: 'Import your 24-word mnemonic into zk-credits sidecar (OS keychain) to run Cline, Claude, or Codex.',
   },
   {
-    title: 'Stay unlinked',
-    body: 'The gateway verifies your proof and forwards to OpenRouter without linking to your deposit.',
+    title: '4. Prove, don’t reveal',
+    body: 'Call LLMs through the loopback sidecar with client-side ZK-RLN proofs (100 tickets per deposit).',
   },
 ];
 

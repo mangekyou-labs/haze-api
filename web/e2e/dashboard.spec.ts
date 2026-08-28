@@ -17,10 +17,10 @@ test('dev login reaches the dashboard and renders all sections', async ({
   ).toBeVisible();
   await expect(page.getByText('dev@zkcredits.test')).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Shared API Compatibility Key' }),
+    page.getByRole('heading', { name: /Identity Mnemonic & Compatibility Bearer/ }),
   ).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Buy Credits' })
+    page.getByRole('heading', { name: 'Buy Credits' }),
   ).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'LLM Playground' })
@@ -30,10 +30,9 @@ test('dev login reaches the dashboard and renders all sections', async ({
   ).toBeVisible();
   // No commitment in a fresh browser profile -> placeholder, not a crash.
   await expect(
-    page.getByText('Generate an API key to see your usage status.')
+    page.getByText('Generate your identity key to see your usage status.')
   ).toBeVisible();
 });
-
 test('signed-in header shows Dashboard instead of Sign in', async ({
   page,
 }) => {
@@ -63,7 +62,7 @@ test('unconfigured integrations explain the disabled dashboard actions', async (
     page.getByText(/Stripe checkout is unavailable/i),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Generate API Key' }),
+    page.getByRole('button', { name: /Generate Identity & Key/ }),
   ).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Buy Now' }).first()).toBeDisabled();
 });
