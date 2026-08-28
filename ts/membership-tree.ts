@@ -31,8 +31,10 @@ export function parseMembershipTreeBootstrapSnapshot(raw: string): MembershipTre
   return { leaves: snapshot.leaves, layers: snapshot.layers as string[][] };
 }
 
-function rootMismatch(): Error {
-  return new Error('Membership tree root mismatch; refusing to serve a divergent snapshot');
+function rootMismatch(detail?: string): Error {
+  return new Error(
+    `Membership tree root mismatch; refusing to serve a divergent snapshot${detail ? ` (${detail})` : ''}`,
+  );
 }
 
 async function buildActiveTree(
@@ -75,7 +77,11 @@ export async function reconstructMembershipTreeFromStore(
 
   const pending = leaves.filter((leaf) => leaf.status === 'pending');
   if (pending.length === 0) {
-    if (chainRoot !== activeTree.root().toString()) throw rootMismatch();
+    if (chainRoot !== activeTree.root().toString()) {
+      throw rootMismatch(
+        `db_root=${activeTree.root().toString()} chain_root=${chainRoot} db_leaves_count=${leaves.length}`,
+      );
+    }
     return activeTree;
   }
   if (pending.length !== 1) throw rootMismatch();
@@ -143,4 +149,36 @@ export async function bootstrapMembershipTreeFromLeaves(
     leaves: canonical.getLeaves().map(String),
     layers: canonical.getLayers().map((layer) => layer.map(String)),
   }, chainRoot);
+}
+
+/**
+ * One-time compare-and-swap repair replacing stale membership tree state with
+ * an operator-supplied public snapshot after validating that the snapshot root
+ * matches the active Soroban contract root.
+ */
+export async function repairMembershipTreeFromSnapshot(
+  store: GatewayStore,
+  snapshot: { leaves: readonly string[]; layers: readonly (readonly string[])[] },
+  expectedStaleRoot: string,
+  chainRoot: string,
+): Promise<MerkleTree> {
+  const tree = await MerkleTree.fromLayers(snapshot.layers);
+  if (snapshot.leaves.length !== tree.getLeaves().length) throw rootMismatch('leaves length');
+  for (let index = 0; index < snapshot.leaves.length; index++) {
+    if (BigInt(snapshot.leaves[index]!) !== tree.getLeaf(index)) throw rootMismatch(`leaf index ${index}`);
+  }
+  if (tree.root().toString() !== chainRoot) {
+    throw rootMismatch(`snapshot root ${tree.root().toString()} !== chainRoot ${chainRoot}`);
+  }
+  await store.repairMembershipTree(
+    tree.getLeaves()
+      .map((commitment, leafIndex) => ({ leafIndex, commitment: commitment.toString() }))
+      .filter((leaf) => leaf.commitment !== '0'),
+    {
+      root: tree.root().toString(),
+      layers: tree.getLayers().map((layer) => layer.map(String)),
+    },
+    expectedStaleRoot,
+  );
+  return tree;
 }

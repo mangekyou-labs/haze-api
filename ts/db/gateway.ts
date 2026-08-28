@@ -152,6 +152,12 @@ export interface GatewayStore {
     leaves: Array<{ leafIndex: number; commitment: string }>,
     state: { root: string; layers: string[][] },
   ): Promise<void>;
+  /** One-time CAS repair replacing stale membership tree state with a validated snapshot. */
+  repairMembershipTree(
+    leaves: Array<{ leafIndex: number; commitment: string }>,
+    state: { root: string; layers: string[][] },
+    expectedStaleRoot: string,
+  ): Promise<void>;
   listMembershipLeaves(): Promise<MembershipLeaf[]>;
   getMembershipTreeState(): Promise<MembershipTreeState | null>;
 }
@@ -410,6 +416,46 @@ export class MemoryGatewayStore implements GatewayStore {
       indices.add(leaf.leafIndex);
       commitments.add(leaf.commitment);
     }
+    const now = new Date();
+    for (const leaf of leaves) {
+      this.membershipLeaves.set(leaf.leafIndex, {
+        ...leaf,
+        status: 'active',
+        candidateRoot: state.root,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    this.membershipTreeState = {
+      root: state.root,
+      version: 1,
+      layers: state.layers.map((layer) => [...layer]),
+      updatedAt: now,
+    };
+  }
+
+  async repairMembershipTree(
+    leaves: Array<{ leafIndex: number; commitment: string }>,
+    state: { root: string; layers: string[][] },
+    expectedStaleRoot: string,
+  ): Promise<void> {
+    const currentRoot = this.membershipTreeState?.root ?? null;
+    if (currentRoot !== expectedStaleRoot) {
+      throw new Error(
+        `CAS repair expected stale DB root "${expectedStaleRoot}", but found "${currentRoot ?? 'none'}"`,
+      );
+    }
+    const indices = new Set<number>();
+    const commitments = new Set<string>();
+    for (const leaf of leaves) {
+      if (!Number.isInteger(leaf.leafIndex) || leaf.leafIndex < 0 || leaf.leafIndex >= 8
+        || indices.has(leaf.leafIndex) || commitments.has(leaf.commitment)) {
+        throw new Error('membership tree repair is malformed');
+      }
+      indices.add(leaf.leafIndex);
+      commitments.add(leaf.commitment);
+    }
+    this.membershipLeaves.clear();
     const now = new Date();
     for (const leaf of leaves) {
       this.membershipLeaves.set(leaf.leafIndex, {
@@ -886,6 +932,54 @@ export class PostgresGatewayStore implements GatewayStore {
         if (!Number.isInteger(leaf.leafIndex) || leaf.leafIndex < 0 || leaf.leafIndex >= 8
           || indices.has(leaf.leafIndex) || commitments.has(leaf.commitment)) {
           throw new Error('membership tree bootstrap is malformed');
+        }
+        indices.add(leaf.leafIndex);
+        commitments.add(leaf.commitment);
+        await client.query(
+          `INSERT INTO ${C.membershipLeaves} (leaf_index, commitment, status, candidate_root)
+           VALUES ($1, $2, 'active', $3)`,
+          [leaf.leafIndex, leaf.commitment, state.root],
+        );
+      }
+      await client.query(
+        `INSERT INTO ${C.membershipTreeState} (tree_name, root, version, layers)
+         VALUES ('active_membership', $1, 1, $2)`,
+        [state.root, JSON.stringify(state.layers)],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async repairMembershipTree(
+    leaves: Array<{ leafIndex: number; commitment: string }>,
+    state: { root: string; layers: string[][] },
+    expectedStaleRoot: string,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const currentState = await client.query(
+        `SELECT root FROM ${C.membershipTreeState} WHERE tree_name = 'active_membership' FOR UPDATE`,
+      );
+      const currentRoot = (currentState.rows[0]?.root as string | undefined) ?? null;
+      if (currentRoot !== expectedStaleRoot) {
+        throw new Error(
+          `CAS repair expected stale DB root "${expectedStaleRoot}", but found "${currentRoot ?? 'none'}"`,
+        );
+      }
+      await client.query(`DELETE FROM ${C.membershipLeaves}`);
+      await client.query(`DELETE FROM ${C.membershipTreeState}`);
+      const indices = new Set<number>();
+      const commitments = new Set<string>();
+      for (const leaf of leaves) {
+        if (!Number.isInteger(leaf.leafIndex) || leaf.leafIndex < 0 || leaf.leafIndex >= 8
+          || indices.has(leaf.leafIndex) || commitments.has(leaf.commitment)) {
+          throw new Error('membership tree repair is malformed');
         }
         indices.add(leaf.leafIndex);
         commitments.add(leaf.commitment);

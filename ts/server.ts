@@ -19,6 +19,7 @@ import {
   bootstrapMembershipTreeFromSnapshot,
   parseMembershipTreeBootstrapSnapshot,
   reconstructMembershipTreeFromStore,
+  repairMembershipTreeFromSnapshot,
 } from './membership-tree.js';
 import { requestDigestToField, verifyGroth16Proof } from '@zk-credits/shared';
 import {
@@ -108,7 +109,21 @@ export async function initDurableGatewayStore(
   if (env.ZK_CONTRACT_ID) {
     const contractModule = await import('./contract.js');
     const chainRoot = await contractModule.getCurrentRoot();
-    if (membershipLeaves.length === 0 && env.MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT) {
+    if (env.MEMBERSHIP_TREE_REPAIR_SNAPSHOT && env.MEMBERSHIP_TREE_REPAIR_EXPECTED_STALE_ROOT) {
+      const snapshot = parseMembershipTreeBootstrapSnapshot(env.MEMBERSHIP_TREE_REPAIR_SNAPSHOT);
+      merkleTree.replaceWith(
+        await repairMembershipTreeFromSnapshot(
+          store,
+          snapshot,
+          env.MEMBERSHIP_TREE_REPAIR_EXPECTED_STALE_ROOT,
+          chainRoot,
+        ),
+      );
+      membershipLeaves = await store.listMembershipLeaves();
+      console.log(
+        `[db] CAS repair completed: replaced stale DB root "${env.MEMBERSHIP_TREE_REPAIR_EXPECTED_STALE_ROOT}" with snapshot matching chain root ${chainRoot}`,
+      );
+    } else if (membershipLeaves.length === 0 && env.MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT) {
       const snapshot = parseMembershipTreeBootstrapSnapshot(env.MEMBERSHIP_TREE_BOOTSTRAP_SNAPSHOT);
       merkleTree.replaceWith(await bootstrapMembershipTreeFromSnapshot(store, snapshot, chainRoot));
       membershipLeaves = await store.listMembershipLeaves();
