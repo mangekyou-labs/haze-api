@@ -31,6 +31,7 @@ const providers = [
 ];
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   providers,
   session: { strategy: 'jwt' },
   callbacks: {
