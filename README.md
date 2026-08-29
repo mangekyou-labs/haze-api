@@ -114,14 +114,13 @@ Live surfaces:
 2. **100-ticket specialization.** Starter is exactly ticket indices `0..99`.
 3. **Variable-cost refunds deferred.** Fixed per-call ticket price.
 4. **Single-contributor trusted setup.** Groth16 BLS12-381 ceremony is dev-only.
-5. **Custodial gateway-mediated withdrawal.** Gateway co-signs. It can block by
-   disappearing; it cannot redirect funds without the membership-removal proof.
-6. **Async on-chain audit.** Proofs verify off-chain for latency, then settle
+5. **Custodial gateway-mediated withdrawal.** Gateway co-signs. The gateway can block by disappearing, but the gateway cannot unilaterally redirect funds because the contract requires the browser-secret membership-removal proof.
+6. **Async per-call on-chain audit.** Proofs verify off-chain for latency, then settle
    to Soroban `spend()` asynchronously.
 7. **Single gateway timing.** No cryptographic link from call to deposit, but
    one operator can observe request timing.
-8. **Proving latency.** First proof ~1.5s per session, then cached.
-9. **IP is not hidden.** Payment identity is hidden; network identity is not.
+8. **Browser proving latency.** Browser and sidecar proving adds latency (~1.5s first call per session, cached after).
+9. **IP is not hidden.** Payment and deposit identity is hidden; network identity / IP is not hidden.
 10. **Validated clients.** `zk-credits cline`, `zk-credits claude`, and
     `zk-credits codex` / `zk-credits/codex`. Other clients need a custom
     OpenAI-compatible base URL.
