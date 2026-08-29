@@ -1,0 +1,78 @@
+# ─── Local dev orchestration (stellar-launch) ────────────────────
+#   docker compose up -d          # start Postgres + gateway + fee-sponsor
+#   docker compose up -d postgres # start Postgres only (gateway runs on host)
+#   docker compose down -v        # tear down + remove volumes
+#
+# The web app runs outside Docker (next dev on host) since it needs the
+# browser's filesystem for circuit artifacts and the dev server's HMR.
+# For production/demo (M3), each backend service deploys separately to Render;
+# the web app deploys to Vercel.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: zk_credits_dev
+      POSTGRES_DB: zk_credits
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zk_credits"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    build:
+      context: .
+      dockerfile: ts/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgres://postgres:zk_credits_dev@postgres:5432/zk_credits
+      STELLAR_NETWORK: testnet
+      STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+      PORT: "3001"
+      DEFAULT_EPOCH_QUOTA: "100"
+      PRICE_PER_CALL_USDC: "1000"
+      FEE_SPONSOR_URL: http://fee-sponsor:3002
+      # ── Secrets: inject from .env or override in docker-compose.override.yml ──
+      GATEWAY_SECRET_KEY: "${GATEWAY_SECRET_KEY:-}"
+      GATEWAY_ADDRESS: "${GATEWAY_ADDRESS:-}"
+      ZK_CONTRACT_ID: "${ZK_CONTRACT_ID:-}"
+      USDC_CONTRACT_ID: "${USDC_CONTRACT_ID:-}"
+      USDC_ISSUER: "${USDC_ISSUER:-}"
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+      STRIPE_PRICE_5: "${STRIPE_PRICE_5:-}"
+      STRIPE_PRICE_20: "${STRIPE_PRICE_20:-}"
+      STRIPE_PRICE_50: "${STRIPE_PRICE_50:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET:-}"
+      GATEWAY_BASE_URL: http://localhost:3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  fee-sponsor:
+    build:
+      context: .
+      dockerfile: services/fee-sponsor/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: "3002"
+      STELLAR_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
+      STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+      # ── Secrets ──
+      ZK_CONTRACT_ID: "${ZK_CONTRACT_ID:-}"
+      FEE_SPONSOR_SECRET_KEY: "${FEE_SPONSOR_SECRET_KEY:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

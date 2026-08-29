@@ -1,0 +1,40 @@
+# ─── Fee-sponsor Fly.io config (stellar-launch M3.4) ────────────
+# Deploy from repo root:
+#   fly launch --config services/fee-sponsor/fly.toml
+# Secrets: fly secrets set FEE_SPONSOR_SECRET_KEY=... etc.
+
+app = "zk-credits-fee-sponsor"
+primary_region = "iad"
+
+# dockerfile is relative to this fly.toml's directory (services/fee-sponsor/).
+# Build context is the repo root (fly deploy --config from repo root), so the
+# Dockerfile's COPY packages/... paths resolve against the monorepo.
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3002"
+  NODE_ENV = "production"
+  STELLAR_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015"
+  STELLAR_RPC_URL = "https://soroban-testnet.stellar.org"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3002
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    force_https = false
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "get"
+    path = "/health"

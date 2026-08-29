@@ -1,0 +1,57 @@
+name: Deploy Smoke
+
+# Post-deploy smoke against the hosted testnet (M3.2/3.3/3.4). Template —
+# activates once the Fly.io / Vercel URLs exist and GATEWAY_URL / WEB_URL /
+# FEE_SPONSOR_URL secrets are configured. Runs manually, or automatically
+# after a successful main-branch CI.
+#
+# The full hosted E2E (M4.1/4.2/4.3) — scripts/e2e-test.js and
+# scripts/slash-demo.js against the public URLs — is the launch-validation gate
+# and runs from a machine/runner with the demo credentials, not from this
+# health-only smoke.
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Hosted health + client smoke
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    env:
+      GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
+      WEB_URL: ${{ secrets.WEB_URL }}
+      FEE_SPONSOR_URL: ${{ secrets.FEE_SPONSOR_URL }}
+    steps:
+      # NOTE: `secrets` context is not available in job-level `if`, so the
+      # GATEWAY_URL guard lives here rather than in the job `if` above.
+      - name: Require GATEWAY_URL (guards until M3.2/3.3/3.4 secrets exist)
+        if: env.GATEWAY_URL == ''
+        run: echo "::notice::GATEWAY_URL not configured; skipping hosted smoke (template pre-deploy)"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install root deps
+        run: npm ci
+      - name: Gateway health
+        run: curl -fsS -o /dev/null -w 'gateway /health -> %{http_code}\n' "$GATEWAY_URL/health"
+      - name: Fee-relay health
+        if: env.FEE_SPONSOR_URL != ''
+        run: curl -fsS -o /dev/null -w 'fee-relay /health -> %{http_code}\n' "$FEE_SPONSOR_URL/health"
+      - name: Web landing renders
+        run: curl -fsS "$WEB_URL" | grep -q "ZK API Credits" && echo "web landing OK"
+      - name: Web contract-status proxy reachable
+        run: curl -fsS -o /dev/null -w 'contract-status -> %{http_code}\n' "$WEB_URL/api/dashboard/status"

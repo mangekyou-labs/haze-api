@@ -9,9 +9,9 @@ function getStripe(): Stripe | null {
 }
 
 const PRICE_MAP: Record<string, { usdc: number; label: string }> = {
-  starter: { usdc: 5_0000000, label: '$5 Credits' },
-  pro: { usdc: 20_0000000, label: '$20 Credits' },
-  enterprise: { usdc: 50_0000000, label: '$50 Credits' },
+  starter: { usdc: 1_000_000, label: '$1 Starter (100 tickets)' },
+  pro: { usdc: 20_000_000, label: '$20 Credits' },
+  enterprise: { usdc: 50_000_000, label: '$50 Credits' },
 };
 
 export async function POST(req: NextRequest) {
@@ -37,9 +37,9 @@ export async function POST(req: NextRequest) {
   }
 
   const priceInfo = PRICE_MAP[tier];
-  if (!priceInfo) {
+  if (!priceInfo || tier !== 'starter') {
     return NextResponse.json(
-      { error: 'invalid_tier', valid: Object.keys(PRICE_MAP) },
+      { error: 'invalid_tier', valid: ['starter'] },
       { status: 400 },
     );
   }
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
               name: priceInfo.label,
               description: `ZK-API Credits — ${priceInfo.label}`,
             },
-            unit_amount: parseInt(tier === 'starter' ? '500' : tier === 'pro' ? '2000' : '5000'),
+            unit_amount: tier === 'starter' ? 100 : tier === 'pro' ? 2000 : 5000,
           },
           quantity: 1,
         },

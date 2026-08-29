@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const snarkjs = require('snarkjs');
 const path = require('path');
 const fs = require('fs');
+const { requestDigestToField, skToField } = require('@zk-credits/shared');
 
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
 const GATEWAY_SECRET = process.env.GATEWAY_SECRET || 'dev-secret';
@@ -35,7 +36,7 @@ async function main() {
   // Step 3: Generate secret_k + commitment
   console.log('3. Generating secret_k + commitment...');
   const secretK = crypto.randomBytes(32);
-  const skField = BigInt('0x' + secretK.toString('hex')).toString();
+  const skField = skToField(secretK);
 
   const { publicSignals: depositSignals } = await snarkjs.groth16.fullProve(
     {
@@ -65,15 +66,19 @@ async function main() {
 
   // Step 5: Generate RLN proof
   console.log('5. Generating RLN proof...');
-  const epoch = Math.floor(Date.now() / 86400000).toString();
-  const signalValue = crypto.randomBytes(16).toString('hex');
+  const requestBody = {
+    model: 'anthropic/claude-sonnet-4',
+    messages: [{ role: 'user', content: 'Say hello in 3 words.' }],
+    max_tokens: 50,
+  };
+  const requestDigest = await requestDigestToField(requestBody);
 
   const startProve = Date.now();
   const { proof, publicSignals: rlnSignals } = await snarkjs.groth16.fullProve(
     {
       secret_k: skField,
-      signal_value: BigInt('0x' + signalValue).toString(),
-      epoch,
+      ticket_index: '0',
+      request_digest: requestDigest.field,
       merkle_path_elements: ['0', '0', '0'],
       merkle_path_indices: ['0', '0', '0'],
     },
@@ -98,9 +103,7 @@ async function main() {
       'X-ZK-Proof': proofHeader,
     },
     body: JSON.stringify({
-      model: 'anthropic/claude-sonnet-4',
-      messages: [{ role: 'user', content: 'Say hello in 3 words.' }],
-      max_tokens: 50,
+      ...requestBody,
     }),
   });
   const callTime = Date.now() - startCall;
@@ -115,8 +118,8 @@ async function main() {
   }
   console.log();
 
-  // Step 7: Replay same nullifier (should fail)
-  console.log('7. Replaying same nullifier (should fail)...');
+  // Step 7: Replay the exact tuple (idempotent retry)
+  console.log('7. Replaying the exact tuple (should return the stored response)...');
   const replayRes = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -125,12 +128,11 @@ async function main() {
       'X-ZK-Proof': proofHeader,
     },
     body: JSON.stringify({
-      model: 'anthropic/claude-opus-4',
-      messages: [{ role: 'user', content: 'This should fail' }],
+      ...requestBody,
     }),
   });
   const replayData = await replayRes.json();
-  console.log(`   Status: ${replayRes.status} (expected 403)`);
+  console.log(`   Status: ${replayRes.status} (expected 200)`);
   console.log(`   Error: ${replayData.error}\n`);
 
   // Step 8: Check status

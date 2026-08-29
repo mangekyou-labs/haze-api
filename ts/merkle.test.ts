@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { MerkleTree, frOrder } from './merkle.js';
+import { groth16 } from 'snarkjs';
+import { resolve } from 'node:path';
+
+const CIRCUITS_DIR = resolve(import.meta.dirname!, '..', 'circuits');
 
 describe('MerkleTree', () => {
   it('starts with zero root', () => {
@@ -42,6 +46,34 @@ describe('MerkleTree', () => {
     expect(root1).toBe(root2);
   });
 
+  it('rebuilds a two-member tree from indexed leaves without changing positions', async () => {
+    const original = new MerkleTree();
+    await original.insert(11n);
+    await original.insert(22n);
+
+    const rebuilt = await MerkleTree.fromLeaves(['11', '22', '0', '0', '0', '0', '0', '0']);
+
+    expect(rebuilt.root()).toBe(original.root());
+    expect(rebuilt.getLeaf(0)).toBe(11n);
+    expect(rebuilt.getLeaf(1)).toBe(22n);
+  });
+
+  it('restores persisted layers after a removal leaves a non-canonical zero branch', async () => {
+    const original = new MerkleTree();
+    await original.setLeaf(0, 101n);
+    await original.setLeaf(2, 202n);
+    await original.setLeaf(0, 0n);
+
+    const restored = await MerkleTree.fromLayers(
+      original.getLayers().map((layer) => layer.map(String)),
+    );
+    const leafOnly = await MerkleTree.fromLeaves(original.getLeaves().map(String));
+
+    expect(restored.root()).toBe(original.root());
+    expect(restored.getLeaf(2)).toBe(202n);
+    expect(leafOnly.root()).not.toBe(original.root());
+  });
+
   it('root changes after each insert', async () => {
     const tree = new MerkleTree();
     const root1 = await tree.insert(BigInt(1));
@@ -70,4 +102,20 @@ describe('MerkleTree', () => {
     const root = await tree.insert(BigInt(42));
     expect(root).toBeLessThan(frOrder());
   });
+
+  it('matches the BLS12-381 MiMC root produced by the RLN circuit', async () => {
+    const { publicSignals } = await groth16.fullProve(
+      {
+        secret_k: '12345',
+        merkle_path_elements: ['0', '0', '0'],
+        merkle_path_indices: ['0', '0', '0'],
+      },
+      resolve(CIRCUITS_DIR, 'deposit_membership.wasm'),
+      resolve(CIRCUITS_DIR, 'deposit_membership_final.zkey'),
+    );
+    const tree = new MerkleTree();
+    const root = await tree.insert(BigInt(publicSignals[1]));
+
+    expect(root.toString()).toBe(publicSignals[0]);
+  }, 120_000);
 });

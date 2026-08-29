@@ -5,7 +5,8 @@
 // Flow:
 // 1. Generate secret_k + commitment
 // 2. Create API key via gateway
-// 3. Generate two RLN proofs with same epoch (same nullifier = double-spend)
+// 3. Generate two RLN proofs with the same private ticket index (same
+//    nullifier, different request points = slashable fork)
 // 4. Extract secret_k from the two shares via slash circuit
 // 5. Submit slash proof on-chain (or demonstrate the extraction)
 
@@ -13,6 +14,16 @@ const crypto = require('crypto');
 const snarkjs = require('snarkjs');
 const path = require('path');
 const fs = require('fs');
+const {
+  Contract,
+  Keypair,
+  Networks,
+  TransactionBuilder,
+  Address,
+  nativeToScVal,
+  rpc: SorobanRpc,
+} = require('@stellar/stellar-sdk');
+const { requestDigestToField, skToField } = require('@zk-credits/shared');
 
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
 const GATEWAY_SECRET = process.env.GATEWAY_SECRET || 'dev-secret';
@@ -27,8 +38,8 @@ async function main() {
 
   // Step 1: Generate identity
   console.log('1. Generating secret_k + commitment...');
-  const secretK = crypto.randomBytes(31); // 31 bytes to stay in field
-  const skField = BigInt('0x' + secretK.toString('hex'));
+  const secretK = crypto.randomBytes(32);
+  const skField = BigInt(skToField(secretK));
 
   const { publicSignals: depositSignals } = await snarkjs.groth16.fullProve(
     {
@@ -56,17 +67,27 @@ async function main() {
   const keyData = await keyRes.json();
   console.log(`   API Key: ${keyData.apiKey?.slice(0, 20)}...\n`);
 
-  // Step 3: Generate two RLN proofs in same epoch (different signals)
-  // Same epoch + same secret_k = same nullifier = double-spend detected
-  const epoch = Math.floor(Date.now() / 86400000).toString();
-  console.log(`3. Generating two RLN proofs (epoch=${epoch})...`);
+  // Step 3: Generate two RLN proofs for the same private ticket and different
+  // requests. The nullifier stays the same while the shares differ, which is
+  // the paper's slashable fork condition.
+  const body1 = {
+    model: 'anthropic/claude-opus-4',
+    messages: [{ role: 'user', content: 'Say "hello"' }],
+  };
+  const body2 = {
+    model: 'anthropic/claude-opus-4',
+    messages: [{ role: 'user', content: 'This should be rejected' }],
+  };
+  const digest1 = await requestDigestToField(body1);
+  const digest2 = await requestDigestToField(body2);
+  console.log('3. Generating two RLN proofs for ticket index 7...');
 
   const proof1Start = Date.now();
   const { proof: proof1, publicSignals: signals1 } = await snarkjs.groth16.fullProve(
     {
       secret_k: skField.toString(),
-      signal_value: '1',
-      epoch,
+      ticket_index: '7',
+      request_digest: digest1.field,
       merkle_path_elements: ['0', '0', '0'],
       merkle_path_indices: ['0', '0', '0'],
     },
@@ -83,8 +104,8 @@ async function main() {
   const { proof: proof2, publicSignals: signals2 } = await snarkjs.groth16.fullProve(
     {
       secret_k: skField.toString(),
-      signal_value: '2',
-      epoch,
+      ticket_index: '7',
+      request_digest: digest2.field,
       merkle_path_elements: ['0', '0', '0'],
       merkle_path_indices: ['0', '0', '0'],
     },
@@ -97,7 +118,7 @@ async function main() {
   const sameNullifier = signals1[1] === signals2[1];
   console.log(`   Same nullifier: ${sameNullifier}`);
   if (!sameNullifier) {
-    console.error('   ERROR: Proofs should have same nullifier for same epoch!');
+    console.error('   ERROR: Proofs should have same nullifier for the same ticket index!');
     process.exit(1);
   }
 
@@ -112,7 +133,8 @@ async function main() {
   const { proof: slashProof, publicSignals: slashSignals } = await snarkjs.groth16.fullProve(
     {
       share1_x, share1_y, share2_x, share2_y,
-      epoch,
+      merkle_path_elements: ['0', '0', '0'],
+      merkle_path_indices: ['0', '0', '0'],
     },
     path.join(CIRCUITS_DIR, 'slash.wasm'),
     path.join(CIRCUITS_DIR, 'slash_final.zkey'),
@@ -121,9 +143,18 @@ async function main() {
   console.log(`   Extracted secret_k: ${slashSignals[0].slice(0, 20)}...`);
   console.log(`   Original secret_k: ${skField.toString().slice(0, 20)}...`);
   console.log(`   Match: ${slashSignals[0] === skField.toString()}`);
+  console.log(`   Current root matches RLN: ${slashSignals[3] === signals1[0]}`);
+  console.log(`   Next root removes commitment: ${slashSignals[3] !== slashSignals[4]}`);
+  if (slashSignals.length !== 9 || slashSignals[3] !== signals1[0] || slashSignals[3] !== signals2[0]) {
+    throw new Error('slash proof did not bind both RLN shares to the active membership root');
+  }
+  if (slashSignals[3] === slashSignals[4]) {
+    throw new Error('slash proof did not produce a post-removal root');
+  }
 
   // Verify the slash proof
   const valid = await snarkjs.groth16.verify(VERIFIERS.slash, slashSignals, slashProof);
+  if (!valid) throw new Error('slash proof failed local verification');
   console.log(`   Slash proof valid: ${valid}\n`);
 
   // Step 5: Submit first proof to gateway (should succeed)
@@ -149,8 +180,8 @@ async function main() {
   console.log(`   Status: ${call1Res.status}`);
   console.log(`   Response: ${call1Data.choices?.[0]?.message?.content?.slice(0, 60) || call1Data.error}\n`);
 
-  // Step 6: Submit second proof with SAME nullifier (should fail with 403)
-  console.log('6. Submitting second proof with same nullifier (over-quota)...');
+  // Step 6: Submit second proof with SAME nullifier (should be flagged as a fork)
+  console.log('6. Submitting second proof with same nullifier (fork detection)...');
   const proofHeader2 = Buffer.from(JSON.stringify({
     proof: proof2,
     pubSignals: signals2,
@@ -164,28 +195,71 @@ async function main() {
       'X-ZK-Proof': proofHeader2,
     },
     body: JSON.stringify({
-      model: 'anthropic/claude-opus-4',
-      messages: [{ role: 'user', content: 'This should be rejected' }],
+      ...body2,
     }),
   });
   const call2Data = await call2Res.json();
-  console.log(`   Status: ${call2Res.status} (expected 403)`);
+  console.log(`   Status: ${call2Res.status} (expected 409)`);
   console.log(`   Error: ${call2Data.error}`);
   console.log(`   Message: ${call2Data.message}\n`);
 
-  // Step 7: Summary
+  // Step 7: submit the reporter-signed inner slash transaction through the
+  // public gateway and fee sponsor. The reporter signs locally but does not
+  // pay XLM; the contract still verifies the proof and executes the split.
+  const reporterSecretKey = process.env.REPORTER_SECRET_KEY;
+  const contractId = process.env.ZK_CONTRACT_ID;
+  if (reporterSecretKey && contractId) {
+    console.log('\\n7. Submitting slash transaction through the fee sponsor...');
+    const keypair = Keypair.fromSecret(reporterSecretKey);
+    const rpc = new SorobanRpc.Server(
+      process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
+      { allowHttp: true },
+    );
+    const source = await rpc.getAccount(keypair.publicKey());
+    const tx = new TransactionBuilder(source, {
+      fee: '100000',
+      networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || Networks.TESTNET,
+    })
+      .addOperation(
+        new Contract(contractId).call(
+          'slash',
+          nativeToScVal(slashProof, {}),
+          nativeToScVal(slashSignals.map((signal) => BigInt(signal)), {}),
+          nativeToScVal(BigInt(commitment), { type: 'u256' }),
+          new Address(keypair.publicKey()).toScVal(),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+    tx.sign(keypair);
+
+    const slashRes = await fetch(`${GATEWAY_URL}/v1/slash`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ innerTransactionXdr: tx.toEnvelope().toXDR('base64') }),
+    });
+    const slashData = await slashRes.json();
+    console.log(`   Status: ${slashRes.status}`);
+    console.log(`   Fee bump submitted: ${slashData.feeBumpHash ? 'YES' : 'NO'}`);
+    if (!slashRes.ok) throw new Error(`slash submission failed: ${slashData.error || 'unknown'}`);
+  } else {
+    console.log('\\n7. On-chain slash submission skipped (REPORTER_SECRET_KEY/ZK_CONTRACT_ID not configured).');
+  }
+
+  // Step 8: Summary
   console.log('=== Slash Demo Summary ===');
   console.log(`Secret_k extracted: ${slashSignals[0] === skField.toString() ? 'YES' : 'NO'}`);
   console.log(`Nullifier collision detected: ${sameNullifier ? 'YES' : 'NO'}`);
-  console.log(`Over-quota rejected: ${call2Res.status === 403 ? 'YES' : 'NO'}`);
+  console.log(`Ticket fork rejected: ${call2Res.status === 409 ? 'YES' : 'NO'}`);
   console.log(`Slash proof valid: ${valid ? 'YES' : 'NO'}`);
   console.log();
   console.log('In a production flow:');
   console.log('1. The gateway watches for nullifier collisions');
   console.log('2. It runs the slash circuit to extract secret_k');
-  console.log('3. It submits the slash proof on-chain');
-  console.log('4. The contract slashes the deposit: 50% treasury, 50% reporter');
-  console.log(`5. Contract ID: ${process.env.ZK_CONTRACT_ID || 'not configured'}`);
+  console.log('3. It builds and signs the inner slash() transaction locally');
+  console.log('4. The fee sponsor fee-bumps and submits that exact transaction');
+  console.log('5. The contract slashes the deposit: 50% treasury, 50% reporter');
+  console.log(`6. Contract ID: ${process.env.ZK_CONTRACT_ID || 'not configured'}`);
   console.log('\n=== Demo Complete ===');
 }
 

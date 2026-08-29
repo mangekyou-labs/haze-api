@@ -1,0 +1,50 @@
+{
+  "name": "zk-credits",
+  "version": "0.1.3",
+  "description": "Loopback proof-aware OpenAI transport for Cline, Claude Code, and Codex.",
+  "homepage": "https://feature-zk-api-credits-gadillacers-projects.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mangekyou-labs/haze-api.git",
+    "directory": "packages/zk-credits-sidecar"
+  },
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "zk-credits": "dist/zk-credits.js"
+  },
+  "exports": {
+    "./codex": {
+      "types": "./dist/codex-sdk-options.d.ts",
+      "import": "./dist/codex-sdk-options.js"
+    }
+  },
+  "files": [
+    "dist",
+    "circuits"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/bundle.mjs",
+    "clean": "node --input-type=module -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
+    "test": "vitest run",
+    "start": "node dist/zk-credits.js",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@scure/bip39": "^2.3.0",
+    "circomlibjs": "^0.1.7",
+    "keytar": "^7.9.0",
+    "snarkjs": "^0.7.6"
+  },
+  "devDependencies": {
+    "@openai/codex-sdk": "^0.150.1",
+    "@types/node": "^24.13.3",
+    "@zk-credits/shared": "file:../zk-credits-shared",
+    "esbuild": "^0.28.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

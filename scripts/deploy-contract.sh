@@ -64,20 +64,24 @@ echo "4. Converting VK to Soroban hex format..."
 cd "$ROOT_DIR"
 node scripts/vk-convert.js 2>&1
 
-# 6. Read RLN VK hex values for constructor args
+# 6. Read all statement VK hex values for constructor args + admin setup
 echo ""
-echo "5. Reading RLN VK for constructor..."
-VK_FILE="$CIRCUITS_DIR/verification_key_rln_soroban.json"
-if [ ! -f "$VK_FILE" ]; then
-    echo "ERROR: VK file not found at $VK_FILE"
-    exit 1
-fi
+echo "5. Reading statement verification keys..."
+for VK_FILE in \
+    "$CIRCUITS_DIR/verification_key_rln_soroban.json" \
+    "$CIRCUITS_DIR/verification_key_slash_soroban.json" \
+    "$CIRCUITS_DIR/verification_key_membership_removal_soroban.json"; do
+    if [ ! -f "$VK_FILE" ]; then
+        echo "ERROR: VK file not found at $VK_FILE"
+        exit 1
+    fi
+    echo "   VK file: $VK_FILE"
+done
 
 # The constructor args are: (admin, treasury, vk, usdc_contract)
 # VK is a VerificationKey struct with alpha, beta, gamma, delta, ic
 # These need to be passed as Soroban CLI args — complex struct serialization.
 # For now, deploy with a script that constructs the args programmatically.
-echo "   VK file: $VK_FILE"
 echo ""
 echo "NOTE: Deploying with a VerificationKey struct requires Soroban CLI struct args."
 echo "      The contract constructor expects:"
@@ -91,7 +95,7 @@ echo "        node scripts/deploy-contract.js"
 echo ""
 echo "=== Pre-deployment Checklist ==="
 echo "  [ ] Contract WASM built: $WASM_PATH"
-echo "  [ ] VK converted: $VK_FILE"
+echo "  [ ] Spend/slash/membership VKs converted"
 echo "  [ ] Deployer funded: $DEPLOYER_ADDR"
 echo "  [ ] USDC contract: $USDC_CONTRACT"
 echo "  [ ] Treasury: $TREASURY_ADDR"

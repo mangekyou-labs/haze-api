@@ -1,215 +1,158 @@
-# zk-api-credits
+# zk-credits
 
-Anonymous RLN-rate-limited API credits for coding agents on Stellar.
+Anonymous API credits for coding agents. Buy 100 tickets, import a 24-word
+phrase, run Cline / Claude Code / Codex. The gateway never sees your identity.
 
-## What It Is
-
-A privacy gateway between coding agents (Claude Code, Codex, OpenCode, Cline) and LLM APIs (OpenRouter, 400+ models). Developers buy anonymous credits with a card; agents call LLMs via ZK-RLN proofs; over-quota calls slash deposits on-chain.
-
-**The gateway cannot link a call to a deposit.** ZK enforced.
-
-## How It Works
-
-1. Developer signs in with GitHub, buys $5 credits via Stripe
-2. Browser generates `secret_k` + commitment, stores key in IndexedDB
-3. Gateway mints on-chain USDC deposit referencing the commitment
-4. Agent calls `OPENAI_BASE_URL` with a ZK proof in the header
-5. Gateway verifies proof (off-chain), forwards to OpenRouter, returns response
-6. Over-quota: nullifier collision → RLN math extracts `secret_k` → slash on-chain
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 20+
-- Rust 1.94+ (`rustup toolchain install 1.94`)
-- Stellar CLI 27+ (`cargo install stellar-cli`)
-- Circom 0.5.46+
-
-### 1. Clone & Install
+**Testnet only. No real money.**
 
 ```bash
-git clone <repo>
-cd feature-zk-api-credits
+npm install --global zk-credits
+```
 
-# Gateway
+## First run
+
+### 1. Fund an identity
+
+1. Open https://feature-zk-api-credits-gadillacers-projects.vercel.app
+2. Sign in with GitHub
+3. Generate identity and write down the **24-word recovery phrase**
+4. Buy **Starter — $1.00 / 100 tickets** (Stripe test card `4242…`)
+5. Wait until the dashboard shows an **active** deposit
+
+The phrase is the proving identity. It never leaves your machine.
+
+### 2. Import it locally
+
+```bash
+zk-credits import-mnemonic
+# paste the 24-word phrase (hidden TTY, saved to OS keychain)
+```
+
+### 3. Run an agent
+
+```bash
+zk-credits cline "summarize this repository"
+zk-credits claude -p "summarize this repository"
+zk-credits setup codex && zk-credits codex "summarize this repository"
+```
+
+Each command starts a loopback sidecar on `127.0.0.1:3210`, proves the request
+locally, and launches the agent against that sidecar. Your default
+`~/.cline` / `~/.claude` / `~/.codex` profiles are not modified.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `zk-credits import-mnemonic` | Hidden-TTY import of the 24-word phrase into OS keychain |
+| `zk-credits cline [args…]` | Launch Cline through the proof-aware sidecar |
+| `zk-credits claude [args…]` | Launch Claude Code through the sidecar (`ANTHROPIC_BASE_URL`) |
+| `zk-credits setup codex` | Write an isolated Codex profile |
+| `zk-credits codex [args…]` | Launch Codex CLI through the sidecar |
+| `zk-credits status` | Identity + sidecar state |
+| `zk-credits serve` | Sidecar only, for any OpenAI-compatible client |
+| `eval "$(zk-credits env)"` | Print `OPENAI_BASE_URL` + loopback bearer |
+
+Other clients:
+
+```bash
+zk-credits serve
+eval "$(zk-credits env)"
+# OPENAI_BASE_URL=http://127.0.0.1:3210/v1
+```
+
+TypeScript (Codex SDK):
+
+```ts
+import { Codex } from '@openai/codex-sdk';
+import { buildCodexSdkOptions, buildCodexThreadOptions } from 'zk-credits/codex';
+
+const codex = new Codex(buildCodexSdkOptions({
+  loopbackBaseUrl: 'http://127.0.0.1:3210',
+  token,
+  codexHome,
+}));
+const thread = codex.startThread(buildCodexThreadOptions({ model: 'openai/gpt-4o-mini' }));
+await thread.run('summarize this repository');
+```
+
+`ZK_CREDITS_MNEMONIC` is for a headless process only. It is not persisted.
+
+## How it works
+
+1. Browser derives `secret_k` from a 24-word phrase and a public commitment
+2. Starter checkout deposits 1 USDC testnet against that commitment
+3. Sidecar imports the phrase, fetches the public Merkle snapshot, and attaches
+   a fresh body-bound ZK-RLN proof to each LLM request
+4. Gateway verifies the proof, forwards to OpenRouter, returns the response
+5. Ticket fork (same ticket, different request) slashes the deposit on-chain
+
+The gateway cannot link a call to a deposit. ZK enforced.
+
+Live surfaces:
+
+- Web: https://feature-zk-api-credits-gadillacers-projects.vercel.app
+- Gateway: https://zk-credits-gateway.onrender.com
+- Contract: `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`
+
+## Before you try it
+
+- **Testnet Stripe + GitHub** are required. No anonymous CLI-only signup.
+- **Membership tree capacity is 8.** If Buy Credits fails or the gateway
+  returns `Tree is full`, a slot must be freed (withdraw/slash) before a new
+  identity can deposit.
+- **Render free-tier cold start.** First `/health` after idle can take ~30s or
+  return 503; retry.
+- **Node 20+.** `keytar` needs a working OS keychain (macOS Keychain, libsecret
+  on Linux, Credential Manager on Windows).
+- Sidecar binds **only** `127.0.0.1`. It does not install a plugin, intercept
+  TLS, or replace your default agent profile.
+
+## Honest caveats
+
+1. **Testnet only.** No real money. USDC is testnet faucet.
+2. **100-ticket specialization.** Starter is exactly ticket indices `0..99`.
+3. **Variable-cost refunds deferred.** Fixed per-call ticket price.
+4. **Single-contributor trusted setup.** Groth16 BLS12-381 ceremony is dev-only.
+5. **Custodial gateway-mediated withdrawal.** Gateway co-signs. The gateway can block by disappearing, but the gateway cannot unilaterally redirect funds because the contract requires the browser-secret membership-removal proof.
+6. **Async per-call on-chain audit.** Proofs verify off-chain for latency, then settle
+   to Soroban `spend()` asynchronously.
+7. **Single gateway timing.** No cryptographic link from call to deposit, but
+   one operator can observe request timing.
+8. **Browser proving latency.** Browser and sidecar proving adds latency (~1.5s first call per session, cached after).
+9. **IP is not hidden.** Payment and deposit identity is hidden; network identity / IP is not hidden.
+10. **Validated clients.** `zk-credits cline`, `zk-credits claude`, and
+    `zk-credits codex` / `zk-credits/codex`. Other clients need a custom
+    OpenAI-compatible base URL.
+
+## Build from source
+
+For protocol contributors only. End users should stop at **First run**.
+
+Prerequisites: Node 20+, Rust 1.94+, Stellar CLI 27+, Circom 0.5.46+.
+
+```bash
+git clone https://github.com/mangekyou-labs/haze-api.git
+cd haze-api
+cp .env.example .env   # STELLAR_*, OPENROUTER_API_KEY, GATEWAY_SECRET, STRIPE_*, GITHUB_*
+
 cd ts && npm install && cd ..
-
-# Web app
 cd web && npm install && cd ..
-
-# Circuits
 cd circuits && npm install && cd ..
-```
 
-### 2. Environment
-
-```bash
-cp .env.example .env
-# Edit .env with your keys:
-# - STELLAR_SECRET_KEY (gateway account)
-# - OPENROUTER_API_KEY
-# - GATEWAY_SECRET (shared between web app and gateway)
-# - STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
-# - GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
-```
-
-### 3. Build Circuits
-
-```bash
+# circuits (trusted setup is single-contributor, dev-only)
 cd circuits
-# Compile circuits (requires circom on PATH)
 circom deposit_membership.circom --r1cs --wasm -p bls12381
 circom rln_nullifier.circom --r1cs --wasm -p bls12381
 circom slash.circom --r1cs --wasm -p bls12381
+node scripts/setup.js && cd ..
 
-# Trusted setup (single-contributor, dev-only)
-node scripts/setup.js
-cd ..
+cd ts && npm run dev          # gateway :3001
+cd web && npm run dev         # web :3000
 ```
 
-### 4. Build & Deploy Contract
-
-```bash
-cd zk-credits-contract
-RUSTUP_TOOLCHAIN=1.94 stellar contract build
-
-# Deploy to testnet
-RUSTUP_TOOLCHAIN=1.94 stellar contract deploy \
-  --wasm target/wasm32v1-none/release/zk_credits_contract.wasm \
-  --source-account <your-stellar-key> \
-  --network testnet \
-  --network-passphrase "Test SDF Network ; September 2015" \
-  --rpc-url https://soroban-testnet.stellar.org \
-  -- \
-  --admin <admin-address> \
-  --treasury <treasury-address> \
-  --vk-file-path <path-to-vk-json> \
-  --usdc-contract <usdc-sac-id>
-cd ..
-```
-
-### 5. Start Gateway
-
-```bash
-cd ts
-npm run dev
-# Gateway runs on http://localhost:3001
-```
-
-### 6. Start Web App
-
-```bash
-cd web
-npm run dev
-# Web app runs on http://localhost:3000
-```
-
-### 7. Run E2E Test
-
-```bash
-node scripts/e2e-test.js
-```
-
-### 8. Run Slash Demo
-
-```bash
-node scripts/slash-demo.js
-```
-
-## Project Structure
-
-```
-├── circuits/              Circom circuits (deposit, RLN, slash)
-│   ├── deposit_membership.circom
-│   ├── rln_nullifier.circom
-│   ├── slash.circom
-│   └── scripts/           Test & setup scripts
-├── contracts/             Archived Solidity (superseded by Soroban)
-├── zk-credits-contract/   Soroban smart contract (Rust)
-│   └── contracts/zk-credits-contract/src/lib.rs
-├── ts/                    Gateway (Node.js + Express + TypeScript)
-│   ├── server.ts          OpenAI-compatible API gateway
-│   ├── contract.ts        Soroban RPC client
-│   ├── crypto.ts          Browser crypto (secret_k, BIP-39)
-│   ├── prover.ts          Groth16 proof generation + caching
-│   ├── providerAdapter.ts Pluggable upstream (OpenRouter)
-│   └── storage.ts         IndexedDB abstraction
-├── web/                   Web app (Next.js 16 + App Router)
-│   └── src/
-│       ├── app/
-│       │   ├── api/       Checkout, webhook, keys, status routes
-│       │   ├── dashboard/ Dashboard with status, keys, buy credits
-│       │   ├── onboarding/secret_k generation + mnemonic backup
-│       │   └── sign-in/   GitHub OAuth
-│       └── lib/
-│           ├── crypto.ts  Browser witness calculator
-│           └── stellar.ts Contract read stub (M8)
-└── scripts/
-    ├── setup-testnet.sh   Testnet account setup
-    ├── e2e-test.js        End-to-end test script
-    ├── slash-demo.js      RLN slash demonstration
-    └── demo-script.md    5-minute demo walkthrough
-```
-
-## API Reference
-
-### Gateway Endpoints
-
-| Endpoint | Method | Auth | Description |
-|---|---|---|---|
-| `/health` | GET | None | Health check |
-| `/v1/chat/completions` | POST | API key | OpenAI-compatible chat (ZK proof required) |
-| `/v1/api-keys` | POST | Gateway secret | Generate API key |
-| `/v1/status/:commitment` | GET | None | User stats (calls, quota, keys) |
-| `/v1/contract-status` | GET | None | On-chain contract state |
-| `/v1/slash` | POST | None | Submit slash proof (stub) |
-
-### Web App Routes
-
-| Route | Description |
-|---|---|
-| `/` | Landing page |
-| `/sign-in` | GitHub OAuth |
-| `/dashboard` | Protected dashboard (status, keys, buy credits) |
-| `/onboarding` | First-run: generate secret_k, mnemonic backup |
-| `/api/checkout` | Stripe Checkout session creation |
-| `/api/webhooks/stripe` | Stripe webhook handler |
-| `/api/keys` | API key generation (proxies to gateway) |
-| `/api/dashboard/status` | Dashboard status (proxies to gateway) |
-
-## Contract
-
-**Testnet:** `CCJG427D5B2KCLQC4GNSUXLZU7T3455T763EEIX44DNLCUMLXYKGEE4R`
-
-Functions:
-- `deposit(depositor, commitment, new_root, amount)` — Register commitment + transfer USDC
-- `spend(proof, pub_signals)` — Verify RLN proof + record nullifier
-- `slash(slash_proof, pub_signals, commitment, submitter)` — Extract secret_k + split USDC
-- `withdraw(commitment, recipient)` — Withdraw unused credits
-
-## Honest Caveats
-
-1. **Custodial v1:** Gateway holds USDC; user holds `secret_k`. Gateway cannot spend without user's proof (contract enforces), but if gateway disappears, user needs independent withdrawal path.
-2. **Testnet only:** No real money. USDC is testnet faucet. Trusted setup is single-contributor dev-only.
-3. **Single gateway:** Cross-gateway unlinkability is v2. v1 has one gateway — it can't link cryptographically, but could log timing patterns.
-4. **Browser proving:** ~1.5s first call per session, cached after. Acceptable for demo, needs optimization for production.
-5. **Network identity:** v1 hides payment identity, not IP. Tor/client-side relay is v2.
-6. **On-chain VK:** Contract deployed with dummy VK. Gateway verifies off-chain with real VK. Full on-chain verification needs BLS12-381 point serialization.
-
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| Circuits | Circom + snarkjs (`-p bls12381`) |
-| Contract | Rust + soroban-sdk 26 |
-| Chain | Stellar testnet (CAP-0059 BLS12-381) |
-| Gateway | Node.js + Express + TypeScript |
-| Web App | Next.js 16 + App Router + next-auth |
-| Auth | GitHub OAuth |
-| Payments | Stripe (test mode) |
-| LLM | OpenRouter (400+ models) |
-| Hash | MiMC (in-circuit), Keccak256 (archived Solidity) |
+Contract, slash demo, and E2E scripts live in `zk-credits-contract/` and
+`scripts/`.
 
 ## License
 

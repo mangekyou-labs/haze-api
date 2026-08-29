@@ -1,0 +1,20 @@
+# ─── Docker ignore (stellar-launch) ──────────────────────────────
+# Keep Docker build context small by excluding everything that isn't
+# explicitly COPY'd in the Dockerfiles.
+
+node_modules
+.git
+.next
+dist
+coverage
+test-results
+playwright-report
+*.log
+.env
+.env.local
+.DS_Store
+e2e-screenshots
+
+# Keep Dockerfile and fly.toml (they're explicitly COPY'd)
+!ts/Dockerfile
+!services/fee-sponsor/Dockerfile

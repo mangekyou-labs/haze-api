@@ -15,18 +15,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'server_misconfigured' }, { status: 500 });
   }
 
-  let commitment: string;
-  try {
-    const body = await req.json();
-    commitment = body.commitment;
-  } catch {
-    return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
-  }
-
-  if (!commitment || typeof commitment !== 'string') {
-    return NextResponse.json({ error: 'missing_commitment' }, { status: 400 });
-  }
-
   try {
     const res = await fetch(`${GATEWAY_URL}/v1/api-keys`, {
       method: 'POST',
@@ -34,10 +22,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${GATEWAY_SECRET}`,
       },
-      body: JSON.stringify({
-        commitment,
-        label: session.user?.email ?? 'github-user',
-      }),
+      body: JSON.stringify({}),
     });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });

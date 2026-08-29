@@ -1,13 +1,14 @@
 include "lib/mimcsponge.circom";
 include "lib/mux1.circom";
+include "lib/bitify.circom";
+include "lib/comparators.circom";
 
 template RlnNullifier(nLevels) {
     signal private input secret_k;
-    signal private input signal_value;
+    signal private input ticket_index;
+    signal private input request_digest;
     signal private input merkle_path_elements[nLevels];
     signal private input merkle_path_indices[nLevels];
-
-    signal input epoch;
 
     signal output root;
     signal output nullifier;
@@ -67,18 +68,33 @@ template RlnNullifier(nLevels) {
 
     root <== m2.out[0];
 
-    component nullifier_hash = MiMCSponge(2, 220, 1);
-    nullifier_hash.ins[0] <== secret_k;
-    nullifier_hash.ins[1] <== epoch;
+    // Fixed Starter package: exactly 100 private ticket indices. Num2Bits
+    // prevents a field element from being used as an arbitrary index, while
+    // LessThan enforces the paper's solvency bound (i + 1) * C <= D with
+    // D = 100 * C and R = 0.
+    component index_bits = Num2Bits(7);
+    index_bits.in <== ticket_index;
+
+    component index_bound = LessThan(7);
+    index_bound.in[0] <== ticket_index;
+    index_bound.in[1] <== 100;
+    index_bound.out === 1;
+
+    component slope_hash = MiMCSponge(2, 220, 1);
+    slope_hash.ins[0] <== secret_k;
+    slope_hash.ins[1] <== ticket_index;
+    slope_hash.k <== 0;
+
+    component nullifier_hash = MiMCSponge(1, 220, 1);
+    nullifier_hash.ins[0] <== slope_hash.outs[0];
     nullifier_hash.k <== 0;
     nullifier <== nullifier_hash.outs[0];
 
-    component signal_hash = MiMCSponge(1, 220, 1);
-    signal_hash.ins[0] <== signal_value;
-    signal_hash.k <== 0;
-    share_x <== signal_hash.outs[0];
+    // request_digest is already the canonical request hash reduced into Fr;
+    // expose exactly that value as the public request point x.
+    share_x <== request_digest;
 
-    share_y <== secret_k * share_x + nullifier;
+    share_y <== secret_k + slope_hash.outs[0] * share_x;
 }
 
 component main = RlnNullifier(3);
