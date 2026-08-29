@@ -1,7 +1,14 @@
 {
   "name": "zk-credits",
   "version": "0.1.2",
-  "description": "Loopback proof-aware OpenAI transport for ZK Credits.",
+  "description": "Loopback proof-aware OpenAI transport for Cline, Claude Code, and Codex.",
+  "homepage": "https://feature-zk-api-credits-gadillacers-projects.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mangekyou-labs/haze-api.git",
+    "directory": "packages/zk-credits-sidecar"
+  },
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20"
