@@ -167,20 +167,12 @@ witness, ticket index, and loopback bearer on the developer machine. Render
 receives only the shared compatibility bearer and a fresh body-bound ZK proof.
 It supports Chat Completions, Responses, and Anthropic Messages endpoints.
 
-The published `0.1.1` release on npm provides `zk-credits cline` and `zk-credits codex`:
+The published `zk-credits@0.1.2` release on npm provides full zero-configuration support for **Cline**, **Claude Code**, and **Codex**:
 
 ```bash
 npm install --global zk-credits
 ```
 
-To use the latest checkout features (including `zk-credits claude` and `zk-credits/codex` SDK exports):
-
-```bash
-cd packages/zk-credits-sidecar
-npm ci
-npm run build
-npm link
-```
 ### 1. Cline CLI
 
 ```bash
