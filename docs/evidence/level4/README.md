@@ -1,8 +1,8 @@
 # Stellar Launch — Level 4 evidence index
 
-Snapshot: 2026-09-12
+Snapshot: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local implementation verified; release evidence pending
+Status: hosted restore and three-pass synthetic verification complete; release evidence pending
 
 This index is intentionally conservative. It will contain only fresh deployed
 links, consented cohort records, redacted exports, and current screenshots
@@ -22,6 +22,42 @@ development capture, or unrelated transaction is counted as Level 4 evidence.
   account data removed;
 - 4–6 minute unlisted demonstration;
 - final branch/PR and lifecycle review references.
+
+## Hosted deployment
+
+Fresh hosted checks from 2026-09-13 (UTC) use the Level 4 commit
+`3c81f9907d60f455a10e5564a72f8570cf262c29`:
+
+| Component | Live URL | Fresh result |
+|---|---|---|
+| Web evaluation deployment | <https://feature-zk-api-credits.vercel.app> | Vercel production deployment `dpl_BQLepbjZd7Nt1aJioeuqXoVKepgc` Ready; frontend probe 200 |
+| Gateway | <https://zk-credits-gateway.onrender.com> | `/health` 200; `/v1/contract-status` 200 |
+| Fee sponsor | <https://zk-credits-fee-sponsor.onrender.com> | `/health` 200 |
+
+Render uses the new restricted Postgres instance `zk-credits-db-level4-20260913`
+(created 2026-09-13T02:10:10Z). This is a fresh evaluation store after the
+previous free database expired; no prior cohort data was recovered. Gateway
+startup logs show durable PostgreSQL initialization twice: 2026-09-13T02:15:02Z
+and 2026-09-13T02:18:29Z. The gateway has the purge secret only; the web-only
+evaluation HMAC secret is configured in Vercel production and the
+`feature-stellar-launch-level4` preview target.
+
+The fresh synthetic command completed three passes without printing URLs or
+bodies:
+
+```text
+pass 1 (cold) ok frontend=ok:200/1003ms/1 attempt(s) gateway-health=ok:200/231ms/1 attempt(s) gateway-contract-status=ok:200/929ms/1 attempt(s) fee-sponsor-health=ok:200/303ms/1 attempt(s)
+pass 2 (warm) ok frontend=ok:200/496ms/1 attempt(s) gateway-health=ok:200/76ms/1 attempt(s) gateway-contract-status=ok:200/711ms/1 attempt(s) fee-sponsor-health=ok:200/107ms/1 attempt(s)
+pass 3 (warm) ok frontend=ok:200/605ms/1 attempt(s) gateway-health=ok:200/90ms/1 attempt(s) gateway-contract-status=ok:200/781ms/1 attempt(s) fee-sponsor-health=ok:200/108ms/1 attempt(s)
+```
+
+The three GitHub `LEVEL4_*` repository variables are now set to the live URLs
+above. Deploy Smoke run
+[34736294570](https://github.com/mangekyou-labs/haze-api/actions/runs/34736294570)
+on `feature-stellar-launch-level4` at 2026-09-13T03:46:11Z passed its
+`level4-synthetic` job on the exact Level 4 commit. Its separate legacy hosted
+smoke job remains failed because its old `GATEWAY_URL` secret/template is not
+configured; that job is not used as the Level 4 synthetic result.
 
 ## Cohort table
 

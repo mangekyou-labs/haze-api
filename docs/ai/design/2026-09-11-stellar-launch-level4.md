@@ -9,7 +9,7 @@ description: Additive evaluation architecture for the existing launch product
 Date: 2026-09-11  
 Feature slug: `stellar-launch`  
 Baseline: `1c17e14`  
-Status: approved; locally implemented; hosted acceptance pending
+Status: approved; locally implemented; hosted restore and synthetic verification complete; hosted product/evidence gates pending
 
 ## Architecture decision
 

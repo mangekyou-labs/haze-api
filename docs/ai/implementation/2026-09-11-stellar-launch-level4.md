@@ -6,9 +6,9 @@ description: Reconciled implementation notes for the evaluation milestone
 
 # Stellar Launch — Level 4 implementation record
 
-Date: 2026-09-12
+Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local implementation and verification complete; hosted acceptance pending
+Status: local implementation plus hosted restore/synthetic verification complete; hosted product/evidence gates pending
 
 This document is updated after each planned task. It records target-branch
 facts only; donor-worktree claims and stale screenshots are not evidence.
@@ -229,9 +229,9 @@ Fresh evidence:
 
 T8 originally recorded a clean-tree matrix of 196 gateway tests / 60 web tests
 / 5 Postgres cases. Phase 7 remediations below supersede those counts. Hosted
-deployment, cohort, fresh screenshots/video, telemetry exports, and GitHub
-publication remain external acceptance gates until their credentials and
-direct evidence exist.
+restore and synthetic verification are now recorded below; cohort, fresh
+screenshots/video, telemetry exports, hosted checkout, and GitHub publication
+remain external acceptance gates until direct evidence exists.
 
 ### Phase 7 remediations (complete locally)
 
@@ -287,8 +287,29 @@ This-session local matrix (2026-09-12, logs in `/tmp/stellar-l4-matrix/`):
   typecheck and 1 test; circuits all passed; synthetic monitor 3 tests;
   `cargo +1.94 test` 24 passed (6 existing `unused_mut` warnings).
 
-Hosted Level 4 deploy of this code, 10-person cohort, exporter, hosted
-screenshots, and demonstration remain unset. The donor
+The hosted Level 4 deploy and three-pass synthetic monitor are now live:
+
+- Web: <https://feature-zk-api-credits.vercel.app> (Vercel production
+  deployment `dpl_BQLepbjZd7Nt1aJioeuqXoVKepgc`, Ready).
+- Gateway: <https://zk-credits-gateway.onrender.com> (`/health` and
+  `/v1/contract-status` returned 200).
+- Fee sponsor: <https://zk-credits-fee-sponsor.onrender.com> (`/health`
+  returned 200).
+- Render services run Level 4 commit
+  `3c81f9907d60f455a10e5564a72f8570cf262c29` against the new restricted store
+  `zk-credits-db-level4-20260913`; gateway durable PostgreSQL initialization
+  was logged twice at 02:15:02Z and 02:18:29Z.
+- Web-only evaluation/Stripe/gateway configuration is present in Vercel
+  production and the Level 4 preview target. The gateway does not receive
+  `EVALUATION_HMAC_SECRET`.
+
+The three GitHub `LEVEL4_*` repository variables are configured. Deploy Smoke
+run [34736294570](https://github.com/mangekyou-labs/haze-api/actions/runs/34736294570)
+passed its `level4-synthetic` job on the Level 4 SHA; its separate legacy
+hosted-smoke job remains failed on old unconfigured secrets/template and
+dependency-install behavior. Cohort remains 0 / 10. Hosted Stripe
+checkout/explorer evidence, telemetry, exporter, hosted screenshots, and
+demonstration remain unset. The donor
 `feature-zk-api-credits` tree is not the submit candidate.
 
 CI on GitHub Actions Node 24.20.0 / npm 11.19.0 first failed `npm ci` for Web,
@@ -303,5 +324,5 @@ and push
 [34691342078](https://github.com/mangekyou-labs/haze-api/actions/runs/34691342078),
 all seven jobs success (Gateway, Web, Fee-sponsor, Shared, Sidecar, Circuits,
 Soroban). Package CI is not hosted synthetic, Stripe, Sentry, PostHog, or
-cohort evidence. Fresh `node scripts/level4-synthetic.mjs` still EXIT 1 with
-the three `LEVEL4_*` variables unset; GitHub vars/secrets lists are empty.
+cohort evidence. The fresh `node scripts/level4-synthetic.mjs` run from the
+Level 4 worktree passed `cold`, `warm`, `warm`; all four checks returned 200.

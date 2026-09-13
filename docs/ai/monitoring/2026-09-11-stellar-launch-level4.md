@@ -8,7 +8,7 @@ description: Privacy-preserving telemetry and synthetic response plan
 
 Date: 2026-09-11  
 Feature slug: `stellar-launch`  
-Status: local monitoring implementation complete; hosted checks pending
+Status: local monitoring implementation complete; hosted restore and synthetic verification complete; telemetry evidence pending
 
 ## PostHog
 
@@ -36,12 +36,14 @@ Gateway retention runs through the dedicated-secret
 `POST /v1/internal/evaluation/purge` operation and a daily in-process schedule
 after the durable Postgres store is initialized.
 
-Hosted synthetic passes, Sentry, and PostHog remain pending until those
-variables and dashboards exist for this branch. Unset names are not treated
-as green. This session: GitHub `vars`/`secrets` lists were `[]`;
-`node scripts/level4-synthetic.mjs` EXIT 1 missing all three `LEVEL4_*`
-variables; Deploy Smoke has not run for `feature-stellar-launch-level4`.
-Package CI success on `de394b3` is not a synthetic-monitor pass.
+Hosted restore and synthetic verification are complete on the Level 4
+deployment. GitHub repository variables `LEVEL4_FRONTEND_URL`,
+`LEVEL4_GATEWAY_URL`, and `LEVEL4_FEE_SPONSOR_URL` are configured, and Deploy
+Smoke run [34736294570](https://github.com/mangekyou-labs/haze-api/actions/runs/34736294570)
+passed its `level4-synthetic` job on the Level 4 commit. The separate legacy
+hosted-smoke job still uses old unconfigured secrets/templates and is not a
+Level 4 gate. Scrubbed Sentry and consented PostHog evidence remain pending;
+missing variables or dashboards are never treated as green.
 
 ## Response
 

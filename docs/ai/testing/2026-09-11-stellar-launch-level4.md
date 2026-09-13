@@ -6,9 +6,9 @@ description: Fresh verification evidence for the additive evaluation milestone
 
 # Stellar Launch — Level 4 verification record
 
-Date: 2026-09-12
+Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local verification complete; hosted evidence pending
+Status: local verification plus hosted restore/synthetic verification complete; release evidence pending
 
 Only commands run in the clean Level 4 worktree may be recorded here. Donor
 claims, development screenshots, and stale lockfile results are excluded.
@@ -122,23 +122,35 @@ Hosted GitHub Actions CI for SHA `de394b3` is green (PR run 34691343208,
 push run 34691342078; all seven jobs success). That is package CI, not a
 hosted evaluation gate.
 
-External release artifacts remain pending until deployment credentials, hosted
-URLs, Stripe test ingress, telemetry access, fresh screenshots, and ten
-distinct consenting participants are available. Hosted variables
-`LEVEL4_FRONTEND_URL`, `LEVEL4_GATEWAY_URL`, `LEVEL4_FEE_SPONSOR_URL`, Stripe,
-Sentry, `DATABASE_URL`, and evaluation secrets were unset in this session.
-GitHub repository variables and secrets lists were empty (`[]`). Fresh
-`node scripts/level4-synthetic.mjs` EXIT 1:
-`Missing required Level 4 monitor variables: LEVEL4_FRONTEND_URL, LEVEL4_GATEWAY_URL, LEVEL4_FEE_SPONSOR_URL`.
-Cohort remains 0 / 10. Last Deploy Smoke workflow run is
-[33234152209](https://github.com/mangekyou-labs/haze-api/actions/runs/33234152209)
-on `main` (2026-08-29, failure); it did not run for this branch. The Vercel
-GitHub integration built preview
-`https://feature-zk-api-credits-chavufnzj-gadillacers-projects.vercel.app`
-for `de394b3` (HTTP 200, title `ZK API Credits`; branch alias also HTTP 200).
-That URL is not a hosted evaluation gate: it has no configured
-`LEVEL4_*` services, Stripe test ingress, evaluation secrets, or durable
-evaluation database.
+External release artifacts remain pending until hosted Stripe checkout and
+explorer evidence, telemetry access, fresh screenshots/video, and ten
+distinct consenting participants are available.
+
+Fresh hosted restore facts from 2026-09-13:
+
+- Web: <https://feature-zk-api-credits.vercel.app>, Vercel production
+  deployment `dpl_BQLepbjZd7Nt1aJioeuqXoVKepgc` Ready from
+  `3c81f9907d60f455a10e5564a72f8570cf262c29`.
+- Gateway: <https://zk-credits-gateway.onrender.com>; `/health` and
+  `/v1/contract-status` returned 200.
+- Fee sponsor: <https://zk-credits-fee-sponsor.onrender.com>; `/health`
+  returned 200.
+- New restricted database: `zk-credits-db-level4-20260913`; gateway logs
+  recorded durable PostgreSQL initialization twice at 02:15:02Z and 02:18:29Z.
+- Vercel production and the Level 4 preview target contain the required web
+  evaluation/Stripe/gateway configuration. The gateway does not contain the
+  web-only `EVALUATION_HMAC_SECRET`.
+
+The fresh `node scripts/level4-synthetic.mjs` command passed all three labels
+(`cold`, `warm`, `warm`); every frontend, gateway health, gateway contract
+status, and fee-sponsor health check returned 200. It printed only service
+labels, statuses, durations, and retry counts. The three GitHub `LEVEL4_*`
+variables are configured, and Deploy Smoke run
+[34736294570](https://github.com/mangekyou-labs/haze-api/actions/runs/34736294570)
+on the Level 4 SHA passed its `level4-synthetic` job at 2026-09-13T03:46:11Z.
+The workflow’s separate legacy hosted-smoke job failed on its old unconfigured
+secret/template and dependency-install step; it is not the Level 4 synthetic
+gate. Cohort remains 0 / 10.
 
 ## Required behavior evidence
 
