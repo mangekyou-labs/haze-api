@@ -6,9 +6,9 @@ description: Privacy-preserving telemetry and synthetic response plan
 
 # Stellar Launch — Level 4 monitoring
 
-Date: 2026-09-11  
+Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local monitoring implementation complete; hosted restore and synthetic verification complete; telemetry evidence pending
+Status: local monitoring implementation complete; wallet-optional path pending local implementation; hosted restore and synthetic verification complete; telemetry evidence pending
 
 ## PostHog
 
@@ -16,6 +16,12 @@ Start opted out. Enable only after an explicit evaluation checkbox and send a
 closed allowlist of coarse event names/properties. Disable autocapture,
 pageviews, session recording, surveys, and arbitrary free text. Logout removes
 consent and resets the client identity.
+
+The primary evaluation path is walletless. It must not emit Freighter detection
+failures, wallet prompts, signatures, commitments, or other wallet material as
+PostHog properties or Sentry fields. Optional wallet-proof usage remains a
+separate compatibility surface and does not change the primary telemetry
+contract.
 
 ## Sentry
 

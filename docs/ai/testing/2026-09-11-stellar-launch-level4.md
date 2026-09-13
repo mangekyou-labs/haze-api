@@ -8,10 +8,22 @@ description: Fresh verification evidence for the additive evaluation milestone
 
 Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local verification plus hosted restore/synthetic verification complete; release evidence pending
+Status: wallet-optional scope approved; follow-up verification pending; hosted restore and synthetic verification complete; release evidence pending
 
 Only commands run in the clean Level 4 worktree may be recorded here. Donor
 claims, development screenshots, and stale lockfile results are excluded.
+
+## Scope-change follow-up
+
+The historical rows below include the original Freighter-gated implementation.
+The approved wallet-optional design now requires fresh tests for a participant
+with no `window.freighterApi`: browser-held identity, exact consent, `$1`
+checkout, gateway-funded confirmed deposit, feedback, completion, evidence
+eligibility, and logout analytics reset. Optional wallet challenge/proof and
+purge invariants remain regression coverage but are not primary-flow gates.
+The new follow-up results will be appended after each T8.G–T8.I task; no
+hosted checkout, telemetry, screenshot, demo, or cohort evidence is inferred
+from the historical mocked E2E.
 
 ## Local command matrix
 
@@ -80,7 +92,7 @@ implemented. No external deployment or cohort evidence is claimed.
 | Opt-in-only PostHog initialization, event/property allowlist, duration clamping, and logout reset | `cd web && npm test -- --run src/lib/analytics.test.ts src/components/analytics-session-reset.test.ts` | pass (5 tests; the standalone analytics regression below adds 6 current assertions) |
 | Recursive browser Sentry scrub, including nested arrays and bounded depth | `cd web && npm test -- --run src/lib/sentry-scrub.test.ts` | pass (2 tests) |
 | Explicit analytics opt-in route and evaluation route regression | `cd web && npm test -- --run src/app/api/evaluation/analytics/route.test.ts src/app/api/evaluation/routes.test.ts` | pass (6 tests) |
-| Dashboard evaluation consent, wallet, checkout, and receipt UI | `cd web && npm run test:e2e -- e2e/level4.spec.ts` | pass (1 test; mocked gateway/Stripe/Freighter) |
+| Historical dashboard evaluation consent, wallet, checkout, and receipt UI | `cd web && npm run test:e2e -- e2e/level4.spec.ts` | pass (1 test; mocked gateway/Stripe/Freighter; superseded as primary-flow evidence by the walletless follow-up) |
 | Web type safety, lint, and production instrumentation build | `cd web && npm run typecheck`; `cd web && npm run lint`; `cd web && npm run build` | pass; lint has 0 errors and 6 pre-existing warnings |
 
 ## T7 narrow evidence
@@ -108,12 +120,14 @@ implemented. No external deployment or cohort evidence is claimed.
 
 The package-wide rows above were run from the Level 4 worktree after Phase 7
 remediations. The requirement audit confirms the exact consent version and
-participant ID shape, isolated migration `0009`, `wallet_fingerprint` after
-purge, testnet-only SEP-53 proof rules, 90-day purge, unique
-wallet/deposit/session ownership, monotonic checkout claims, 405 browser
-mutations, transactional challenge limits, filtered Stripe relay metadata,
-opt-in telemetry, recursive scrubbing, and preservation of the launch-era
-deposit and ticket-allocation path.
+participant ID shape, isolated migration `0009`, optional
+`wallet_fingerprint` after purge, testnet-only SEP-53 proof rules, 90-day
+purge, unique deposit/session ownership, monotonic checkout claims, 405
+browser mutations, transactional challenge limits, filtered Stripe relay
+metadata, opt-in telemetry, recursive scrubbing, and preservation of the
+launch-era deposit and ticket-allocation path. The walletless
+completion/evidence predicates are a follow-up behavior change and remain
+unverified until T8.G tests pass.
 
 The crash window after chain accept and before receipt-hash persistence is
 documented; it is not claimed as resume-without-resubmit.
@@ -154,8 +168,18 @@ gate. Cohort remains 0 / 10.
 
 ## Required behavior evidence
 
-Add focused results for identity, SEP-53, expiry/replay/rate limits, unique
-ownership, receipt/concurrent webhook behavior, retention, evidence redaction,
+Add focused results for identity, exact consent, browser-held commitment,
+walletless deposit linking, feedback and completion, optional SEP-53
+expiry/replay/rate limits, unique deposit/session ownership,
+receipt/concurrent webhook behavior, retention, walletless evidence redaction,
 analytics allowlisting/reset, recursive scrubbing, and migration-twice/
 real-Postgres cases. Mark unavailable external checks as pending or blocked
 with the exact reason; never convert them into local passes.
+
+## Walletless follow-up evidence
+
+| Task | Behavior | Result |
+|---|---|---|
+| T8.G | Walletless gateway deposit, feedback, completion, and evidence | pending failing-first tests and implementation |
+| T8.H | Dashboard path without Freighter, receipt/explorer state, and logout reset | pending failing-first web/E2E tests and implementation |
+| T8.I | Full local matrix and hosted acceptance reconciliation | pending fresh verification after T8.G/T8.H |

@@ -48,8 +48,9 @@ evidence, or CI logs.
    contract status.~~ Gateway `/health` and
    `/v1/contract-status`, and fee-sponsor `/health`, returned 200 after the
    Level 4 deploy.
-3. Deploy web; verify consent enrollment, wallet proof, checkout return,
-   webhook retry, explorer link, feedback, and logout analytics reset. The web
+3. Deploy web; verify consent enrollment, browser-held identity, checkout
+   return, webhook retry, gateway-funded explorer link, feedback, and logout
+   analytics reset. Freighter is not required for this primary path. The web
    deployment is live; consent, checkout, telemetry, explorer, and cohort
    evidence remain separate gates.
 4. Configure the non-secret repository variables
@@ -61,7 +62,9 @@ evidence, or CI logs.
    passed its `level4-synthetic` job on the Level 4 commit. The separate
    legacy hosted-smoke job still expects old `GATEWAY_URL`/`WEB_URL`/
    `FEE_SPONSOR_URL` secrets and is not a Level 4 result.
-5. Complete the distinct-participant cohort and generate the redacted export.
+5. Complete the distinct authenticated-participant cohort and generate the
+   redacted export. Unique personal wallets are not required; each complete
+   record still needs a unique confirmed evaluation transaction.
 6. Replace pending evidence, reconcile lifecycle docs, perform final review,
    repair GitHub authentication, and publish only after direct evidence exists.
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-13
 
-**Status:** Approved approach; pending written-spec review
+**Status:** Approved
 
 **Feature slug:** `stellar-launch`
 

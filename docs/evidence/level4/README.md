@@ -14,9 +14,10 @@ development capture, or unrelated transaction is counted as Level 4 evidence.
 - deployed web, gateway, and fee-sponsor URLs with current health checks;
 - three cold/warm synthetic passes;
 - scrubbed Sentry test event and consented PostHog event evidence;
-- one complete retried $1 Stripe test checkout and explorer-confirmed deposit;
-- ten distinct participants, wallets, deposits, transaction hashes, and
-  consented feedback records;
+- one complete retried $1 Stripe test checkout and gateway-funded,
+  explorer-confirmed deposit;
+- ten distinct authenticated participants, unique deposits/transaction
+  hashes, and consented feedback records; personal wallets are not required;
 - generated redacted `evidence.json`/`evidence.md`;
 - desktop/mobile/current dashboard screenshots with all secrets and personal
   account data removed;
@@ -61,14 +62,14 @@ configured; that job is not used as the Level 4 synthetic result.
 
 ## Cohort table
 
-| Participant | Wallet | Confirmed testnet transaction | Completed | Feedback |
+| Participant | Confirmed testnet transaction | Completed | Feedback |
 |---|---|---|---|---|
-| 0 / 10 available | — | — | — | — |
+| 0 / 10 available | — | — | — |
 
 The table must be populated only from the exporter after its ten-record,
-unique-wallet, unique-transaction gate succeeds. Full wallets, signatures,
+unique-participant, unique-transaction gate succeeds. Full wallets, signatures,
 subjects, prompts, proofs, commitments, API keys, and authorization headers
-must never be committed.
+must never be committed. Freighter is not a prerequisite for a valid record.
 
 ## Local verification
 

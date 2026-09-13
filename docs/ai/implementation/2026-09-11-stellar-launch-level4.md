@@ -8,7 +8,7 @@ description: Reconciled implementation notes for the evaluation milestone
 
 Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local implementation plus hosted restore/synthetic verification complete; hosted product/evidence gates pending
+Status: wallet-optional scope approved; local behavior update in progress; hosted restore and synthetic verification complete; hosted product/evidence gates pending
 
 This document is updated after each planned task. It records target-branch
 facts only; donor-worktree claims and stale screenshots are not evidence.
@@ -22,9 +22,24 @@ facts only; donor-worktree claims and stale screenshots are not evidence.
 - Keep `EVALUATION_HMAC_SECRET` server-side in web only.
 - Keep `EVALUATION_PURGE_SECRET` on the gateway only; never reuse `GATEWAY_SECRET`.
 - Never export or send raw wallet/signature/subject/request material.
+- Wallet proof is optional compatibility behavior. It must not gate the primary
+  checkout, gateway-funded deposit, feedback, completion, or evidence path.
 - Do not claim crash-after-accept as resume-without-resubmit. Tree
   reconstruction blocks a second leaf; receipt hash needs a reconciler that
   this milestone does not include.
+
+## Scope-change follow-up
+
+On 2026-09-13 the Level 4 audience was narrowed to normal Web2 and agentic
+coding users. The approved design is recorded in
+[`docs/superpowers/specs/2026-09-13-stellar-launch-web2-evaluation-design.md`](../../superpowers/specs/2026-09-13-stellar-launch-web2-evaluation-design.md).
+
+The original implementation and evidence below document the wallet-gated
+behavior that shipped before this decision. Follow-up tasks T8.G–T8.I replace
+the primary journey and its completion/evidence predicates with the approved
+wallet-optional contract. The gateway-funded staged Stellar testnet deposit,
+Stripe retry behavior, browser-held commitment, privacy boundaries, and
+optional wallet API invariants remain in scope.
 
 ## Task record
 
@@ -159,17 +174,22 @@ code.
 
 ### T6 — dashboard evaluation flow and privacy telemetry (complete)
 
-Added an additive client-only evaluation card to the existing dashboard. It
-keeps launch onboarding, browser-held identity generation, indexed ticket
-status, agent configuration, playground, and Starter checkout in place while
-adding a four-stage progress view for consent, wallet proof, payment, and
-feedback. Enrollment is gated by the exact consent version and explicitly
-describes restricted 90-day retention. Freighter proof requests require the
-Testnet network, display only a redacted wallet, and never render a signature
-or raw transaction hash. The `$1` evaluation checkout is disabled until
-enrollment, wallet verification, and a browser-held commitment are all present;
-receipt reconciliation uses bounded polling and exposes only status plus a
-safe explorer link.
+Historical T6 implementation: added an additive client-only evaluation card to
+the existing dashboard. It kept launch onboarding, browser-held identity
+generation, indexed ticket status, agent configuration, playground, and
+Starter checkout in place while adding a four-stage progress view for consent,
+wallet proof, payment, and feedback. Enrollment was gated by the exact consent
+version and explicitly described restricted 90-day retention. Freighter proof
+requests required the Testnet network, displayed only a redacted wallet, and
+never rendered a signature or raw transaction hash. The `$1` evaluation
+checkout was disabled until enrollment, wallet verification, and a
+browser-held commitment were all present; receipt reconciliation used bounded
+polling and exposed only status plus a safe explorer link.
+
+The wallet-gated dashboard behavior is superseded by the approved follow-up:
+the primary card will omit Freighter and will enable checkout from enrollment
+plus a browser-held commitment. Confirmed gateway-funded deposit, then
+feedback, will determine completion.
 
 Added opt-in-only PostHog tracking with an explicit event/property allowlist,
 memory persistence, no autocapture/pageviews/session recording, public-code
@@ -241,9 +261,11 @@ now includes:
 - `wallet_fingerprint` (SHA-256, unique 64-hex) retained after 90-day raw
   proof purge; same-wallet re-verify is idempotent and does not restore
   address/signature; a different wallet still fails `wallet_already_used`.
-- Public status keys `wallet.verified` and `complete` on
-  `wallet_verified_at`. Evidence `isComplete` still requires a raw wallet
-  address, so post-purge records do not export.
+- Public status keys `wallet.verified` and `complete` currently key on
+  `wallet_verified_at`; evidence `isComplete` currently requires a raw wallet
+  address. These are known wallet-gated predicates to be replaced by T8.G;
+  the approved target is deposit-plus-feedback completion and walletless
+  evidence eligibility.
 - Monotonic `markCheckout` / `claimCheckout`: `confirmed` cannot be
   downgraded (`processing_status <> 'confirmed'`).
 - Transactional challenge rate-limit: `connect` / `BEGIN` /
@@ -326,3 +348,32 @@ all seven jobs success (Gateway, Web, Fee-sponsor, Shared, Sidecar, Circuits,
 Soroban). Package CI is not hosted synthetic, Stripe, Sentry, PostHog, or
 cohort evidence. The fresh `node scripts/level4-synthetic.mjs` run from the
 Level 4 worktree passed `cold`, `warm`, `warm`; all four checks returned 200.
+
+### T8.F — wallet-optional documentation reconciliation (in progress)
+
+The approved wallet-optional design, requirements, planning, implementation,
+testing, deployment, monitoring, and evidence records are being reconciled in
+the target worktree. Hosted restore and synthetic facts remain complete; the
+walletless product path is not yet deployed or externally accepted.
+
+### T8.G — walletless gateway behavior (todo)
+
+Add failing memory, Postgres, and route tests for deposit linking, feedback,
+completion, and ten-record evidence without wallet proof. Then remove wallet
+checks from those gates while preserving optional wallet challenge/proof
+validation, ownership, purge, checkout claims, and the existing gateway-funded
+staged deposit path.
+
+### T8.H — walletless dashboard path (todo)
+
+Add failing web/E2E coverage with no Freighter provider, remove the required
+wallet step and wallet-gated checkout/feedback conditions, and preserve
+browser-held commitment checkout, receipt polling, explorer-safe status,
+feedback validation, and logout analytics reset.
+
+### T8.I — follow-up verification and acceptance reconciliation (todo)
+
+Run the affected and full local verification matrix, update the evidence index
+with fresh results, and record hosted T8.B–E as pending until direct Stripe,
+explorer, telemetry, cohort, screenshot, demo, and final-review evidence
+exists.
