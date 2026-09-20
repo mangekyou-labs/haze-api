@@ -88,8 +88,13 @@ of reordered public signals is B12. S6 and S7 are Foundry evidence against a
 mocked `ISpendVerifier` and keccak Poseidon stand-ins, so they do not show
 that a real generated proof verifies, that a real Poseidon deployment agrees
 with the circuit, or that anything has happened onchain. S23 is not closed:
-there is still no independent review, no generated proof verified by a real
-Solidity verifier and adapter on Base Sepolia, and no paid-traffic gate.
+there is still no independent review and no paid-traffic gate.
+
+Superseded in part by [Local B11 evidence](#local-b11-evidence-2026-09-20):
+the generated verifier, the adapter, and the real Poseidon deployments now
+carry real-proof Foundry evidence, and the adapter's reordered/altered/malformed
+payload cases are covered there. The Base Sepolia half of S23 and the
+independent review are still open.
 
 ## Local B9 evidence (2026-09-20)
 
@@ -149,6 +154,45 @@ These are local adapter and consumer regressions only. Durable reservation
 state, gateway status mapping, proof freshness enforcement, and live
 facilitator-route migration remain B6; generated proofs, Solidity verification,
 deployment, and paid traffic remain B12.
+
+## Local B11 evidence (2026-09-20)
+
+Run from the `feature-base-zk-credits` worktree on top of `20492b0` and
+`4d5387e`. Every command below is a fresh run in this session. There is no
+Base Sepolia receipt in this section, so nothing here is an onchain or
+paid-traffic claim, and B12 keeps the independent review.
+
+| Scenarios | Command | Result |
+| --- | --- | --- |
+| S1 | `npm test` in `packages/zk-credits-shared` | 29 passed, 8 skipped |
+| S16, S24 | `npm run build && npx vitest run` in `packages/zk-credits-sidecar` | 66 passed, 19 files, including the opt-in `src/pinned-artifacts.artifact.test.ts` against the installed frozen bundle: real `fullProve`, real `groth16.verify` self-check, exact six-signal order, reordered statement rejected |
+| S8–S11, S21 | `npx vitest run` in `packages/x402-zk-prepaid` | 11 passed, including identifying-field rejection and the single-capability `/supported` response |
+| S8–S14, S21 | `NODE_ENV=test npx vitest run` in `ts` | 81 passed, 12 skipped across 16 files |
+| S9 | `NODE_ENV=test npx vitest run zk-prepaid-gateway.test.ts` in `ts` | 16 passed. The new case pins the window `[now-300s, now+5s]` with both edges accepted, and rejects `now-301`, `now+6`, a user-selected historical `issuedAt`, and a public timestamp that is not the gateway `issuedAt` (`issued_at_mismatch`), each with no claim row |
+| S2–S5 | `CIRCOM=$HOME/.local/bin/circom npm test` in `circuits` | compiled with circom 2.2.2: `public inputs: 0`, `private inputs: 48`, `public outputs: 6`; witness checks passed. S3 covers the negative witness set and S5 the one-transcript/two-transcript pair. The expected-unsatisfying witnesses still print `ERROR: 4 Error in template PrivateCreditSpend_218` |
+| S4 | `r1csfile.readR1cs(file, false, false, false)` | new build `{ nOutputs: 6, nPubInputs: 0, nPrvInputs: 48 }`; root fixture `{ nOutputs: 6, nPubInputs: 48, nPrvInputs: 0 }` |
+| S5–S7, S23 (local half) | `FOUNDRY_OFFLINE=true forge test` in `contracts` | 42 passed: 26 unit + 2 invariants (256 sequences, ~128,000 calls, 0 reverts each) + 8 `SpendVerifierTest` + 3 `PoseidonParityTest` + 3 `SpendRecoveryTest`. The new suites decode the snarkjs `soliditycalldata` payload, verify both real transcripts of one nullifier through the generated verifier, reject reordered, swapped, altered, out-of-field, and truncated payloads, reproduce the circuit root and the circomlibjs literals with the deployed Poseidon T2/T3/T4, and slash two conflicting transcripts 50/50 against the real verifier with the real Poseidon |
+| S19 | `npm run typecheck`, `npm test`, `npm run lint`, `npm run build` in `web` | typecheck and build passed; 12 tests passed; lint 0 errors, 8 warnings (7 in `web/src/archive/stellar`, 1 in `postcss.config.mjs`) |
+| S34 | `npx ai-devkit@latest lint --feature base-zk-credits`; `git diff --check` | all checks passed; no whitespace errors |
+| S21, S22 | production-surface scan: `console.*` statements in `ts`, `packages`, and `web/src` (tests and archives excluded), plus dashboard and component field names | no production log statement carries a prompt, response, secret, proof, wallet, account, credit, nullifier, or request signal; dashboard views expose no `nullifier`, `requestSignal`, `remainingCredit`, or `encryptedReplay` field; the aggregate metrics snapshot stays token-gated and carries no witness, proof, or field element |
+
+Reading notes. The `ts` suite runs with `NODE_ENV=test` because the gateway
+fails closed on billing routes when the ambient `NODE_ENV` is `production`.
+The Foundry fixture is generated rather than hand-edited:
+`contracts/scripts/generate-spend-fixtures.mjs` re-verified the wasm, zkey, and
+verification-key digests against
+`packages/zk-credits-sidecar/circuits/manifest.json` before proving and checked
+its payload layout against `groth16.exportSolidityCallData`; the parity suite
+caught a bad literal in an earlier draft, so the literals are pinned against
+`packages/zk-credits-shared/src/base.test.ts` rather than transcribed.
+
+Not covered here and not claimed: a Base Sepolia verifier or adapter
+deployment (that needs explicit authorization and a funded keystore), the
+independent cryptographic review, paid traffic, and any production ceremony.
+`post-expiry` is enforced by the circuit (`timestamp < expiry`) and by the
+bond's proof-context check, not by the gateway, which does not know a
+credential's expiry; the gateway's equivalent negative is the
+`[now-300s, now+5s]` window above.
 
 ## Scenario catalog
 

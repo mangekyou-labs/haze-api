@@ -37,8 +37,11 @@ the rejected share equation.
   slot blinding or secret, and out-of-range field elements. `releaseBond` is
   permissionless at expiry plus seven days and pays the refund vault. Leaves
   stay `Poseidon(commitment, tier_id, expiry)` over a depth-20 append-only
-  tree with historical roots retained. The spend verifier remains a Foundry
-  mock until B12 supplies the generated verifier and adapter.
+  tree with historical roots retained. The spend verifier is
+  `contracts/src/SpendVerifier.sol`, an `ISpendVerifier` adapter over the
+  generated `contracts/src/PrivateCreditSpendVerifier.sol`; `MockSpendVerifier`
+  and the keccak Poseidon stand-ins remain only for narrow bond-accounting
+  unit tests.
 - `packages/zk-credits-shared`: browser/Node crypto, canonical requests,
   encrypted credentials. B2 restored the slot-blinding statement, BN254
   field-range rejection, and the RFC 8785 length-prefixed request signal in
@@ -158,6 +161,42 @@ relative, symlink-escaping, or hash-mismatched artifact before the first
   artifact and derives the depth-20 path locally. No gateway endpoint serves a
   path for a named leaf or commitment.
 
+## Spend verifier and real-proof fixtures (B11)
+
+`contracts/src/PrivateCreditSpendVerifier.sol` is the unmodified snarkjs
+export of the development zkey pinned by the sidecar manifest (zkey sha256
+`3afb378d832d646a7d207b7eecbbd33cf3b041b99274cb074bbe314ac0b79291`). It reads
+exactly six public signals in the canonical order and is never hand-edited;
+regenerate it with
+`snarkjs zkey export solidityverifier <zkey> PrivateCreditSpendVerifier.sol`.
+
+`contracts/src/SpendVerifier.sol` implements `ISpendVerifier` over that
+verifier. Its `proof` payload is the snarkjs `soliditycalldata` word list: the
+eight Groth16 point words with each `pi_b` Fp2 pair swapped relative to the
+proof JSON, then `[root, timestamp, domain, requestSignal, nullifier, share]`.
+The adapter passes those six words to the generated verifier unchanged and
+binds the caller's `signal`, `nullifier`, and `share` to their canonical
+positions, so a reordered, altered, or truncated payload cannot verify.
+`commitment` is not a circuit public input; the bond binds it through
+two-transcript recovery.
+
+`contracts/scripts/generate-spend-fixtures.mjs` regenerates
+`contracts/test/fixtures/PrivateCreditSpendFixture.sol` from the frozen
+bundle. It refuses any artifact whose digest does not match the manifest and
+checks its payload layout against `groth16.exportSolidityCallData`, so the
+Foundry suites cannot drift from the shipped bundle or from snarkjs. Foundry
+deploys the real Poseidon T2/T3/T4 libraries on that path and reproduces the
+circuit root, the circomlibjs literals, and the mocked-free slash recovery.
+
+The gateway accepts a challenge while its `issuedAt` stays inside
+`[now - 300s, now + 5s]`, and the real Groth16 verifier reads the same
+`issuedAtInWindow` helper, so the off-chain prover cannot accept a timestamp
+the resource server would reject. Token-issuance `expiry` is not known to the
+gateway; the circuit and the bond enforce `timestamp < expiry`.
+
+Deployment for this ticket is the verifier and the adapter only. The bond,
+USDC escrow, and Poseidon libraries are not part of the B11 broadcast.
+
 ## Error and logging policy
 
 Return safe x402 challenge/validation errors without exposing proof
@@ -189,6 +228,6 @@ Follow planning B2→B3→B4 for the cryptographic spine, then B5→B6→B8 for
 spend, then B9 for invite-only onboarding. B2, B3, B4, and the B9 onboarding
 rewrite are done locally; B5/B6/B8 remain **present-unsafe** where the notes
 above say so. Do not represent the restored circuit as privacy-preserving
-while the rejected root fixtures are still present and no generated Solidity
-verifier has been proven end to end. Do not onboard paid partners until
+while the rejected root fixtures are still present and the generated verifier
+has no Base Sepolia receipt. Do not onboard paid partners until
 planning B12 and founder B16 pass.
