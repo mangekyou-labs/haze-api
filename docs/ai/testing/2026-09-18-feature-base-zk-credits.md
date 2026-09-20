@@ -91,6 +91,22 @@ with the circuit, or that anything has happened onchain. S23 is not closed:
 there is still no independent review, no generated proof verified by a real
 Solidity verifier and adapter on Base Sepolia, and no paid-traffic gate.
 
+## Local B5 evidence (2026-09-20)
+
+| Scenarios | Command | Result |
+| --- | --- | --- |
+| S8–S11 | `npm test` in `packages/x402-zk-prepaid` | 8 passed; covers fixed credit wire fields, Base64 envelopes, identifying/unknown-field rejection, mixed-accept selection, cache keys and stale challenges, empty transaction/omitted payer, real core registration and `/supported`, phase injection rejection, and escrow orchestration |
+| S8–S11 | `npm run build` in `packages/x402-zk-prepaid` | passed with `@x402/core` v2.26 types |
+| S8–S11 | `npm run typecheck` in `ts` | passed |
+| S9–S10 | `NODE_ENV=test npx vitest run zk-prepaid-gateway.test.ts` in `ts` | 7 passed |
+| S8–S10 | `NODE_ENV=test npx vitest run src/base-sidecar.test.ts src/sidecar.test.ts` in `packages/zk-credits-sidecar` | 7 passed |
+| S34 | `npx ai-devkit@latest lint --feature base-zk-credits`; `npx ai-devkit@latest lint`; `git diff --check` | all passed |
+
+These are local adapter and consumer regressions only. Durable reservation
+state, gateway status mapping, proof freshness enforcement, and live
+facilitator-route migration remain B6; generated proofs, Solidity verification,
+deployment, and paid traffic remain B12.
+
 ## Scenario catalog
 
 | ID | Scenario | Planning tasks |

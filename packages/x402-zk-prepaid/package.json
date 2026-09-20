@@ -1,0 +1,30 @@
+{
+  "name": "@zk-credits/x402-zk-prepaid",
+  "version": "0.1.0",
+  "description": "Custom x402 v2 zk-prepaid adapter for private prepaid API credits.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@x402/core": "^2.26.0"
+  },
+  "devDependencies": {
+    "@x402/core": "^2.26.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

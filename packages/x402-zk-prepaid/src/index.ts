@@ -1,0 +1,424 @@
+/**
+ * Custom x402 v2 `zk-prepaid` adapter for private prepaid API credits.
+ *
+ * This package implements one scheme against the published @x402/core v2
+ * interfaces. It is intentionally not a general x402 or Bazaar compatibility
+ * layer.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+import type {
+  AssetAmount,
+  FacilitatorContext,
+  Network,
+  PaymentPayload as CorePaymentPayload,
+  PaymentPayloadContext,
+  PaymentRequired as CorePaymentRequired,
+  PaymentRequirements as CorePaymentRequirements,
+  Price,
+  ResourceInfo as CoreResourceInfo,
+  SchemeNetworkClient,
+  SchemeNetworkFacilitator,
+  SchemeNetworkServer,
+  SettleContext,
+  SettleResponse as CoreSettleResponse,
+  SupportedKind,
+  VerifyResponse as CoreVerifyResponse,
+} from '@x402/core/types';
+import type { x402Client } from '@x402/core/client';
+import type { x402Facilitator } from '@x402/core/facilitator';
+import type { FacilitatorClient, x402ResourceServer } from '@x402/core/server';
+
+export const X402_VERSION = 2 as const;
+export const ZK_PREPAID_SCHEME = 'zk-prepaid' as const;
+export const BASE_SEPOLIA_NETWORK = 'eip155:84532' as const;
+export const CODING_DEEPSEEK_V4_FLASH_V1 = 'coding-deepseek-v4-flash-v1' as const;
+export const PRIVATE_CREDIT_AMOUNT = '1' as const;
+export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED';
+export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE';
+export const PAYMENT_RESPONSE_HEADER = 'PAYMENT-RESPONSE';
+export const PUBLIC_SIGNAL_INDEX = Object.freeze({ root: 0, timestamp: 1, domain: 2, signal: 3, nullifier: 4, share: 5 });
+
+const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+const FORBIDDEN_KEYS = new Set(['account', 'commitment', 'order', 'secret', 'tier', 'wallet', 'payer', 'user', 'subject', 'phase', 'settlementphase']);
+const PAYMENT_KEYS = new Set(['x402Version', 'accepted', 'payload', 'resource', 'extensions']);
+const SETTLEMENT_PHASE = Symbol('zk-prepaid.settlementPhase');
+
+export type ResourceInfo = CoreResourceInfo;
+
+export interface ZkPrepaidExtra {
+  assetTransferMethod: 'prepaid-claim';
+  paymentFlow: 'escrow';
+  circuit: string;
+  verifyingKey: string;
+  deploymentDomain: string;
+  contract: string;
+  requirementsVersion: string;
+  issuedAt: number;
+  [key: string]: unknown;
+}
+
+export type PaymentRequirements = Omit<CorePaymentRequirements, 'scheme' | 'network' | 'amount' | 'asset' | 'extra'> & {
+  scheme: typeof ZK_PREPAID_SCHEME;
+  network: typeof BASE_SEPOLIA_NETWORK;
+  amount: typeof PRIVATE_CREDIT_AMOUNT;
+  asset: typeof CODING_DEEPSEEK_V4_FLASH_V1;
+  extra: ZkPrepaidExtra;
+};
+
+export type PaymentRequired = Omit<CorePaymentRequired, 'x402Version' | 'accepts'> & {
+  x402Version: typeof X402_VERSION;
+  accepts: PaymentRequirements[];
+};
+
+export interface ZkPrepaidPayload {
+  proof: Record<string, unknown>;
+  publicSignals: string[];
+  nonce: string;
+  responseKey: string;
+  [key: string]: unknown;
+}
+
+export type PaymentPayload = Omit<CorePaymentPayload, 'x402Version' | 'accepted' | 'payload' | 'resource'> & {
+  x402Version: typeof X402_VERSION;
+  resource?: ResourceInfo;
+  accepted: PaymentRequirements;
+  payload: ZkPrepaidPayload;
+};
+
+export type SettlementResponse = Omit<CoreSettleResponse, 'payer' | 'transaction' | 'network'> & {
+  transaction: '';
+  network: Network;
+  reservationId?: string;
+  payer?: never;
+};
+
+export type VerificationResponse = CoreVerifyResponse;
+
+export interface SupportedResponse {
+  kinds: Array<SupportedKind>;
+  extensions: string[];
+  signers: Record<string, string[]>;
+}
+
+export interface PaymentRequirementsOptions {
+  /** Kept for source compatibility; only the fixed credit asset is accepted. */
+  asset?: string;
+  payTo: string;
+  contract: string;
+  deploymentDomain: string;
+  circuitId: string;
+  verifyingKeyId: string;
+  requirementsVersion?: string;
+  maxTimeoutSeconds?: number;
+  network?: string;
+  issuedAt?: number;
+}
+
+function assertNonEmpty(value: string, label: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) throw new Error(`${label} is required`);
+  return value;
+}
+
+function assertIssuedAt(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error('issuedAt must be a non-negative integer');
+  return value;
+}
+
+export function buildPaymentRequirements(options: PaymentRequirementsOptions): PaymentRequirements {
+  const network = options.network ?? BASE_SEPOLIA_NETWORK;
+  if (network !== BASE_SEPOLIA_NETWORK) throw new Error(`zk-prepaid is not enabled on ${network}`);
+  if (options.asset !== undefined && options.asset !== CODING_DEEPSEEK_V4_FLASH_V1) throw new Error('zk-prepaid asset is fixed');
+  if (!Number.isInteger(options.maxTimeoutSeconds ?? 300) || (options.maxTimeoutSeconds ?? 300) <= 0) throw new Error('Invalid max timeout');
+  return {
+    scheme: ZK_PREPAID_SCHEME,
+    network: BASE_SEPOLIA_NETWORK,
+    amount: PRIVATE_CREDIT_AMOUNT,
+    asset: CODING_DEEPSEEK_V4_FLASH_V1,
+    payTo: assertNonEmpty(options.payTo, 'payTo'),
+    maxTimeoutSeconds: options.maxTimeoutSeconds ?? 300,
+    extra: {
+      assetTransferMethod: 'prepaid-claim',
+      paymentFlow: 'escrow',
+      circuit: assertNonEmpty(options.circuitId, 'circuit id'),
+      verifyingKey: assertNonEmpty(options.verifyingKeyId, 'verifying key'),
+      deploymentDomain: assertNonEmpty(options.deploymentDomain, 'deployment domain'),
+      contract: assertNonEmpty(options.contract, 'contract'),
+      requirementsVersion: options.requirementsVersion ?? 'zk-prepaid-v1',
+      issuedAt: assertIssuedAt(options.issuedAt ?? Math.floor(Date.now() / 1000)),
+    },
+  };
+}
+
+export function buildPaymentRequired(url: string, requirements: PaymentRequirements, error?: string): PaymentRequired {
+  return {
+    x402Version: X402_VERSION,
+    ...(error ? { error } : {}),
+    resource: { url, description: 'One private prepaid API credit', mimeType: 'application/json' },
+    accepts: [structuredClone(requirements)],
+  };
+}
+
+export interface PaymentPayloadOptions {
+  requirements: PaymentRequirements;
+  proof: Record<string, unknown>;
+  publicSignals: string[];
+  nonce: string;
+  responseKey: string;
+  resource?: ResourceInfo;
+  extensions?: Record<string, unknown>;
+}
+
+export function buildPaymentPayload(options: PaymentPayloadOptions): PaymentPayload {
+  return {
+    x402Version: X402_VERSION,
+    ...(options.resource ? { resource: structuredClone(options.resource) } : {}),
+    accepted: structuredClone(options.requirements),
+    payload: {
+      proof: structuredClone(options.proof),
+      publicSignals: [...options.publicSignals],
+      nonce: options.nonce,
+      responseKey: options.responseKey,
+    },
+    ...(options.extensions ? { extensions: structuredClone(options.extensions) } : {}),
+  };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) throw new Error('Invalid Base64 header');
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+export function encodeHeader(value: unknown): string {
+  return bytesToBase64(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+export function decodeHeader<T>(value: string): T {
+  try {
+    return JSON.parse(new TextDecoder().decode(base64ToBytes(value))) as T;
+  } catch {
+    throw new Error('Invalid x402 Base64 JSON header');
+  }
+}
+
+function canonical(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (typeof value === 'object' && value !== null) return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`;
+  throw new Error('Unsupported x402 value');
+}
+
+export function canonicalRequirementsDigest(requirements: PaymentRequirements): string { return canonical(requirements); }
+export function requirementsEqual(left: PaymentRequirements, right: PaymentRequirements): boolean { return canonicalRequirementsDigest(left) === canonicalRequirementsDigest(right); }
+
+function hasForbiddenKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasForbiddenKey);
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, item]) => FORBIDDEN_KEYS.has(key.toLowerCase()) || hasForbiddenKey(item));
+}
+
+function validField(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d+$/u.test(value)) return false;
+  try { const field = BigInt(value); return field >= 0n && field < FIELD_ORDER; }
+  catch { return false; }
+}
+
+function validRequirements(requirements: PaymentRequirements): boolean {
+  return requirements.scheme === ZK_PREPAID_SCHEME && requirements.network === BASE_SEPOLIA_NETWORK && requirements.amount === PRIVATE_CREDIT_AMOUNT && requirements.asset === CODING_DEEPSEEK_V4_FLASH_V1 && typeof requirements.extra?.contract === 'string' && Number.isSafeInteger(requirements.extra?.issuedAt) && requirements.extra.issuedAt >= 0;
+}
+
+export async function validateZkPrepaidPayload(payment: unknown, requirements: PaymentRequirements, expectedSignal?: string): Promise<VerificationResponse> {
+  if (!validRequirements(requirements)) return { isValid: false, invalidReason: 'requirements_mismatch' };
+  if (!payment || typeof payment !== 'object') return { isValid: false, invalidReason: 'invalid_payload' };
+  const candidate = payment as Partial<PaymentPayload>;
+  if (candidate.x402Version !== X402_VERSION || !candidate.accepted) return { isValid: false, invalidReason: 'requirements_mismatch' };
+  try { if (!requirementsEqual(candidate.accepted, requirements)) return { isValid: false, invalidReason: 'requirements_mismatch' }; }
+  catch { return { isValid: false, invalidReason: 'requirements_mismatch' }; }
+  if (!candidate.payload || typeof candidate.payload !== 'object') return { isValid: false, invalidReason: 'invalid_payload' };
+  if (hasForbiddenKey(candidate)) return { isValid: false, invalidReason: 'identifying_field' };
+  if (Object.keys(candidate).some((key) => !PAYMENT_KEYS.has(key))) return { isValid: false, invalidReason: 'invalid_payload_fields' };
+  const payload = candidate.payload as Partial<ZkPrepaidPayload>;
+  if (Object.keys(payload).sort().join(',') !== 'nonce,proof,publicSignals,responseKey') return { isValid: false, invalidReason: 'invalid_payload_fields' };
+  if (!payload.proof || typeof payload.proof !== 'object' || Array.isArray(payload.proof) || !Array.isArray(payload.publicSignals) || payload.publicSignals.length !== 6 || !payload.publicSignals.every(validField)) return { isValid: false, invalidReason: 'invalid_public_signals' };
+  if (typeof payload.nonce !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(payload.nonce)) return { isValid: false, invalidReason: 'invalid_nonce' };
+  if (typeof payload.responseKey !== 'string' || payload.responseKey.length < 8 || payload.responseKey.length > 4096) return { isValid: false, invalidReason: 'invalid_response_key' };
+  if (payload.publicSignals[PUBLIC_SIGNAL_INDEX.timestamp] !== String(requirements.extra.issuedAt)) return { isValid: false, invalidReason: 'issued_at_mismatch' };
+  if (expectedSignal !== undefined && (!validField(expectedSignal) || payload.publicSignals[PUBLIC_SIGNAL_INDEX.signal] !== expectedSignal)) return { isValid: false, invalidReason: 'request_signal_mismatch' };
+  return { isValid: true };
+}
+
+export interface ZkPrepaidClientContext { url: string; method: string; body: unknown; requirements: PaymentRequirements; }
+export interface ZkPrepaidClientOptions { fetch?: typeof fetch; createPayload: (context: ZkPrepaidClientContext) => Promise<PaymentPayload>; now?: () => number; }
+export interface ZkPrepaidClient { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>; clearRequirements(url?: string): void; }
+
+function requestUrl(input: RequestInfo | URL): string { return typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url; }
+function cloneInit(init?: RequestInit): RequestInit | undefined {
+  if (!init) return undefined;
+  if (init.body && typeof init.body !== 'string' && !(init.body instanceof Uint8Array) && !(init.body instanceof ArrayBuffer)) throw new Error('zk-prepaid client requires a replayable request body');
+  return { ...init, headers: new Headers(init.headers) };
+}
+function setPaymentHeader(init: RequestInit | undefined, value: PaymentPayload): RequestInit { const next = cloneInit(init) ?? {}; const headers = new Headers(next.headers); headers.set(PAYMENT_SIGNATURE_HEADER, encodeHeader(value)); return { ...next, headers }; }
+function issuedAtFresh(requirements: PaymentRequirements, nowMs: number): boolean { const now = Math.floor(nowMs / 1000); return requirements.extra.issuedAt >= now - 300 && requirements.extra.issuedAt <= now + 5; }
+function ensureClientPayload(payment: PaymentPayload, requirements: PaymentRequirements): PaymentPayload {
+  if (!requirementsEqual(payment.accepted, requirements) || payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.timestamp] !== String(requirements.extra.issuedAt)) throw new Error('zk_prepaid_payload_mismatch');
+  return payment;
+}
+
+export function createZkPrepaidClient(options: ZkPrepaidClientOptions): ZkPrepaidClient {
+  const fetcher = options.fetch ?? fetch;
+  const now = options.now ?? Date.now;
+  const cache = new Map<string, PaymentRequired>();
+  const prefix = (method: string, url: string) => `${method.toUpperCase()}\u0000${url}\u0000`;
+  const cacheKey = (method: string, url: string, requirements: PaymentRequirements) => `${prefix(method, url)}${canonicalRequirementsDigest(requirements)}`;
+  const findCached = (method: string, url: string): PaymentRequirements | undefined => {
+    const keyPrefix = prefix(method, url);
+    for (const [key, required] of cache) {
+      if (!key.startsWith(keyPrefix)) continue;
+      const selected = required.accepts.find((item) => item.scheme === ZK_PREPAID_SCHEME);
+      if (!selected || !issuedAtFresh(selected, now())) cache.delete(key);
+      else return selected;
+    }
+    return undefined;
+  };
+  return {
+    async fetch(input, init) {
+      const url = requestUrl(input);
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const body = init?.body ?? null;
+      const cached = findCached(method, url);
+      let response = cached ? await fetcher(input, setPaymentHeader(init, ensureClientPayload(await options.createPayload({ url, method, body, requirements: cached }), cached))) : await fetcher(input, cloneInit(init));
+      if (response.status !== 402) return response;
+      const encoded = response.headers.get(PAYMENT_REQUIRED_HEADER);
+      if (!encoded) return response;
+      const required = decodeHeader<PaymentRequired>(encoded);
+      const accepted = required.accepts?.find((item) => item.scheme === ZK_PREPAID_SCHEME);
+      if (required.x402Version !== X402_VERSION || !accepted || !issuedAtFresh(accepted, now())) return response;
+      const keyPrefix = prefix(method, url);
+      for (const key of cache.keys()) if (key.startsWith(keyPrefix)) cache.delete(key);
+      cache.set(cacheKey(method, url, accepted), { ...required, accepts: [structuredClone(accepted)] });
+      const payment = ensureClientPayload(await options.createPayload({ url, method, body, requirements: accepted }), accepted);
+      return fetcher(input, setPaymentHeader(init, payment));
+    },
+    clearRequirements(url) { if (!url) cache.clear(); else for (const key of cache.keys()) if (key.split('\u0000')[1] === url) cache.delete(key); },
+  };
+}
+
+export interface ResourceServerRequest { url: string; paymentHeader?: string | null; }
+export interface ResourceServerResult { authorized: boolean; status: 200 | 402; paymentRequired?: PaymentRequired; paymentResponse?: SettlementResponse; payment?: PaymentPayload; invalidReason?: string; }
+export interface ZkPrepaidResourceServerOptions { requirements: PaymentRequirements; verify: (payment: PaymentPayload, requirements: PaymentRequirements) => Promise<VerificationResponse>; settle: (payment: PaymentPayload, requirements: PaymentRequirements) => Promise<SettlementResponse>; }
+
+/** Framework-neutral manual adapter retained for the existing gateway routes. */
+export function createZkPrepaidResourceServer(options: ZkPrepaidResourceServerOptions) {
+  return {
+    async handle(request: ResourceServerRequest): Promise<ResourceServerResult> {
+      if (!request.paymentHeader) return { authorized: false, status: 402, paymentRequired: buildPaymentRequired(request.url, options.requirements) };
+      let payment: PaymentPayload;
+      try { payment = decodeHeader<PaymentPayload>(request.paymentHeader); }
+      catch { return { authorized: false, status: 402, paymentRequired: buildPaymentRequired(request.url, options.requirements, 'invalid_payment_payload'), invalidReason: 'invalid_payment_payload' }; }
+      const verified = await options.verify(payment, options.requirements);
+      if (!verified.isValid) return { authorized: false, status: 402, paymentRequired: buildPaymentRequired(request.url, options.requirements, verified.invalidReason), invalidReason: verified.invalidReason };
+      const settled = await options.settle(payment, options.requirements);
+      if (!settled.success) return { authorized: false, status: 402, paymentRequired: buildPaymentRequired(request.url, options.requirements, settled.errorReason), invalidReason: settled.errorReason };
+      return { authorized: true, status: 200, paymentResponse: settled, payment };
+    },
+  };
+}
+
+export type ClaimState = 'reserved' | 'committed' | 'cancelled';
+export interface ClaimRecord { nullifier: string; signalHash: string; state: ClaimState; reservationId: string; createdAt: number; updatedAt: number; encryptedReplay?: string; }
+export interface ClaimStore { reserve(nullifier: string, signalHash: string, now?: number): Promise<{ kind: 'new' | 'existing'; record: ClaimRecord }>; commit(reservationId: string, encryptedReplay?: string, now?: number): Promise<ClaimRecord>; cancel(reservationId: string, now?: number): Promise<ClaimRecord>; get(nullifier: string): Promise<ClaimRecord | undefined>; expireReservations(before: number): Promise<number>; }
+
+export class InMemoryClaimStore implements ClaimStore {
+  private readonly records = new Map<string, ClaimRecord>();
+  async reserve(nullifier: string, signalHash: string, now = Date.now()): Promise<{ kind: 'new' | 'existing'; record: ClaimRecord }> {
+    const current = this.records.get(nullifier);
+    if (current) {
+      if (current.signalHash !== signalHash) throw new Error('conflicting_signal');
+      if (current.state === 'cancelled') { const record: ClaimRecord = { nullifier, signalHash, state: 'reserved', reservationId: crypto.randomUUID(), createdAt: current.createdAt, updatedAt: now }; this.records.set(nullifier, record); return { kind: 'new', record: { ...record } }; }
+      return { kind: 'existing', record: { ...current } };
+    }
+    const record: ClaimRecord = { nullifier, signalHash, state: 'reserved', reservationId: crypto.randomUUID(), createdAt: now, updatedAt: now }; this.records.set(nullifier, record); return { kind: 'new', record: { ...record } };
+  }
+  async commit(reservationId: string, encryptedReplay?: string, now = Date.now()): Promise<ClaimRecord> {
+    const record = [...this.records.values()].find((candidate) => candidate.reservationId === reservationId); if (!record) throw new Error('reservation_not_found'); if (record.state === 'cancelled') throw new Error('reservation_cancelled'); record.state = 'committed'; record.updatedAt = now; if (encryptedReplay !== undefined) record.encryptedReplay = encryptedReplay; return { ...record };
+  }
+  async cancel(reservationId: string, now = Date.now()): Promise<ClaimRecord> {
+    const record = [...this.records.values()].find((candidate) => candidate.reservationId === reservationId); if (!record) throw new Error('reservation_not_found'); if (record.state !== 'committed') { record.state = 'cancelled'; record.updatedAt = now; } return { ...record };
+  }
+  async get(nullifier: string): Promise<ClaimRecord | undefined> { const record = this.records.get(nullifier); return record ? { ...record } : undefined; }
+  async expireReservations(before: number): Promise<number> { let count = 0; for (const record of this.records.values()) if (record.state === 'reserved' && record.updatedAt < before) { record.state = 'cancelled'; record.updatedAt = Date.now(); count += 1; } return count; }
+}
+
+export interface ZkPrepaidFacilitatorOptions { claimStore?: ClaimStore; verifyProof?: (payment: PaymentPayload, requirements: PaymentRequirements) => Promise<VerificationResponse>; hashSignal?: (payment: PaymentPayload) => string; now?: () => number; }
+function phaseOf(payment: PaymentPayload): 'before-handler' | 'after-handler' | 'cancel' | undefined { return (payment.payload as unknown as Record<PropertyKey, unknown>)[SETTLEMENT_PHASE] as 'before-handler' | 'after-handler' | 'cancel' | undefined; }
+
+export function createZkPrepaidFacilitator(options: ZkPrepaidFacilitatorOptions = {}) {
+  const claimStore = options.claimStore ?? new InMemoryClaimStore(); const now = options.now ?? Date.now; const hashSignal = options.hashSignal ?? ((payment) => encodeHeader(payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.signal]));
+  const verify = async (payment: PaymentPayload, requirements: PaymentRequirements, expectedSignal?: string): Promise<VerificationResponse> => { const suppliedSignal = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.signal]; if (typeof suppliedSignal !== 'string') return { isValid: false, invalidReason: 'invalid_public_signals' }; const structural = await validateZkPrepaidPayload(payment, requirements, expectedSignal ?? suppliedSignal); if (!structural.isValid) return structural; return options.verifyProof ? options.verifyProof(payment, requirements) : { isValid: true }; };
+  const failure = (network: Network, errorReason: string): SettlementResponse => ({ success: false, transaction: '', network, errorReason });
+  return {
+    supported(): SupportedResponse { return { kinds: [{ x402Version: X402_VERSION, scheme: ZK_PREPAID_SCHEME, network: BASE_SEPOLIA_NETWORK, extra: { assetTransferMethod: 'prepaid-claim', paymentFlow: 'escrow', requirementsVersion: 'zk-prepaid-v1' } }], extensions: [], signers: {} }; },
+    verify,
+    async settle(payment: PaymentPayload, requirements: PaymentRequirements, _context?: FacilitatorContext): Promise<SettlementResponse> {
+      const phase = phaseOf(payment) ?? 'before-handler'; const nullifier = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.nullifier]; if (typeof nullifier !== 'string') return failure(requirements.network, 'invalid_public_signals');
+      if (phase === 'before-handler') { const checked = await verify(payment, requirements); if (!checked.isValid) return failure(requirements.network, checked.invalidReason ?? 'verification_failed'); try { const reservation = await claimStore.reserve(nullifier, hashSignal(payment), now()); if (reservation.record.state === 'cancelled') return failure(requirements.network, 'reservation_cancelled'); return { success: true, transaction: '', network: requirements.network, reservationId: reservation.record.reservationId }; } catch (error) { return failure(requirements.network, error instanceof Error ? error.message : 'claim_reservation_failed'); } }
+      const record = await claimStore.get(nullifier); if (!record) return failure(requirements.network, 'reservation_not_found'); try { const updated = phase === 'cancel' ? await claimStore.cancel(record.reservationId, now()) : await claimStore.commit(record.reservationId, undefined, now()); return { success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId }; } catch (error) { return failure(requirements.network, error instanceof Error ? error.message : phase === 'cancel' ? 'cancel_failed' : 'commit_failed'); }
+    },
+    async commit(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> { try { const record = await claimStore.commit(reservationId, undefined, now()); return { success: true, transaction: '', network, reservationId: record.reservationId }; } catch (error) { return failure(network, error instanceof Error ? error.message : 'commit_failed'); } },
+    async cancel(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> { try { const record = await claimStore.cancel(reservationId, now()); return { success: true, transaction: '', network, reservationId: record.reservationId }; } catch (error) { return failure(network, error instanceof Error ? error.message : 'cancel_failed'); } },
+    claimStore,
+  };
+}
+
+// Public aliases preserve the package's old names while now referring to the published @x402/core v2 contracts.
+export type OfficialX402PaymentRequirements = CorePaymentRequirements;
+export type OfficialX402SupportedKind = SupportedKind;
+export type OfficialX402PaymentPayload = CorePaymentPayload;
+export type OfficialX402PaymentPayloadContext = PaymentPayloadContext;
+export type OfficialX402SchemeServer = SchemeNetworkServer;
+export type OfficialX402SchemeClient = SchemeNetworkClient;
+export type OfficialX402SchemeFacilitator = SchemeNetworkFacilitator;
+
+function asOfficialRequirements(value: CorePaymentRequirements): PaymentRequirements { if (value.scheme !== ZK_PREPAID_SCHEME || value.network !== BASE_SEPOLIA_NETWORK || value.amount !== PRIVATE_CREDIT_AMOUNT || value.asset !== CODING_DEEPSEEK_V4_FLASH_V1 || !value.extra || typeof value.extra !== 'object') throw new Error('zk_prepaid_requirements_mismatch'); return value as unknown as PaymentRequirements; }
+function asOfficialPayment(value: CorePaymentPayload): PaymentPayload { if (value.x402Version !== X402_VERSION || !value.accepted || !value.payload || typeof value.payload !== 'object') throw new Error('zk_prepaid_payload_mismatch'); return value as unknown as PaymentPayload; }
+
+export function asOfficialX402SchemeServer(configuredRequirements: PaymentRequirements): OfficialX402SchemeServer {
+  const configured = structuredClone(configuredRequirements);
+  return {
+    scheme: ZK_PREPAID_SCHEME,
+    defaultAssetTransferMethod: 'prepaid-claim',
+    paymentFlows: { 'prepaid-claim': { supported: ['escrow'], default: 'escrow' } },
+    parsePrice: async (price: Price, network: Network): Promise<AssetAmount> => { if (network !== BASE_SEPOLIA_NETWORK) throw new Error(`zk-prepaid is not enabled on ${network}`); const requested = typeof price === 'object' && price !== null ? price.amount : price; if (requested !== undefined && String(requested) !== PRIVATE_CREDIT_AMOUNT) throw new Error('zk_prepaid_price_must_be_one_credit'); return { amount: PRIVATE_CREDIT_AMOUNT, asset: CODING_DEEPSEEK_V4_FLASH_V1, extra: structuredClone(configured.extra) }; },
+    enrichSettlementPayload: async (context: SettleContext) => ({ [SETTLEMENT_PHASE]: context.phase } as unknown as Record<string, unknown>),
+    settleOnCancel: async (_context) => structuredClone(configured),
+    enhancePaymentRequirements: async (requirements) => { if (requirements.scheme !== ZK_PREPAID_SCHEME || requirements.network !== configured.network || requirements.asset !== CODING_DEEPSEEK_V4_FLASH_V1 || requirements.payTo !== configured.payTo) throw new Error('zk_prepaid_requirements_mismatch'); return { ...requirements, amount: PRIVATE_CREDIT_AMOUNT, extra: structuredClone(configured.extra) }; },
+    getAssetDecimals: () => 0,
+  };
+}
+
+export function asOfficialX402SchemeClient(proofFactory: (context: { requirements: PaymentRequirements; x402Version: number; extensions?: Record<string, unknown>; maxAmountPerPayment?: string }) => Promise<PaymentPayload>): OfficialX402SchemeClient {
+  return { scheme: ZK_PREPAID_SCHEME, async createPaymentPayload(x402Version, requirements, context) { if (x402Version !== X402_VERSION) throw new Error('zk_prepaid_x402_version_mismatch'); const accepted = asOfficialRequirements(requirements); const payment = await proofFactory({ requirements: accepted, x402Version, extensions: context?.extensions, maxAmountPerPayment: context?.maxAmountPerPayment }); ensureClientPayload(payment, accepted); return { x402Version: payment.x402Version, payload: payment.payload, extensions: payment.extensions }; } };
+}
+
+export function asOfficialX402SchemeFacilitator(facilitator: ReturnType<typeof createZkPrepaidFacilitator>): OfficialX402SchemeFacilitator {
+  return {
+    scheme: ZK_PREPAID_SCHEME,
+    caipFamily: 'eip155:*',
+    getExtra: (network) => network === BASE_SEPOLIA_NETWORK ? { assetTransferMethod: 'prepaid-claim', paymentFlow: 'escrow', requirementsVersion: 'zk-prepaid-v1' } : undefined,
+    getSigners: () => [],
+    async verify(payment, requirements) { try { return await facilitator.verify(asOfficialPayment(payment), asOfficialRequirements(requirements)); } catch { return { isValid: false, invalidReason: 'zk_prepaid_payload_mismatch' }; } },
+    async settle(payment, requirements, context) { try { return await facilitator.settle(asOfficialPayment(payment), asOfficialRequirements(requirements), context); } catch (error) { return { success: false, transaction: '', network: requirements.network, errorReason: error instanceof Error ? error.message : 'zk_prepaid_settlement_failed' }; } },
+  };
+}
+
+export function registerZkPrepaidClient(client: x402Client, proofFactory: Parameters<typeof asOfficialX402SchemeClient>[0]): x402Client { return client.register(BASE_SEPOLIA_NETWORK, asOfficialX402SchemeClient(proofFactory)); }
+export function registerZkPrepaidResourceServer(server: x402ResourceServer, requirements: PaymentRequirements): x402ResourceServer { return server.register(BASE_SEPOLIA_NETWORK, asOfficialX402SchemeServer(requirements)); }
+export function registerZkPrepaidFacilitator(facilitator: x402Facilitator, adapter: ReturnType<typeof createZkPrepaidFacilitator>): x402Facilitator { return facilitator.register(BASE_SEPOLIA_NETWORK, asOfficialX402SchemeFacilitator(adapter)); }
+export function createLocalZkPrepaidFacilitatorClient(adapter: ReturnType<typeof createZkPrepaidFacilitator>): FacilitatorClient { return { verify: async (payment, requirements) => asOfficialX402SchemeFacilitator(adapter).verify(payment, requirements), settle: async (payment, requirements) => asOfficialX402SchemeFacilitator(adapter).settle(payment, requirements), getSupported: async () => adapter.supported() }; }
