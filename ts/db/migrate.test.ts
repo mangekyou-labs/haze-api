@@ -8,6 +8,7 @@ import { SCHEMAS } from './config.js';
 const MIGRATIONS_DIR = resolve(import.meta.dirname, 'migrations');
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgres://localhost:5432/zk_credits_test';
 const ADMIN_DATABASE_URL = process.env.TEST_ADMIN_DATABASE_URL || 'postgres://localhost:5432/postgres';
+const DB_TEST_LOCK = 8_402_062_006;
 
 // Integration tests against a real Postgres are opt-in so the default `npm test`
 // stays green without a DB (mirrors the circuit-artifact gating pattern).
@@ -97,10 +98,30 @@ describe('migrations (offline, static)', () => {
     expect(sql).toMatch(/wallet_fingerprint IS NULL OR wallet_fingerprint ~ '\^\[a-f0-9\]\{64\}\$'/i);
     expect(sql).toMatch(/amount_cents\s+integer\s+NOT NULL\s+CHECK\s*\(amount_cents\s*=\s*100\)/i);
   });
+
+  it('claim lifecycle migration adds durable fencing, replay expiry, and bounded dispatch', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0014_base_claim_lifecycle.sql'), 'utf8');
+    for (const column of [
+      'generation BIGINT',
+      'fencing_token TEXT',
+      'lease_expires_at TIMESTAMPTZ',
+      'dispatch_count INTEGER',
+      'replay_expires_at TIMESTAMPTZ',
+      'dispatch_idempotency_key TEXT',
+      'commit_idempotency_key TEXT',
+    ]) {
+      expect(sql).toMatch(new RegExp(`ADD COLUMN IF NOT EXISTS ${column}`, 'i'));
+    }
+    expect(sql).toMatch(/state IN \('reserved', 'ready', 'committed', 'cancelled'\)/i);
+    expect(sql).toMatch(/dispatch_count BETWEEN 0 AND 2/i);
+    expect(sql).toMatch(/claims_nullifier_signal_idx/i);
+    expect(sql).toMatch(/encrypted_replay[\s\S]*plaintext is never stored/i);
+  });
 });
 
 describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', () => {
   let pool: Pool;
+  let lockClient: Awaited<ReturnType<Pool['connect']>>;
 
   beforeAll(async () => {
     const dbName = dbNameFrom(TEST_DATABASE_URL);
@@ -113,6 +134,8 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
     await admin.end();
 
     pool = new Pool({ connectionString: TEST_DATABASE_URL });
+    lockClient = await pool.connect();
+    await lockClient.query('SELECT pg_advisory_lock($1)', [DB_TEST_LOCK]);
     // Reset the test DB to a clean slate so the "first run applies > 0"
     // assertion is deterministic across repeated invocations (the migration
     // runner itself is idempotent and would otherwise apply 0 on the 2nd run).
@@ -120,10 +143,13 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
     await pool.query('DROP SCHEMA IF EXISTS billing CASCADE');
     await pool.query('DROP SCHEMA IF EXISTS "fee-sponsor" CASCADE');
     await pool.query('DROP SCHEMA IF EXISTS evaluation CASCADE');
+    await pool.query('DROP SCHEMA IF EXISTS spend_plane CASCADE');
     await pool.query('DROP TABLE IF EXISTS public.schema_migrations');
   });
 
   afterAll(async () => {
+    await lockClient.query('SELECT pg_advisory_unlock($1)', [DB_TEST_LOCK]);
+    lockClient.release();
     await pool.end();
   });
 
@@ -136,9 +162,9 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
 
     const res = await pool.query(
       `SELECT schema_name FROM information_schema.schemata
-       WHERE schema_name IN ('gateway', 'billing', 'fee-sponsor', 'evaluation')`,
+       WHERE schema_name IN ('gateway', 'billing', 'fee-sponsor', 'evaluation', 'spend_plane')`,
     );
     const names = res.rows.map((r) => r.schema_name).sort();
-    expect(names).toEqual(['billing', 'evaluation', 'fee-sponsor', 'gateway']);
+    expect(names).toEqual(['billing', 'evaluation', 'fee-sponsor', 'gateway', 'spend_plane']);
   });
 });

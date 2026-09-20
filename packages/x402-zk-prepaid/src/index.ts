@@ -331,36 +331,282 @@ export function createZkPrepaidResourceServer(options: ZkPrepaidResourceServerOp
   };
 }
 
-export type ClaimState = 'reserved' | 'committed' | 'cancelled';
-export interface ClaimRecord { nullifier: string; signalHash: string; state: ClaimState; reservationId: string; createdAt: number; updatedAt: number; encryptedReplay?: string; }
-export interface ClaimStore { reserve(nullifier: string, signalHash: string, now?: number): Promise<{ kind: 'new' | 'existing'; record: ClaimRecord }>; commit(reservationId: string, encryptedReplay?: string, now?: number): Promise<ClaimRecord>; cancel(reservationId: string, now?: number): Promise<ClaimRecord>; get(nullifier: string): Promise<ClaimRecord | undefined>; expireReservations(before: number): Promise<number>; }
+export type ClaimState = 'reserved' | 'ready' | 'committed' | 'cancelled';
+
+export interface ClaimFence {
+  reservationId: string;
+  generation: number;
+  fencingToken: string;
+}
+
+export interface ClaimRecord extends ClaimFence {
+  nullifier: string;
+  signalHash: string;
+  state: ClaimState;
+  createdAt: number;
+  updatedAt: number;
+  leaseExpiresAt: number;
+  dispatchCount: number;
+  encryptedReplay?: string;
+  replayExpiresAt?: number;
+  dispatchIdempotencyKey?: string;
+  commitIdempotencyKey?: string;
+}
+
+export interface ClaimReservation {
+  kind: 'new' | 'existing';
+  record: ClaimRecord;
+}
+
+/**
+ * Public spend-plane lifecycle. Every mutating operation carries the fence
+ * returned by reserve; a stale worker can therefore never mutate a takeover.
+ */
+export interface ClaimStore {
+  reserve(nullifier: string, signalHash: string, now?: number): Promise<ClaimReservation>;
+  beginDispatch(fence: ClaimFence, idempotencyKey: string, now?: number): Promise<ClaimRecord>;
+  stageReady(fence: ClaimFence, encryptedReplay: string, now?: number): Promise<ClaimRecord>;
+  commit(fence: ClaimFence, idempotencyKey: string, now?: number): Promise<ClaimRecord>;
+  cancel(fence: ClaimFence, now?: number): Promise<ClaimRecord>;
+  resetDispatchBudget(fence: ClaimFence, operatorToken: string, now?: number): Promise<ClaimRecord>;
+  lookup(nullifier: string, signalHash?: string, now?: number): Promise<ClaimRecord | undefined>;
+  lookupByReservation(reservationId: string, now?: number): Promise<ClaimRecord | undefined>;
+  /** Read-only compatibility alias; mutating callers must use a fence. */
+  get(nullifier: string, now?: number): Promise<ClaimRecord | undefined>;
+  expireReservations(before: number): Promise<number>;
+}
+
+const CLAIM_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
+const CLAIM_LEASE_MS = 5 * 60 * 1000;
+const MAX_DISPATCH_COUNT = 2;
+
+function cloneClaim(record: ClaimRecord): ClaimRecord {
+  return { ...record };
+}
+
+function newFence(previous: ClaimRecord | undefined): ClaimFence {
+  return {
+    reservationId: crypto.randomUUID(),
+    generation: (previous?.generation ?? 0) + 1,
+    fencingToken: crypto.randomUUID(),
+  };
+}
+
+function fenceMatches(record: ClaimRecord, fence: ClaimFence): boolean {
+  return record.reservationId === fence.reservationId
+    && record.generation === fence.generation
+    && record.fencingToken === fence.fencingToken;
+}
+
+function findByFence(records: Map<string, ClaimRecord>, fence: ClaimFence): ClaimRecord {
+  const record = [...records.values()].find((candidate) => fenceMatches(candidate, fence));
+  if (!record) throw new Error('stale_fence');
+  return record;
+}
+
+function enforceReplayExpiry(record: ClaimRecord, now: number): void {
+  if (record.replayExpiresAt !== undefined && record.replayExpiresAt <= now) {
+    delete record.encryptedReplay;
+    delete record.replayExpiresAt;
+  }
+}
+
+export interface InMemoryClaimStoreOptions {
+  operatorToken?: string;
+}
 
 export class InMemoryClaimStore implements ClaimStore {
   private readonly records = new Map<string, ClaimRecord>();
-  async reserve(nullifier: string, signalHash: string, now = Date.now()): Promise<{ kind: 'new' | 'existing'; record: ClaimRecord }> {
+  private readonly operatorToken: string;
+
+  constructor(options: InMemoryClaimStoreOptions = {}) {
+    this.operatorToken = options.operatorToken ?? 'operator-only';
+  }
+
+  async reserve(nullifier: string, signalHash: string, now = Date.now()): Promise<ClaimReservation> {
     const current = this.records.get(nullifier);
     if (current) {
+      enforceReplayExpiry(current, now);
       if (current.signalHash !== signalHash) throw new Error('conflicting_signal');
-      if (current.state === 'cancelled') { const record: ClaimRecord = { nullifier, signalHash, state: 'reserved', reservationId: crypto.randomUUID(), createdAt: current.createdAt, updatedAt: now }; this.records.set(nullifier, record); return { kind: 'new', record: { ...record } }; }
-      return { kind: 'existing', record: { ...current } };
+      const takeover = (current.state === 'cancelled' && current.dispatchCount < MAX_DISPATCH_COUNT)
+        || (current.state === 'reserved' && current.leaseExpiresAt <= now && current.dispatchCount < MAX_DISPATCH_COUNT);
+      if (takeover) {
+        const fence = newFence(current);
+        const record: ClaimRecord = {
+          ...current,
+          ...fence,
+          state: 'reserved',
+          updatedAt: now,
+          leaseExpiresAt: now + CLAIM_LEASE_MS,
+          encryptedReplay: undefined,
+          replayExpiresAt: undefined,
+          dispatchIdempotencyKey: undefined,
+          commitIdempotencyKey: undefined,
+        };
+        this.records.set(nullifier, record);
+        return { kind: 'new', record: cloneClaim(record) };
+      }
+      return { kind: 'existing', record: cloneClaim(current) };
     }
-    const record: ClaimRecord = { nullifier, signalHash, state: 'reserved', reservationId: crypto.randomUUID(), createdAt: now, updatedAt: now }; this.records.set(nullifier, record); return { kind: 'new', record: { ...record } };
+    const fence = newFence(undefined);
+    const record: ClaimRecord = {
+      ...fence,
+      nullifier,
+      signalHash,
+      state: 'reserved',
+      createdAt: now,
+      updatedAt: now,
+      leaseExpiresAt: now + CLAIM_LEASE_MS,
+      dispatchCount: 0,
+    };
+    this.records.set(nullifier, record);
+    return { kind: 'new', record: cloneClaim(record) };
   }
-  async commit(reservationId: string, encryptedReplay?: string, now = Date.now()): Promise<ClaimRecord> {
-    const record = [...this.records.values()].find((candidate) => candidate.reservationId === reservationId); if (!record) throw new Error('reservation_not_found'); if (record.state === 'cancelled') throw new Error('reservation_cancelled'); record.state = 'committed'; record.updatedAt = now; if (encryptedReplay !== undefined) record.encryptedReplay = encryptedReplay; return { ...record };
+
+  async beginDispatch(fence: ClaimFence, idempotencyKey: string, now = Date.now()): Promise<ClaimRecord> {
+    const record = findByFence(this.records, fence);
+    if (record.state !== 'reserved') {
+      if (record.dispatchIdempotencyKey === idempotencyKey && (record.state === 'ready' || record.state === 'committed')) return cloneClaim(record);
+      throw new Error(record.state === 'cancelled' ? 'claim_cancelled' : 'claim_not_dispatchable');
+    }
+    if (record.leaseExpiresAt <= now) throw new Error('reservation_lease_expired');
+    if (record.dispatchIdempotencyKey === idempotencyKey) return cloneClaim(record);
+    if (record.dispatchIdempotencyKey) throw new Error('dispatch_in_progress');
+    if (record.dispatchCount >= MAX_DISPATCH_COUNT) throw new Error('dispatch_budget_exhausted');
+    record.dispatchCount += 1;
+    record.dispatchIdempotencyKey = idempotencyKey;
+    record.updatedAt = now;
+    record.leaseExpiresAt = now + CLAIM_LEASE_MS;
+    return cloneClaim(record);
   }
-  async cancel(reservationId: string, now = Date.now()): Promise<ClaimRecord> {
-    const record = [...this.records.values()].find((candidate) => candidate.reservationId === reservationId); if (!record) throw new Error('reservation_not_found'); if (record.state !== 'committed') { record.state = 'cancelled'; record.updatedAt = now; } return { ...record };
+
+  async stageReady(fence: ClaimFence, encryptedReplay: string, now = Date.now()): Promise<ClaimRecord> {
+    const record = findByFence(this.records, fence);
+    if (record.state === 'ready' || record.state === 'committed') {
+      if (record.encryptedReplay !== encryptedReplay) throw new Error('idempotency_conflict');
+      return cloneClaim(record);
+    }
+    if (record.state !== 'reserved') throw new Error('claim_not_stageable');
+    if (record.leaseExpiresAt <= now) throw new Error('reservation_lease_expired');
+    if (!record.dispatchIdempotencyKey) throw new Error('dispatch_not_started');
+    record.state = 'ready';
+    record.encryptedReplay = encryptedReplay;
+    record.replayExpiresAt = now + CLAIM_REPLAY_TTL_MS;
+    record.updatedAt = now;
+    return cloneClaim(record);
   }
-  async get(nullifier: string): Promise<ClaimRecord | undefined> { const record = this.records.get(nullifier); return record ? { ...record } : undefined; }
-  async expireReservations(before: number): Promise<number> { let count = 0; for (const record of this.records.values()) if (record.state === 'reserved' && record.updatedAt < before) { record.state = 'cancelled'; record.updatedAt = Date.now(); count += 1; } return count; }
+
+  async commit(fence: ClaimFence, idempotencyKey: string, now = Date.now()): Promise<ClaimRecord> {
+    const record = findByFence(this.records, fence);
+    if (record.state === 'committed') {
+      if (record.commitIdempotencyKey && record.commitIdempotencyKey !== idempotencyKey) throw new Error('idempotency_conflict');
+      return cloneClaim(record);
+    }
+    if (record.state !== 'ready') throw new Error(record.state === 'cancelled' ? 'claim_cancelled' : 'commit_requires_ready');
+    record.state = 'committed';
+    record.commitIdempotencyKey = idempotencyKey;
+    record.updatedAt = now;
+    return cloneClaim(record);
+  }
+
+  async cancel(fence: ClaimFence, now = Date.now()): Promise<ClaimRecord> {
+    const record = findByFence(this.records, fence);
+    if (record.state === 'cancelled') return cloneClaim(record);
+    if (record.state !== 'reserved') throw new Error('claim_not_cancellable');
+    if (record.leaseExpiresAt <= now) throw new Error('reservation_lease_expired');
+    record.state = 'cancelled';
+    record.updatedAt = now;
+    return cloneClaim(record);
+  }
+
+  async resetDispatchBudget(fence: ClaimFence, operatorToken: string, now = Date.now()): Promise<ClaimRecord> {
+    if (operatorToken !== this.operatorToken) throw new Error('operator_auth_required');
+    const record = findByFence(this.records, fence);
+    if (record.state === 'ready' || record.state === 'committed') throw new Error('claim_already_ready');
+    const nextFence = newFence(record);
+    const reset: ClaimRecord = {
+      ...record,
+      ...nextFence,
+      state: 'cancelled',
+      dispatchCount: 0,
+      dispatchIdempotencyKey: undefined,
+      commitIdempotencyKey: undefined,
+      encryptedReplay: undefined,
+      replayExpiresAt: undefined,
+      updatedAt: now,
+      leaseExpiresAt: now + CLAIM_LEASE_MS,
+    };
+    this.records.set(record.nullifier, reset);
+    return cloneClaim(reset);
+  }
+
+  async lookup(nullifier: string, signalHash?: string, now = Date.now()): Promise<ClaimRecord | undefined> {
+    const record = this.records.get(nullifier);
+    if (!record) return undefined;
+    enforceReplayExpiry(record, now);
+    if (signalHash !== undefined && record.signalHash !== signalHash) throw new Error('conflicting_signal');
+    return cloneClaim(record);
+  }
+
+  async get(nullifier: string, now = Date.now()): Promise<ClaimRecord | undefined> {
+    return this.lookup(nullifier, undefined, now);
+  }
+
+  async lookupByReservation(reservationId: string, now = Date.now()): Promise<ClaimRecord | undefined> {
+    const record = [...this.records.values()].find((candidate) => candidate.reservationId === reservationId);
+    if (!record) return undefined;
+    enforceReplayExpiry(record, now);
+    return cloneClaim(record);
+  }
+
+  async expireReservations(before: number): Promise<number> {
+    let count = 0;
+    for (const record of this.records.values()) {
+      if (record.state === 'reserved' && record.leaseExpiresAt <= before) {
+        record.state = 'cancelled';
+        record.updatedAt = before;
+        count += 1;
+      }
+    }
+    return count;
+  }
 }
 
 export interface ZkPrepaidFacilitatorOptions { claimStore?: ClaimStore; verifyProof?: (payment: PaymentPayload, requirements: PaymentRequirements) => Promise<VerificationResponse>; hashSignal?: (payment: PaymentPayload) => string; now?: () => number; }
 function phaseOf(payment: PaymentPayload): 'before-handler' | 'after-handler' | 'cancel' | undefined { return (payment.payload as unknown as Record<PropertyKey, unknown>)[SETTLEMENT_PHASE] as 'before-handler' | 'after-handler' | 'cancel' | undefined; }
 
+const SAFE_SETTLEMENT_ERRORS = new Set([
+  'conflicting_signal',
+  'stale_fence',
+  'claim_cancelled',
+  'claim_not_dispatchable',
+  'dispatch_in_progress',
+  'dispatch_budget_exhausted',
+  'reservation_lease_expired',
+  'dispatch_not_started',
+  'claim_not_stageable',
+  'idempotency_conflict',
+  'commit_requires_ready',
+  'claim_not_cancellable',
+  'claim_already_ready',
+  'operator_auth_required',
+  'reservation_not_found',
+  'claim_not_found_after_reservation',
+  'invalid_public_signals',
+  'verification_failed',
+  'zk_prepaid_payload_mismatch',
+  'zk_prepaid_requirements_mismatch',
+]);
+
+function safeSettlementError(error: unknown, fallback = 'claim_store_unavailable'): string {
+  const code = error instanceof Error ? error.message : '';
+  return SAFE_SETTLEMENT_ERRORS.has(code) ? code : fallback;
+}
+
 export function createZkPrepaidFacilitator(options: ZkPrepaidFacilitatorOptions = {}) {
   const claimStore = options.claimStore ?? new InMemoryClaimStore(); const now = options.now ?? Date.now; const hashSignal = options.hashSignal ?? ((payment) => encodeHeader(payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.signal]));
+  const idempotencyKey = (record: ClaimRecord, phase: string): string => `${record.nullifier}:${record.signalHash}:${record.generation}:${phase}`;
+  const fenceOf = (record: ClaimRecord): ClaimFence => ({ reservationId: record.reservationId, generation: record.generation, fencingToken: record.fencingToken });
   const verify = async (payment: PaymentPayload, requirements: PaymentRequirements, expectedSignal?: string): Promise<VerificationResponse> => { const suppliedSignal = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.signal]; if (typeof suppliedSignal !== 'string') return { isValid: false, invalidReason: 'invalid_public_signals' }; const structural = await validateZkPrepaidPayload(payment, requirements, expectedSignal ?? suppliedSignal); if (!structural.isValid) return structural; return options.verifyProof ? options.verifyProof(payment, requirements) : { isValid: true }; };
   const failure = (network: Network, errorReason: string): SettlementResponse => ({ success: false, transaction: '', network, errorReason });
   return {
@@ -368,11 +614,49 @@ export function createZkPrepaidFacilitator(options: ZkPrepaidFacilitatorOptions 
     verify,
     async settle(payment: PaymentPayload, requirements: PaymentRequirements, _context?: FacilitatorContext): Promise<SettlementResponse> {
       const phase = phaseOf(payment) ?? 'before-handler'; const nullifier = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.nullifier]; if (typeof nullifier !== 'string') return failure(requirements.network, 'invalid_public_signals');
-      if (phase === 'before-handler') { const checked = await verify(payment, requirements); if (!checked.isValid) return failure(requirements.network, checked.invalidReason ?? 'verification_failed'); try { const reservation = await claimStore.reserve(nullifier, hashSignal(payment), now()); if (reservation.record.state === 'cancelled') return failure(requirements.network, 'reservation_cancelled'); return { success: true, transaction: '', network: requirements.network, reservationId: reservation.record.reservationId }; } catch (error) { return failure(requirements.network, error instanceof Error ? error.message : 'claim_reservation_failed'); } }
-      const record = await claimStore.get(nullifier); if (!record) return failure(requirements.network, 'reservation_not_found'); try { const updated = phase === 'cancel' ? await claimStore.cancel(record.reservationId, now()) : await claimStore.commit(record.reservationId, undefined, now()); return { success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId }; } catch (error) { return failure(requirements.network, error instanceof Error ? error.message : phase === 'cancel' ? 'cancel_failed' : 'commit_failed'); }
+      const signal = hashSignal(payment);
+      if (phase === 'before-handler') { const checked = await verify(payment, requirements); if (!checked.isValid) return failure(requirements.network, checked.invalidReason ?? 'verification_failed'); try { const reservation = await claimStore.reserve(nullifier, signal, now()); if (reservation.record.state === 'cancelled') return failure(requirements.network, 'reservation_cancelled'); return { success: true, transaction: '', network: requirements.network, reservationId: reservation.record.reservationId }; } catch (error) { return failure(requirements.network, safeSettlementError(error)); } }
+      let record: ClaimRecord | undefined;
+      try { record = await claimStore.lookup(nullifier, signal, now()); }
+      catch (error) { return failure(requirements.network, safeSettlementError(error)); }
+      if (!record) return failure(requirements.network, 'reservation_not_found');
+      try {
+        if (phase === 'cancel') {
+          const updated = await claimStore.cancel(fenceOf(record), now());
+          return { success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId };
+        }
+        const dispatch = record.state === 'reserved'
+          ? await claimStore.beginDispatch(fenceOf(record), idempotencyKey(record, 'dispatch'), now())
+          : record;
+        const ready = dispatch.state === 'ready' || dispatch.state === 'committed'
+          ? dispatch
+          : await claimStore.stageReady(fenceOf(dispatch), '', now());
+        const updated = await claimStore.commit(fenceOf(ready), idempotencyKey(ready, 'commit'), now());
+        return { success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId };
+      } catch (error) { return failure(requirements.network, safeSettlementError(error)); }
     },
-    async commit(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> { try { const record = await claimStore.commit(reservationId, undefined, now()); return { success: true, transaction: '', network, reservationId: record.reservationId }; } catch (error) { return failure(network, error instanceof Error ? error.message : 'commit_failed'); } },
-    async cancel(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> { try { const record = await claimStore.cancel(reservationId, now()); return { success: true, transaction: '', network, reservationId: record.reservationId }; } catch (error) { return failure(network, error instanceof Error ? error.message : 'cancel_failed'); } },
+    async commit(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> {
+      try {
+        const record = await claimStore.lookupByReservation(reservationId, now());
+        if (!record) return failure(network, 'reservation_not_found');
+        const dispatch = record.state === 'reserved'
+          ? await claimStore.beginDispatch(fenceOf(record), idempotencyKey(record, 'dispatch'), now())
+          : record;
+        const ready = dispatch.state === 'ready' || dispatch.state === 'committed'
+          ? dispatch
+          : await claimStore.stageReady(fenceOf(dispatch), '', now());
+        const updated = await claimStore.commit(fenceOf(ready), idempotencyKey(ready, 'commit'), now());
+        return { success: true, transaction: '', network, reservationId: updated.reservationId };
+      } catch (error) { return failure(network, safeSettlementError(error)); }
+    },
+    async cancel(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> {
+      try {
+        const record = await claimStore.lookupByReservation(reservationId, now());
+        if (!record) return failure(network, 'reservation_not_found');
+        const updated = await claimStore.cancel(fenceOf(record), now());
+        return { success: true, transaction: '', network, reservationId: updated.reservationId };
+      } catch (error) { return failure(network, safeSettlementError(error)); }
+    },
     claimStore,
   };
 }
@@ -414,7 +698,7 @@ export function asOfficialX402SchemeFacilitator(facilitator: ReturnType<typeof c
     getExtra: (network) => network === BASE_SEPOLIA_NETWORK ? { assetTransferMethod: 'prepaid-claim', paymentFlow: 'escrow', requirementsVersion: 'zk-prepaid-v1' } : undefined,
     getSigners: () => [],
     async verify(payment, requirements) { try { return await facilitator.verify(asOfficialPayment(payment), asOfficialRequirements(requirements)); } catch { return { isValid: false, invalidReason: 'zk_prepaid_payload_mismatch' }; } },
-    async settle(payment, requirements, context) { try { return await facilitator.settle(asOfficialPayment(payment), asOfficialRequirements(requirements), context); } catch (error) { return { success: false, transaction: '', network: requirements.network, errorReason: error instanceof Error ? error.message : 'zk_prepaid_settlement_failed' }; } },
+    async settle(payment, requirements, context) { try { return await facilitator.settle(asOfficialPayment(payment), asOfficialRequirements(requirements), context); } catch (error) { return { success: false, transaction: '', network: requirements.network, errorReason: safeSettlementError(error, 'zk_prepaid_settlement_failed') }; } },
   };
 }
 
