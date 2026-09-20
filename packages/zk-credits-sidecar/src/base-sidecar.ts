@@ -11,11 +11,14 @@
 import { createDecipheriv, generateKeyPair as generateKeyPairCallback, privateDecrypt, randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 import {
+  BASE_MEMBERSHIP_TREE_CAPACITY,
   canonicalizeBaseJson,
+  computeCreditLeaf,
   computeNullifier,
   computeShare,
   computeSlotBlinding,
   deriveRequestSignal,
+  deriveSparseCreditWitness,
   secretFromBase64Url,
   secretToField,
   type CreditCredential,
@@ -30,6 +33,7 @@ import {
   PAYMENT_SIGNATURE_HEADER,
   type ZkPrepaidClient,
 } from '@zk-credits/x402-zk-prepaid';
+import type { BaseSlotLedger } from './slot-ledger.js';
 
 const generateKeyPair = promisify(generateKeyPairCallback);
 const TREE_DEPTH = 20;
@@ -67,22 +71,35 @@ export interface BaseProofResult {
   publicSignals: string[];
 }
 
-export type BaseProofGenerator = (input: BaseProofInput, context: {
+export interface BaseProofContext {
   requirements: PaymentRequirements;
   credential: CreditCredential;
-}) => Promise<BaseProofResult>;
+  /**
+   * The six canonical public signals this payment must carry, in order:
+   * root, timestamp, domain, requestSignal, nullifier, share.
+   */
+  expectedPublicSignals: readonly string[];
+}
+
+export type BaseProofGenerator = (input: BaseProofInput, context: BaseProofContext) => Promise<BaseProofResult>;
 
 export interface BasePrepaidClientOptions {
   credential: CreditCredential;
   witnessProvider: BaseWitnessProvider;
   prove: BaseProofGenerator;
   fetch?: typeof fetch;
-  nextSlot?: (tierId: number) => Promise<number>;
+  /**
+   * Durable local slot ledger. A slot is provisional until the proof passes
+   * local self-verification and is committed immediately before the payment
+   * can leave the process.
+   */
+  slotLedger?: BaseSlotLedger;
 }
 
 export interface BasePrepaidClient {
   client: ZkPrepaidClient;
-  nextSlot(): Promise<number>;
+  /** Slots committed locally; a committed slot is never reused. */
+  committedSlots(): number[];
 }
 
 function field(value: string, label: string): string {
@@ -181,8 +198,6 @@ function decryptReplay(envelopeValue: string, privateKey: string, paymentRespons
 
 /** Builds the reusable client adapter used by the loopback proxy. */
 export function createBasePrepaidClient(options: BasePrepaidClientOptions): BasePrepaidClient {
-  let slot = 0;
-  const nextSlot = options.nextSlot ?? (async () => slot++);
   const secret = secretFromBase64Url(options.credential.secret);
   const fetcher = options.fetch ?? fetch;
   const replayKeys = new Map<string, { privateKey: string; expiresAt: number }>();
@@ -328,50 +343,72 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
       if (inFlight) return inFlight;
 
       const paymentPromise = (async (): Promise<PaymentPayload> => {
-        const nonce = randomNonce();
-        const responseKeys = await responseKey();
-        const requestSignal = await deriveRequestSignal({
-          method,
-          url,
-          body: requestBodyBytes(body),
-          requirements,
-          nonce,
-          responseKey: responseKeys.publicKey,
-        });
-        const selectedSlot = await nextSlot(options.credential.tierId);
-        if (!Number.isSafeInteger(selectedSlot) || selectedSlot < 0) throw new Error('Invalid local credit slot');
-        const witness = assertWitness(await options.witnessProvider.witnessForCredential(options.credential));
-        const expiry = witness.expiry ?? options.credential.expiry;
-        if (!Number.isSafeInteger(expiry) || expiry <= 0) throw new Error('Invalid Base credential expiry');
-        const slotBlinding = await computeSlotBlinding(secret, selectedSlot, options.credential.deploymentDomain);
-        const nullifier = await computeNullifier(slotBlinding);
-        const share = await computeShare(secret, requestSignal.field, slotBlinding);
-        const timestamp = String(requirements.extra.issuedAt);
-        const proof = await options.prove({
-          secret: secretToField(secret),
-          tier_id: String(options.credential.tierId),
-          expiry: String(expiry),
-          slot: String(selectedSlot),
-          merkle_path_elements: witness.pathElements,
-          merkle_path_indices: witness.pathIndices.map(String),
-          root_in: witness.root,
-          timestamp_in: timestamp,
-          domain_in: options.credential.deploymentDomain,
-          request_signal_in: requestSignal.field,
-        }, { requirements, credential: options.credential });
-        const payment = buildPaymentPayload({
-          requirements,
-          proof: proof.proof,
-          publicSignals: [witness.root, timestamp, options.credential.deploymentDomain, requestSignal.field, nullifier, share],
-          nonce,
-          responseKey: responseKeys.publicKey,
-        });
-        const expiresAt = Date.now() + REPLAY_TTL_MS;
-        replayKeys.set(nonce, { privateKey: responseKeys.privateKey, expiresAt });
-        pendingPayments.set(key, { payment, expiresAt });
-        pendingByNonce.set(nonce, key);
-        prunePending();
-        return payment;
+        const slotLedger = options.slotLedger;
+        if (!slotLedger) throw new Error('A durable slot ledger is required for the Base pilot');
+        const selectedSlot = slotLedger.allocateProvisional();
+        try {
+          const nonce = randomNonce();
+          const responseKeys = await responseKey();
+          const requestSignal = await deriveRequestSignal({
+            method,
+            url,
+            body: requestBodyBytes(body),
+            requirements,
+            nonce,
+            responseKey: responseKeys.publicKey,
+          });
+          const witness = assertWitness(await options.witnessProvider.witnessForCredential(options.credential));
+          const expiry = witness.expiry ?? options.credential.expiry;
+          if (!Number.isSafeInteger(expiry) || expiry <= 0) throw new Error('Invalid Base credential expiry');
+          const slotBlinding = await computeSlotBlinding(secret, selectedSlot, options.credential.deploymentDomain);
+          const nullifier = await computeNullifier(slotBlinding);
+          const share = await computeShare(secret, requestSignal.field, slotBlinding);
+          const timestamp = String(requirements.extra.issuedAt);
+          const expectedPublicSignals = [
+            witness.root,
+            timestamp,
+            options.credential.deploymentDomain,
+            requestSignal.field,
+            nullifier,
+            share,
+          ];
+          const proof = await options.prove({
+            secret: secretToField(secret),
+            tier_id: String(options.credential.tierId),
+            expiry: String(expiry),
+            slot: String(selectedSlot),
+            merkle_path_elements: witness.pathElements,
+            merkle_path_indices: witness.pathIndices.map(String),
+            root_in: witness.root,
+            timestamp_in: timestamp,
+            domain_in: options.credential.deploymentDomain,
+            request_signal_in: requestSignal.field,
+          }, { requirements, credential: options.credential, expectedPublicSignals });
+          if (
+            !Array.isArray(proof.publicSignals)
+            || proof.publicSignals.length !== expectedPublicSignals.length
+            || !proof.publicSignals.every((value, index) => value === expectedPublicSignals[index])
+          ) {
+            throw new Error('Proof public signals do not match the canonical statement');
+          }
+          await slotLedger.commit(selectedSlot);
+          const payment = buildPaymentPayload({
+            requirements,
+            proof: proof.proof,
+            publicSignals: [...proof.publicSignals],
+            nonce,
+            responseKey: responseKeys.publicKey,
+          });
+          const expiresAt = Date.now() + REPLAY_TTL_MS;
+          replayKeys.set(nonce, { privateKey: responseKeys.privateKey, expiresAt });
+          pendingPayments.set(key, { payment, expiresAt });
+          pendingByNonce.set(nonce, key);
+          prunePending();
+          return payment;
+        } catch (error) {
+          slotLedger.release(selectedSlot);
+          throw error;
+        }
       })();
       paymentPromises.set(key, paymentPromise);
       try {
@@ -382,33 +419,83 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
     },
   });
 
-  return { client, nextSlot: () => nextSlot(options.credential.tierId) };
+  return { client, committedSlots: () => options.slotLedger?.committedSlots() ?? [] };
 }
 
-/** Reads a depth-20 witness from a local event-sync artifact. */
-export function createFileWitnessProvider(value: unknown): BaseWitnessProvider {
-  const candidate = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+interface PublicTreeArtifact {
+  leaves: ReadonlyMap<number, string>;
+  expiries: ReadonlyMap<number, number>;
+  root?: string;
+}
+
+function parsePublicTreeArtifact(value: unknown): PublicTreeArtifact | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as { leaves?: unknown; root?: unknown };
+  if (!Array.isArray(candidate.leaves)) return undefined;
+  const leaves = new Map<number, string>();
+  const expiries = new Map<number, number>();
+  for (const entry of candidate.leaves) {
+    const record = Array.isArray(entry)
+      ? { index: entry[0], leaf: entry[1], expiry: entry[2] }
+      : entry && typeof entry === 'object'
+        ? entry as { index?: unknown; leaf?: unknown; expiry?: unknown }
+        : undefined;
+    if (!record) throw new Error('Public tree artifact contains a malformed leaf entry');
+    const index = Number(record.index);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= BASE_MEMBERSHIP_TREE_CAPACITY) {
+      throw new Error('Public tree artifact contains an out-of-range leaf index');
+    }
+    if (typeof record.leaf !== 'string' || !/^\d+$/u.test(record.leaf)) {
+      throw new Error('Public tree artifact contains a malformed leaf');
+    }
+    leaves.set(index, record.leaf);
+    if (record.expiry !== undefined) {
+      const expiry = Number(record.expiry);
+      if (!Number.isSafeInteger(expiry) || expiry <= 0) throw new Error('Public tree artifact contains a malformed expiry');
+      expiries.set(index, expiry);
+    }
+  }
   return {
-    async witnessForCredential(): Promise<BaseCreditWitness> {
-      const witness = candidate.witness && typeof candidate.witness === 'object' ? candidate.witness as Record<string, unknown> : candidate;
-      if (!Array.isArray(witness.pathElements) || !Array.isArray(witness.pathIndices) || typeof witness.root !== 'string') {
-        throw new Error('Witness sync artifact is missing root/pathElements/pathIndices');
-      }
-      return {
-        root: witness.root,
-        pathElements: witness.pathElements.map(String),
-        pathIndices: witness.pathIndices.map(Number),
-        ...(witness.expiry === undefined ? {} : { expiry: Number(witness.expiry) }),
-      };
-    },
+    leaves,
+    expiries,
+    ...(typeof candidate.root === 'string' ? { root: candidate.root } : {}),
   };
 }
 
-/** Uses snarkjs only after the caller supplies the local WASM and zkey. */
-export function createSnarkjsProofGenerator(wasmPath: string, zkeyPath: string): BaseProofGenerator {
-  return async (input) => {
-    const module = await import('snarkjs') as unknown as { groth16?: { fullProve(input: BaseProofInput, wasm: string, zkey: string): Promise<BaseProofResult> } };
-    if (!module.groth16?.fullProve) throw new Error('snarkjs Groth16 prover is unavailable');
-    return module.groth16.fullProve(input, wasmPath, zkeyPath);
+/**
+ * Reads a depth-20 witness from a local artifact: either a prepared witness or
+ * a public tree of `BundleFunded` leaves. Nothing is fetched, and no gateway
+ * endpoint serves a path for a named leaf or commitment.
+ */
+export function createFileWitnessProvider(value: unknown): BaseWitnessProvider {
+  const candidate = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const prepared = candidate.witness && typeof candidate.witness === 'object' ? candidate.witness as Record<string, unknown> : candidate;
+  const tree = parsePublicTreeArtifact(value);
+  return {
+    async witnessForCredential(credential: CreditCredential): Promise<BaseCreditWitness> {
+      if (prepared && Array.isArray(prepared.pathElements) && Array.isArray(prepared.pathIndices) && typeof prepared.root === 'string') {
+        return {
+          root: prepared.root,
+          pathElements: prepared.pathElements.map(String),
+          pathIndices: prepared.pathIndices.map(Number),
+          ...(prepared.expiry === undefined ? {} : { expiry: Number(prepared.expiry) }),
+        };
+      }
+      if (!tree) throw new Error('Witness artifact is missing a prepared witness or a public tree');
+      const leaf = await computeCreditLeaf(credential.commitment, credential.tierId, credential.expiry);
+      const entry = [...tree.leaves.entries()].find(([, candidateLeaf]) => candidateLeaf === leaf);
+      if (!entry) throw new Error('No funded Base bundle was found for this credential');
+      const witness = await deriveSparseCreditWitness(tree.leaves, entry[0]);
+      if (tree.root !== undefined && await field(tree.root, 'public tree root') !== witness.root) {
+        throw new Error('Public tree artifact root does not match the derived membership root');
+      }
+      const expiry = tree.expiries.get(entry[0]) ?? credential.expiry;
+      return {
+        root: witness.root,
+        pathElements: witness.pathElements,
+        pathIndices: witness.pathIndices,
+        expiry,
+      };
+    },
   };
 }

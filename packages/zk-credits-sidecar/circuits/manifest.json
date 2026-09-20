@@ -1,16 +1,28 @@
 {
+  "version": 1,
+  "scheme": "zk-prepaid",
+  "network": "eip155:84532",
+  "circuit": {
+    "id": "private-credit-spend-bn254-dev",
+    "depth": 20,
+    "wasm": "private_credit_spend.wasm",
+    "zkey": "private_credit_spend.zkey",
+    "verificationKey": "verification_key_private_credit.json"
+  },
   "artifacts": [
     {
-      "file": "rln_nullifier.wasm",
-      "sha256": "38370baebbafb76562d5c94e15354c04152c388bffe1bf85faeeb4dd221538c1"
+      "file": "private_credit_spend.wasm",
+      "sha256": "64da977cdbf3105a5948a6eb82cac610979e589558ddb1cd0419c460e7735c56"
     },
     {
-      "file": "rln_nullifier_final.zkey",
-      "sha256": "11cd9e881437283701dcebd75be469d57ec7428de3495d229268eb75f2413cc8"
+      "file": "private_credit_spend.zkey",
+      "sha256": "3afb378d832d646a7d207b7eecbbd33cf3b041b99274cb074bbe314ac0b79291"
     },
     {
-      "file": "verification_key_rln.json",
-      "sha256": "9a521e0e19dc272c281f1a41abf79571bb0094cda653c890bdd95aa5b4c5f1ee"
+      "file": "verification_key_private_credit.json",
+      "sha256": "eb0068396ae6a859e95af001589936b6a1cbcdf18947dccdbade6af0099487c2"
     }
-  ]
+  ],
+  "publicSignals": ["root", "timestamp", "domain", "requestSignal", "nullifier", "share"],
+  "provingMaterial": "Development-only Sepolia artifacts. Complete an external production ceremony before mainnet."
 }

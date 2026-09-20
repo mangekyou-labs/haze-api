@@ -43,6 +43,9 @@ export const PUBLIC_SIGNAL_INDEX = Object.freeze({ root: 0, timestamp: 1, domain
 const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const FORBIDDEN_KEYS = new Set(['account', 'commitment', 'order', 'secret', 'tier', 'wallet', 'payer', 'user', 'subject', 'phase', 'settlementphase']);
 const PAYMENT_KEYS = new Set(['x402Version', 'accepted', 'payload', 'resource', 'extensions']);
+const PAYLOAD_KEYS = new Set(['nonce', 'proof', 'publicSignals', 'responseKey']);
+const PROOF_KEYS = new Set(['pi_a', 'pi_b', 'pi_c']);
+const RESOURCE_KEYS = new Set(['url', 'description', 'mimeType', 'serviceName', 'tags', 'iconUrl']);
 const SETTLEMENT_PHASE = Symbol('zk-prepaid.settlementPhase');
 
 export type ResourceInfo = CoreResourceInfo;
@@ -224,6 +227,29 @@ function hasForbiddenKey(value: unknown): boolean {
   return Object.entries(value as Record<string, unknown>).some(([key, item]) => FORBIDDEN_KEYS.has(key.toLowerCase()) || hasForbiddenKey(item));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Every object in the envelope carries exactly the published wire fields.
+ * Anything else — an unknown field, a nested object, or an identifying label —
+ * is a rejection, so no private spend metadata can ride along in an
+ * unvalidated corner of the payload.
+ */
+function hasUnknownFields(value: unknown, allowed: ReadonlySet<string>): boolean {
+  if (!isRecord(value)) return true;
+  return Object.keys(value).some((key) => !allowed.has(key));
+}
+
+function hasUnknownExtension(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (!isRecord(value)) return true;
+  // The pilot advertises no extensions: any declared extension would be
+  // unvalidated private spend metadata.
+  return Object.keys(value).length > 0;
+}
+
 function validField(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d+$/u.test(value)) return false;
   try { const field = BigInt(value); return field >= 0n && field < FIELD_ORDER; }
@@ -243,10 +269,14 @@ export async function validateZkPrepaidPayload(payment: unknown, requirements: P
   catch { return { isValid: false, invalidReason: 'requirements_mismatch' }; }
   if (!candidate.payload || typeof candidate.payload !== 'object') return { isValid: false, invalidReason: 'invalid_payload' };
   if (hasForbiddenKey(candidate)) return { isValid: false, invalidReason: 'identifying_field' };
+  if (!isRecord(candidate)) return { isValid: false, invalidReason: 'invalid_payload' };
   if (Object.keys(candidate).some((key) => !PAYMENT_KEYS.has(key))) return { isValid: false, invalidReason: 'invalid_payload_fields' };
+  if (candidate.resource !== undefined && hasUnknownFields(candidate.resource, RESOURCE_KEYS)) return { isValid: false, invalidReason: 'invalid_payload_fields' };
+  if (hasUnknownExtension(candidate.extensions)) return { isValid: false, invalidReason: 'invalid_payload_fields' };
   const payload = candidate.payload as Partial<ZkPrepaidPayload>;
-  if (Object.keys(payload).sort().join(',') !== 'nonce,proof,publicSignals,responseKey') return { isValid: false, invalidReason: 'invalid_payload_fields' };
+  if (hasUnknownFields(payload, PAYLOAD_KEYS)) return { isValid: false, invalidReason: 'invalid_payload_fields' };
   if (!payload.proof || typeof payload.proof !== 'object' || Array.isArray(payload.proof) || !Array.isArray(payload.publicSignals) || payload.publicSignals.length !== 6 || !payload.publicSignals.every(validField)) return { isValid: false, invalidReason: 'invalid_public_signals' };
+  if (hasUnknownFields(payload.proof, PROOF_KEYS)) return { isValid: false, invalidReason: 'invalid_payload_fields' };
   if (typeof payload.nonce !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(payload.nonce)) return { isValid: false, invalidReason: 'invalid_nonce' };
   if (typeof payload.responseKey !== 'string' || payload.responseKey.length < 8 || payload.responseKey.length > 4096) return { isValid: false, invalidReason: 'invalid_response_key' };
   if (payload.publicSignals[PUBLIC_SIGNAL_INDEX.timestamp] !== String(requirements.extra.issuedAt)) return { isValid: false, invalidReason: 'issued_at_mismatch' };

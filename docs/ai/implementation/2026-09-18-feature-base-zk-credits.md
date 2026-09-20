@@ -56,8 +56,8 @@ the rejected share equation.
   modules never import each other; redemption crosses the boundary through an
   issuer that takes no arguments.
 - `packages/zk-credits-sidecar`: operator-local credential, hash-pinned
-  WASM/zkey, Groth16 `fullProve` plus self-verify, x402 client, replay. It accepts
-  version-2 activated credentials and legacy version-1 exports.
+  proving bundle, Groth16 `fullProve` plus self-verify, x402 client, replay. It
+  accepts version-2 activated credentials and legacy version-1 exports.
 - `web`: invite-only unpaid onboarding. Five-step state machine on `/dashboard`
   (invite, capsule, re-import, funding, activated), local-only recovery, sanitized
   Base Sepolia status. No checkout, order, webhook, wallet-link, or Stripe code.
@@ -124,6 +124,39 @@ order reconciliation.
   serves a path for a named leaf or commitment. Control plane never serves
   proving keys at runtime.
 - One `fullProve` at a time per sidecar process.
+
+## Sidecar proving boundary (B8)
+
+`ZK_CREDITS_ARTIFACT_DIR` points at the installed frozen bundle;
+`packages/zk-credits-sidecar/circuits/manifest.json` pins the SHA-256 of the
+WASM, zkey, and verification key. Resolution rejects a missing, remote,
+relative, symlink-escaping, or hash-mismatched artifact before the first
+`fullProve`. Failure categories are fixed and aggregate-only.
+
+- `src/proof-coordinator.ts` serializes proves process-wide, runs each attempt
+  in a terminable child process with a 10-second deadline, self-verifies with
+  the pinned key, and requires the six public signals to match
+  `[root, timestamp, domain, requestSignal, nullifier, share]` exactly. The
+  worker boundary is a child process, not `worker_threads`: snarkjs's
+  `web-worker` polyfill cannot create nested workers, so a `worker_threads`
+  prover hangs. Retries reuse the same slot, request signal, nonce, response
+  key, and gateway `issuedAt` while more than ten seconds remain.
+- `src/slot-ledger.ts` holds the durable local slot ledger
+  (`$ZK_CREDITS_HOME/base-slots.json`, slot numbers only). A slot is
+  provisional until self-verification succeeds and is committed immediately
+  before `PAYMENT-SIGNATURE` can be emitted; proof misses, timeouts, hash
+  failures, and verification failures release it.
+- `src/sidecar.ts` serves only `GET /health`, `GET /v1/models`,
+  `GET /metrics`, and non-streaming `POST /v1/chat/completions`.
+  `/v1/responses`, Anthropic `/v1/messages`, streaming bodies, and a missing
+  `model` are rejected before any prove; there is no model fallback and no
+  Anthropic translation.
+- `GET /metrics` requires the loopback token and returns attempt counts, fixed
+  failure categories, and hot-prove p50/p95 only. No proofs, signals,
+  nullifiers, credentials, requests, or identifying labels.
+- `createFileWitnessProvider` accepts a prepared witness or a public tree
+  artifact and derives the depth-20 path locally. No gateway endpoint serves a
+  path for a named leaf or commitment.
 
 ## Error and logging policy
 

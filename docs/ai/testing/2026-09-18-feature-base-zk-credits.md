@@ -105,12 +105,34 @@ closed until a token was supplied; that is recorded rather than hidden.
 | S19, S20 | `npm run typecheck`, `npm test`, `npm run lint`, `npm run build` in `web` | all passed; the production route table contains only `/api/invites/redeem`, `/api/pilot/funding`, `/api/network-status`, and `/api/auth/[...nextauth]` |
 | S19, S20 | `E2E_PORT=3313 npx playwright test` in `web` | 7 passed: invite denial, backup gating, full onboarding with local activation verification, funding rejection plus retry with the same capability, version-1 and version-2 recovery, wrong password, tamper |
 | S21 | smoke probes against locally booted gateway (`:3401`) and `next start` (`:3402`) | `/v1/billing/orders`, `/v1/billing/orders/:id`, `/v1/billing/stripe-event`, `/v1/accounts/wallet-link`, `/api/checkout`, `/api/webhooks/stripe`, `/api/orders/:id`, `/api/wallet/link` all 404; anonymous `/dashboard` 307 to sign-in; `/sign-in`, `/onboarding`, `/recover` contain no Stripe, checkout, or purchase action |
-| B8 boundary | `npx vitest run` in `packages/zk-credits-sidecar` | 64 passed, 2 failed; the two failures are `src/pinned-artifacts.artifact.test.ts` real-Groth16 prove cases timing out at 120s, reproduced twice with no other load. They are in B8's proving path, not the credential-loading change, and are not claimed as passing |
+| B8 boundary (superseded) | `npx vitest run` in `packages/zk-credits-sidecar` | 64 passed, 2 failed at the time: the two `src/pinned-artifacts.artifact.test.ts` real-Groth16 cases timed out at 120s. Root cause was the prover running in a `worker_threads` worker, where snarkjs's `web-worker` polyfill re-enters itself; the prover now runs in a terminable child process. See [Local B8 evidence](#local-b8-evidence-2026-09-20) |
 
 Not verified and not claimed: real GitHub OAuth in a deployed environment,
 real Base Sepolia sponsorship, hosted smoke runs, and any change to the
 `present-unsafe` B5/B6/B8 status notes above. The landing page and README SKU
 copy still describe the retired paid path; that is B21.
+
+## Local B8 evidence (2026-09-20)
+
+Run from the `feature-base-zk-credits` worktree. `ts` runs set `NODE_ENV=test`;
+the sidecar runs used the frozen development bundle installed at
+`packages/zk-credits-sidecar/circuits/artifacts` (gitignored, out of band).
+
+| Scenarios | Command | Result |
+| --- | --- | --- |
+| S16 | `npx vitest run` in `packages/zk-credits-sidecar` | 66 passed, 19 files. Includes `artifact-bundle.test.ts` (shipped manifest pins three digests; missing, tampered, escaped-symlink, remote, and malformed manifests fail closed with fixed categories), `proof-coordinator.test.ts` (serialized proves, 10s deadline termination, self-verification, reordered-signal rejection, retry identity, deadline refusal, aggregate-only metrics), and `slot-ledger.test.ts` (provisional allocation, durable commit, reuse after failure, exhaustion) |
+| S12, S13, S16 | `npx vitest run src/base-sidecar-integration.test.ts` in `packages/zk-credits-sidecar` | 2 passed: the real loopback sidecar plus the real prepaid client complete 402 → `PAYMENT-SIGNATURE` → reserve/commit → `PAYMENT-RESPONSE` over real HTTP against a resource server running the package facilitator; the provider receives the exact request bytes; the claim row ends `committed`; `zk-prepaid` is selected when another rail is offered first |
+| S16, S24 | `ZK_CREDITS_ARTIFACT_DIR="$PWD/circuits/artifacts" npx vitest run src/pinned-artifacts.artifact.test.ts` in `packages/zk-credits-sidecar` | 3 passed against the frozen bundle through the compiled child-process worker: real `fullProve`, real `groth16.verify` self-check, exact six-signal order, hot-prove p50/p95 recorded, reordered statement rejected, tampered copy refused before proving |
+| S16, S21 | `npx vitest run` in `packages/x402-zk-prepaid` | 11 passed; privacy rejection now covers account, commitment, order, secret, tier, wallet, payer, user, and subject at any depth and in any case, plus unknown fields in the payment, payload, proof, resource, and extensions objects; `/supported` advertises exactly one capability |
+| S8–S17, S21 | `NODE_ENV=test npx vitest run` in `ts` | 80 passed, 12 skipped across 16 files; `x402-native-fixture.test.ts` drives the real gateway over real HTTP with `x402Client` plus `x402HTTPClient`, registers `zk-prepaid` deliberately, completes the full exchange, selects the scheme from reordered acceptances, and confirms a generic unregistered client fails with an unsupported-scheme error and no fallback rail |
+| S17 | route audit in `ts/x402-native-fixture.test.ts` | no gateway route matches `witness`, `merkle`, `membership`, or `leaf`; `/v1/membership/witness`, `/v1/merkle/path`, `/v1/tree/path`, and `/v1/leaves` return 404 `not_found` |
+| S34 | `npm run build` and `npm pack --dry-run` in `packages/zk-credits-sidecar`; `npx tsc --noEmit` in `packages/zk-credits-sidecar` and `ts` | passed; the packed file list contains `dist/proof-child.js` and `circuits/manifest.json` |
+
+Scope limits: the proofs in the fixture suites are shaped payloads with
+injected crypto, not production proofs. The real bundle path is exercised
+only by the opt-in artifact test on the development ceremony artifacts. No
+Solidity verifier, deployment, or paid traffic is involved, and none of this
+closes B12.
 
 ## Local B5 evidence (2026-09-20)
 

@@ -1,159 +1,102 @@
 # zk-credits
 
-Anonymous API credits for coding agents. Buy 100 tickets, import a 24-word
-phrase, run Cline / Claude Code / Codex. The gateway never sees your identity.
+Private prepaid API credits for OpenAI-compatible clients. Stripe is the only
+customer payment rail in v1. The platform sponsor supplies Base USDC and gas;
+customers do not need a wallet, ETH, or USDC to purchase or use a bundle.
 
-**Testnet only. No real money.**
+The initial network is Base Sepolia (`eip155:84532`). Each bundle has a fixed
+30-day validity period and a seven-day challenge window:
 
-```bash
-npm install --global zk-credits
+| Bundle | Service fee | Refundable bond | Private requests |
+| --- | ---: | ---: | ---: |
+| Starter | $5 | $5 | 5,000 |
+| Builder | $20 | $20 | 25,000 |
+| Scale | $50 | $50 | 75,000 |
+
+The browser creates the secret and Poseidon commitment locally. An encrypted
+credential export is required before Stripe Checkout. The secret is never sent
+to Stripe, GitHub, the gateway, or the spend-plane database. GitHub OAuth is
+the account system; optional SIWE wallet linking proves an additional identity
+but is not required for purchase or API calls.
+
+## Run the local services
+
+```sh
+cd ts && npm ci && npm run typecheck && cd ..
+cd web && npm ci && npm run typecheck && cd ..
+cd packages/x402-zk-prepaid && npm ci && npm test -- --run && cd ../..
+cd packages/zk-credits-sidecar && npm ci && npm test -- --run && cd ../..
 ```
 
-## First run
+The gateway needs `OPENROUTER_API_KEY` and a configured Base contract/verifying
+key in a real environment. Its local fallback claim store is for development;
+production runs use the isolated `spend_plane.claims` Postgres table.
 
-### 1. Fund an identity
+## Local credential proxy
 
-1. Open https://feature-zk-api-credits-gadillacers-projects.vercel.app
-2. Sign in with GitHub
-3. Generate identity and write down the **24-word recovery phrase**
-4. Buy **Starter — $1.00 / 100 tickets** (Stripe test card `4242…`)
-5. Wait until the dashboard shows an **active** deposit
+The sidecar reads an encrypted browser export and generates the BN254 Groth16
+proof locally. It then follows x402 v2 over the gateway:
 
-The phrase is the proving identity. It never leaves your machine.
-
-### 2. Import it locally
-
-```bash
-zk-credits import-mnemonic
-# paste the 24-word phrase (hidden TTY, saved to OS keychain)
+```sh
+export ZK_CREDITS_CREDENTIAL_PATH=/path/to/credential.zkcred
+export ZK_CREDITS_CREDENTIAL_PASSWORD='use-a-local-secret'
+export ZK_CREDITS_ARTIFACT_DIR=/path/to/pinned-bundle
+export ZK_CREDITS_WITNESS_PATH=/path/to/witness.json
+zk-credits serve --gateway http://127.0.0.1:3001 --port 3210
 ```
 
-### 3. Run an agent
+`ZK_CREDITS_ARTIFACT_DIR` holds the frozen proving bundle whose SHA-256
+digests are pinned in `packages/zk-credits-sidecar/circuits/manifest.json`.
+The bytes are installed out of band; a missing, relocated, or altered
+artifact fails closed before any prove.
 
-```bash
-zk-credits cline "summarize this repository"
-zk-credits claude -p "summarize this repository"
-zk-credits setup codex && zk-credits codex "summarize this repository"
+`POST /v1/chat/completions` is protected by the experimental custom x402
+scheme `zk-prepaid`. A missing or stale `PAYMENT-SIGNATURE` receives a 402
+with base64 `PAYMENT-REQUIRED`; the sidecar retries with a proof-bound
+signature. Settlement is a durable escrow claim, not a per-request chain
+transaction, so `PAYMENT-RESPONSE.transaction` is intentionally empty.
+
+The reusable implementation is in
+`packages/x402-zk-prepaid/`. It is not automatically supported by generic x402
+clients: integrations must register this custom scheme and use the published
+requirements/payload format. See
+`docs/ai/design/2026-09-18-feature-base-zk-credits.md` for the protocol
+boundary and security model.
+
+## Contract and circuits
+
+The immutable `PrivateCreditBond` contract is under `contracts/src/` and the
+BN254 circuit is `circuits/private_credit_spend.circom`. No deployment is
+performed by tests. Use the Base Sepolia deployment script only after setting
+the reviewed USDC, sponsor, refund vault, treasury, Poseidon, verifier, and
+deployment-domain addresses:
+
+```sh
+cd contracts
+FOUNDRY_OFFLINE=true forge test
+forge script script/DeployBaseSepolia.s.sol:DeployBaseSepolia \
+  --rpc-url "$BASE_RPC_URL" --broadcast --verify
 ```
 
-Each command starts a loopback sidecar on `127.0.0.1:3210`, proves the request
-locally, and launches the agent against that sidecar. Your default
-`~/.cline` / `~/.claude` / `~/.codex` profiles are not modified.
+Mainnet is blocked until an external contract/circuit audit, production
+Groth16 ceremony, legal and Stripe-risk review, protected keys, monitoring,
+and recovery drills are complete.
 
-## Commands
+## Privacy and product boundaries
 
-| Command | What it does |
-|---|---|
-| `zk-credits import-mnemonic` | Hidden-TTY import of the 24-word phrase into OS keychain |
-| `zk-credits cline [args…]` | Launch Cline through the proof-aware sidecar |
-| `zk-credits claude [args…]` | Launch Claude Code through the sidecar (`ANTHROPIC_BASE_URL`) |
-| `zk-credits setup codex` | Write an isolated Codex profile |
-| `zk-credits codex [args…]` | Launch Codex CLI through the sidecar |
-| `zk-credits status` | Identity + sidecar state |
-| `zk-credits serve` | Sidecar only, for any OpenAI-compatible client |
-| `eval "$(zk-credits env)"` | Print `OPENAI_BASE_URL` + loopback bearer |
+- The dashboard shows bundle allowance, expiry, bond/refund state, and chain
+  links; it does not show remaining-call counts or usage history.
+- The gateway does not log prompts, responses, secrets, proofs, or linkable
+  spend metadata. Encrypted response replays are bounded to 24 hours and 10 MiB.
+- Chargebacks block future purchases but do not revoke an already-active
+  private credential. A successful cryptographic slash prevents the Stripe bond
+  refund.
+- Stripe webhooks, sponsorship, maturity release, contract events, refunds,
+  disputes, and reconciliation require durable idempotent workers in production.
 
-Other clients:
-
-```bash
-zk-credits serve
-eval "$(zk-credits env)"
-# OPENAI_BASE_URL=http://127.0.0.1:3210/v1
-```
-
-TypeScript (Codex SDK):
-
-```ts
-import { Codex } from '@openai/codex-sdk';
-import { buildCodexSdkOptions, buildCodexThreadOptions } from 'zk-credits/codex';
-
-const codex = new Codex(buildCodexSdkOptions({
-  loopbackBaseUrl: 'http://127.0.0.1:3210',
-  token,
-  codexHome,
-}));
-const thread = codex.startThread(buildCodexThreadOptions({ model: 'openai/gpt-4o-mini' }));
-await thread.run('summarize this repository');
-```
-
-`ZK_CREDITS_MNEMONIC` is for a headless process only. It is not persisted.
-
-## How it works
-
-1. Browser derives `secret_k` from a 24-word phrase and a public commitment
-2. Starter checkout deposits 1 USDC testnet against that commitment
-3. Sidecar imports the phrase, fetches the public Merkle snapshot, and attaches
-   a fresh body-bound ZK-RLN proof to each LLM request
-4. Gateway verifies the proof, forwards to OpenRouter, returns the response
-5. Ticket fork (same ticket, different request) slashes the deposit on-chain
-
-The gateway cannot link a call to a deposit. ZK enforced.
-
-Live surfaces:
-
-- Web: https://feature-zk-api-credits-gadillacers-projects.vercel.app
-- Gateway: https://zk-credits-gateway.onrender.com
-- Contract: `CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT`
-
-## Before you try it
-
-- **Testnet Stripe + GitHub** are required. No anonymous CLI-only signup.
-- **Membership tree capacity is 8.** If Buy Credits fails or the gateway
-  returns `Tree is full`, a slot must be freed (withdraw/slash) before a new
-  identity can deposit.
-- **Render free-tier cold start.** First `/health` after idle can take ~30s or
-  return 503; retry.
-- **Node 20+.** `keytar` needs a working OS keychain (macOS Keychain, libsecret
-  on Linux, Credential Manager on Windows).
-- Sidecar binds **only** `127.0.0.1`. It does not install a plugin, intercept
-  TLS, or replace your default agent profile.
-
-## Honest caveats
-
-1. **Testnet only.** No real money. USDC is testnet faucet.
-2. **100-ticket specialization.** Starter is exactly ticket indices `0..99`.
-3. **Variable-cost refunds deferred.** Fixed per-call ticket price.
-4. **Single-contributor trusted setup.** Groth16 BLS12-381 ceremony is dev-only.
-5. **Custodial gateway-mediated withdrawal.** Gateway co-signs. The gateway can block by disappearing, but the gateway cannot unilaterally redirect funds because the contract requires the browser-secret membership-removal proof.
-6. **Async per-call on-chain audit.** Proofs verify off-chain for latency, then settle
-   to Soroban `spend()` asynchronously.
-7. **Single gateway timing.** No cryptographic link from call to deposit, but
-   one operator can observe request timing.
-8. **Browser proving latency.** Browser and sidecar proving adds latency (~1.5s first call per session, cached after).
-9. **IP is not hidden.** Payment and deposit identity is hidden; network identity / IP is not hidden.
-10. **Validated clients.** `zk-credits cline`, `zk-credits claude`, and
-    `zk-credits codex` / `zk-credits/codex`. Other clients need a custom
-    OpenAI-compatible base URL.
-
-## Build from source
-
-For protocol contributors only. End users should stop at **First run**.
-
-Prerequisites: Node 20+, Rust 1.94+, Stellar CLI 27+, Circom 0.5.46+.
-
-```bash
-git clone https://github.com/mangekyou-labs/haze-api.git
-cd haze-api
-cp .env.example .env   # STELLAR_*, OPENROUTER_API_KEY, GATEWAY_SECRET, STRIPE_*, GITHUB_*
-
-cd ts && npm install && cd ..
-cd web && npm install && cd ..
-cd circuits && npm install && cd ..
-
-# circuits (trusted setup is single-contributor, dev-only)
-cd circuits
-circom deposit_membership.circom --r1cs --wasm -p bls12381
-circom rln_nullifier.circom --r1cs --wasm -p bls12381
-circom slash.circom --r1cs --wasm -p bls12381
-node scripts/setup.js && cd ..
-
-cd ts && npm run dev          # gateway :3001
-cd web && npm run dev         # web :3000
-```
-
-Contract, slash demo, and E2E scripts live in `zk-credits-contract/` and
-`scripts/`.
+The former Stellar/Soroban implementation is retained under `archive/stellar/`
+and historical documentation only. It is not part of the active runtime.
 
 ## License
 
-MIT
+AGPL-3.0-or-later. See `LICENSE`.

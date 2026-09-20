@@ -35,7 +35,7 @@ later go/no-go map. They are not tasks on this queue.
 | `contracts/src/PrivateCreditBond.sol` | done (B4) | One funded tier: `FUNDED_TIER_ID` 0, allowance 250, refundable bond `20_000_000` ($20 at six decimals); restored recovery requires `Poseidon(slotBlinding) == nullifier` and `Poseidon(secret) == commitment`; verifier is still a Foundry mock |
 | `packages/x402-zk-prepaid` | present-unsafe | custom scheme package exists; no `extra.issuedAt`; credit-asset fields need freeze |
 | `ts/claim-store.ts`, `ts/zk-prepaid-gateway.ts`, `ts/response-replay.ts` | present-unsafe | timestamp future-skew 30s only; `MAX_REPLAY_BYTES` 10 MiB; `MAX_UPSTREAM_BYTES` 32 MiB; charging/stream paths not frozen |
-| `packages/zk-credits-sidecar` | present-unsafe | local `fullProve` exists; development manifest is not hash-pinned for the restored circuit; self-verify/SLO/proof-failure semantics incomplete |
+| `packages/zk-credits-sidecar` | done (B8) | `ZK_CREDITS_ARTIFACT_DIR` resolves the shipped hash-pinned manifest; `fullProve` runs one at a time in a terminable child process with a 10s deadline; every proof self-verifies and must match the six-signal order; the durable slot ledger commits only after self-verification; the loopback serves non-streaming `POST /v1/chat/completions` plus authenticated `/metrics`. Development bundle bytes stay out of band; the real-bundle proof path is opt-in evidence and is not a production ceremony |
 | `ts/stripe-billing.ts`, `web/` | done (B9), legacy unreferenced | invite-only unpaid onboarding replaced paid checkout: the web dashboard is a five-step state machine, Stripe routes and dependencies are deleted from the active web/gateway entry points, and `ts/stripe-billing.ts`, `ts/wallet-links.ts`, and `ts/db/billing.ts` remain unreferenced for history. README and landing copy still list three SKUs, owned by B21 |
 | `archive/stellar` | present, reference only | must stay off the paid path |
 
@@ -55,7 +55,7 @@ verifiers without implying development proving material is production-ready.
 | B5 | Custom x402 v2 `zk-prepaid` package, credit-asset fields, `@x402/core` registration | done | `issuedAt` in extra; `amount`/`asset` name the credit; scheme-based selection; omit `payer`; empty transaction | B2 | 2026-09-20 local: package `npm test` (8 passed), package `npm run build`, `ts/npm run typecheck`, `NODE_ENV=test npx vitest run zk-prepaid-gateway.test.ts` (7 passed), targeted sidecar regressions (7 passed), both `ai-devkit lint` commands, and `git diff --check` passed. Real core client/resource-server/facilitator registration, `/supported`, escrow phase orchestration, wire validation, cache invalidation, and sidecar issuedAt binding are covered. Durable claim lifecycle and gateway HTTP mapping remain B6. | S8, S9, S10, S11 |
 | B6 | Isolated claim store, facilitator, gateway reservation lifecycle | present-unsafe | Reserve-before-dispatch; commit-only-after-success; 1 MiB buffered replay; no streaming; `issuedAt` window; proof failure never inserts a claim | B5 | Concurrency, crash, freshness, streaming-reject, and replay tests | S9–S15, S21, S29 |
 | B7 | Stripe opaque orders, sponsorship/maturity/refund/dispute jobs | present-unsafe | Signed idempotent webhooks; no Stripe identity joined to nullifiers or signals; durable retry | B4, B6 | Webhook/job integration tests; privacy scan of billing rows | S18, S21, S22 |
-| B8 | Sidecar: hash-pinned WASM/zkey, self-verify, Merkle path, OpenAI-compatible `/v1/chat/completions`, proof-failure metric | present-unsafe | Sidecar-only Groth16; refuse on hash mismatch; one `fullProve` at a time; retries stay on same slot/signal/`issuedAt` | B3, B5, B6 | Sidecar tests; no runtime key fetch; proof-failure leaves slot unused | S12–S17, S21 |
+| B8 | Sidecar: hash-pinned artifacts, self-verify, Merkle path, OpenAI-compatible `/v1/chat/completions`, proof-failure metric | done | Sidecar-only Groth16; refuse on hash mismatch; one `fullProve` at a time; retries stay on same slot/signal/`issuedAt` | B3, B5, B6 | 2026-09-20 local: `npx vitest run` in `packages/zk-credits-sidecar` (66 passed), `npx vitest run` in `packages/x402-zk-prepaid` (11 passed), `NODE_ENV=test npx vitest run` in `ts` (80 passed, 12 skipped), `ZK_CREDITS_ARTIFACT_DIR="$PWD/circuits/artifacts" npx vitest run src/pinned-artifacts.artifact.test.ts` (3 passed: real `fullProve`, real self-verify, six-signal order, hot-prove p50/p95); package build and `npm pack --dry-run`; no runtime key fetch; proof failure leaves the slot unused | S12–S17, S21 |
 | B9 | Web purchase, backup gate, Base status, optional SIWE, retired eval UI | done (B9, unpaid amendment) | Invite-only unpaid onboarding: single-use invites, detached funding capability, two-stage version-2 export, sanitized Base Sepolia status; no checkout, no SIWE wallet link, no remaining-credit view. Live paid SKU wording stays with B21 | B7 (detached) | Web lint/typecheck/build; gateway and pilot unit/integration suites; Playwright onboarding and recovery flows; local smoke probes | S19, S20, S21, S22 |
 | B10 | Keep Stellar/evaluation runtime archived; env/docs/deploy scripts Base-only | present | Paid path has no Stellar spend or evaluation cohort gates | B9 | Dependency/search audit | S33 |
 | B11 | Full local verification and release-gate reconciliation | todo | Fresh command matrix; unpaid traffic only until B12–B16 pass | B2–B10 | Lint, typecheck, package tests, Foundry, circuit, web build, `git diff --check` | S34 |
@@ -114,8 +114,10 @@ external keys and user authorization.
 
 ## Next actions
 
-1. B5 custom x402 v2 `zk-prepaid` package, then B6: `issuedAt` window and
-   1 MiB non-streaming commit path.
-2. B8 sidecar hash-pinned manifest and self-verify against the compiled
-   `circuits/build/private-credit/` artifacts.
-3. B11 fresh local verification matrix before any paid-traffic claim.
+1. B6 durable reservation state and gateway status mapping, still
+   `present-unsafe`.
+2. B11 fresh local verification matrix across every package before any
+   paid-traffic claim.
+3. B12 paid-traffic gate: independent review, a real generated Solidity
+   verifier and adapter on Base Sepolia, and the two-transcript recovery
+   test. Nothing in B8's local evidence substitutes for it.

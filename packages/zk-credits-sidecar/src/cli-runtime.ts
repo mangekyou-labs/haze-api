@@ -3,17 +3,14 @@ import { formatOpenAiEnvironment } from './sidecar-config.js';
 export interface CliCommandDependencies {
   loopbackBaseUrl: string;
   readToken(): Promise<string>;
-  importMnemonic(mnemonic: string): Promise<void>;
-  readMnemonic(): Promise<string>;
   write(line: string): void;
-  isIdentityConfigured(): Promise<boolean>;
+  isCredentialConfigured(): Promise<boolean>;
   configureCodex(model?: string): Promise<void>;
   ensureSidecar(): Promise<string>;
   isCodexProfileInstalled(): Promise<boolean>;
   isSidecarHealthy(): Promise<boolean>;
   launchCodex(args: readonly string[]): Promise<number>;
   launchCline(args: readonly string[], localToken: string): Promise<number>;
-  launchClaude(args: readonly string[], localToken: string): Promise<number>;
 }
 function setupModel(args: readonly string[]): string | undefined {
   if (args[1] !== 'codex') throw new Error('Usage: zk-credits setup codex [--model <model>]');
@@ -35,17 +32,9 @@ export async function runCliCommand(
       ));
       return 0;
     }
-    case 'import-mnemonic': {
-      await dependencies.importMnemonic(await dependencies.readMnemonic());
-      dependencies.write('ZK Credits identity imported into the system credential store.');
-      return 0;
-    }
     case 'setup': {
       const model = setupModel(args);
-      if (!await dependencies.isIdentityConfigured()) {
-        await dependencies.importMnemonic(await dependencies.readMnemonic());
-        dependencies.write('ZK Credits identity imported into the system credential store.');
-      }
+      if (!await dependencies.isCredentialConfigured()) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH before running zk-credits setup');
       await dependencies.configureCodex(model);
       await dependencies.ensureSidecar();
       dependencies.write('ZK Credits is ready for Codex.');
@@ -57,7 +46,7 @@ export async function runCliCommand(
       return 0;
     }
     case 'status': {
-      dependencies.write(`Identity: ${await dependencies.isIdentityConfigured() ? 'configured' : 'missing'}`);
+      dependencies.write(`Credential export: ${await dependencies.isCredentialConfigured() ? 'configured' : 'missing'}`);
       dependencies.write(`Codex profile: ${await dependencies.isCodexProfileInstalled() ? 'installed' : 'missing'}`);
       dependencies.write(`Sidecar: ${await dependencies.isSidecarHealthy() ? 'running' : 'stopped'}`);
       return 0;
@@ -70,22 +59,11 @@ export async function runCliCommand(
       return dependencies.launchCodex(args.slice(1));
     }
     case 'cline': {
-      if (!await dependencies.isIdentityConfigured()) {
-        await dependencies.importMnemonic(await dependencies.readMnemonic());
-        dependencies.write('ZK Credits identity imported into the system credential store.');
-      }
+      if (!await dependencies.isCredentialConfigured()) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH before running zk-credits cline');
       const localToken = await dependencies.ensureSidecar();
       return dependencies.launchCline(args.slice(1), localToken);
     }
-    case 'claude': {
-      if (!await dependencies.isIdentityConfigured()) {
-        await dependencies.importMnemonic(await dependencies.readMnemonic());
-        dependencies.write('ZK Credits identity imported into the system credential store.');
-      }
-      const localToken = await dependencies.ensureSidecar();
-      return dependencies.launchClaude(args.slice(1), localToken);
-    }
     default:
-      throw new Error('Usage: zk-credits <cline|claude|setup codex|codex|status|token|import-mnemonic|serve|env>');
+      throw new Error('Usage: zk-credits <cline|setup codex|codex|status|token|serve|env>');
   }
 }

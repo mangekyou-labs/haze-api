@@ -15,10 +15,9 @@ describe('sidecar configuration', () => {
     ].join('\n'));
   });
 
-  it('creates URL-safe entropy and keeps ledger/token state under one private directory', () => {
+  it('creates URL-safe entropy and keeps token/log state under one private directory', () => {
     expect(createLoopbackToken()).toMatch(/^[A-Za-z0-9_-]{32,}$/);
     expect(sidecarStatePaths('/tmp/zk-credits-test')).toEqual({
-      ledgerPath: '/tmp/zk-credits-test/tickets.json',
       tokenPath: '/tmp/zk-credits-test/loopback-token',
       logPath: '/tmp/zk-credits-test/sidecar.log',
     });

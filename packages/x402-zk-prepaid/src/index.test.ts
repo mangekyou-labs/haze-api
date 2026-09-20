@@ -73,6 +73,56 @@ describe('x402 zk-prepaid wire contract', () => {
     await expect(validateZkPrepaidPayload({ ...base, payer: '0xabc' }, requirements, '987')).resolves.toMatchObject({ isValid: false, invalidReason: 'identifying_field' });
   });
 
+  it('rejects every forbidden identifying label at any depth and in any case', async () => {
+    const forbidden = ['account', 'commitment', 'order', 'secret', 'tier', 'wallet', 'payer', 'user', 'subject'];
+    const base = payment();
+    for (const label of forbidden) {
+      for (const candidate of [
+        { ...base, [label]: 'x' },
+        { ...base, payload: { ...base.payload, [label]: 'x' } },
+        { ...base, [label.toUpperCase()]: 'x' },
+        { ...base, resource: { url: 'https://api.test/chat', [label]: 'x' } },
+        { ...base, payload: { ...base.payload, proof: { ...(base.payload.proof as object), nested: { [label]: 'x' } } } },
+      ]) {
+        await expect(validateZkPrepaidPayload(candidate, requirements, '987'))
+          .resolves.toMatchObject({ isValid: false, invalidReason: 'identifying_field' });
+      }
+    }
+  });
+
+  it('rejects unknown fields in every part of the envelope', async () => {
+    const base = payment();
+    const cases: Array<[string, unknown]> = [
+      ['unknown top-level field', { ...base, extra: 'x' }],
+      ['unknown payload field', { ...base, payload: { ...base.payload, extra: 'x' } }],
+      ['unknown proof field', { ...base, payload: { ...base.payload, proof: { ...(base.payload.proof as object), curve: 'bn254' } } }],
+      ['unknown resource field', { ...base, resource: { url: 'https://api.test/chat', identifier: 'agent-7' } }],
+      ['non-empty extensions', { ...base, extensions: { bazaar: { listing: 'x' } } }],
+    ];
+    for (const [label, candidate] of cases) {
+      await expect(validateZkPrepaidPayload(candidate, requirements, '987'), label)
+        .resolves.toMatchObject({ isValid: false, invalidReason: 'invalid_payload_fields' });
+    }
+    await expect(validateZkPrepaidPayload({ ...base, extensions: {} }, requirements, '987')).resolves.toEqual({ isValid: true });
+    await expect(validateZkPrepaidPayload({ ...base, resource: { url: 'https://api.test/chat', mimeType: 'application/json' } }, requirements, '987')).resolves.toEqual({ isValid: true });
+  });
+
+  it('advertises exactly one supported capability with no other rail', () => {
+    const supported = createZkPrepaidFacilitator().supported();
+    expect(supported.kinds).toEqual([{
+      x402Version: 2,
+      scheme: ZK_PREPAID_SCHEME,
+      network: BASE_SEPOLIA_NETWORK,
+      extra: { assetTransferMethod: 'prepaid-claim', paymentFlow: 'escrow', requirementsVersion: 'zk-prepaid-v1' },
+    }]);
+    expect(supported.extensions).toEqual([]);
+    expect(supported.signers).toEqual({});
+    const advertised = JSON.stringify(supported);
+    for (const otherRail of ['"exact"', 'authorization', 'bazaar', 'mcp', 'solana']) {
+      expect(advertised).not.toContain(otherRail);
+    }
+  });
+
   it('selects zk-prepaid from mixed accepts and caches by method, URL, and digest', async () => {
     const seen: Request[] = [];
     let calls = 0;

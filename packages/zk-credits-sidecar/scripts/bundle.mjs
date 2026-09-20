@@ -8,7 +8,7 @@ const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputPath = resolve(packageDirectory, 'dist/zk-credits.js');
 const entryPoint = resolve(packageDirectory, 'dist/cli.js');
 const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
-const runtimeExternalPackages = ['@scure/bip39', 'circomlibjs', 'keytar', 'snarkjs'];
+const runtimeExternalPackages = ['@zk-credits/shared', '@zk-credits/x402-zk-prepaid', 'snarkjs'];
 
 function isRuntimeExternal(path) {
   return runtimeExternalPackages.some((packageName) => (

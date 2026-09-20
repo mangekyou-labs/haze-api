@@ -1,36 +1,25 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import {
-  anthropicErrorType,
-  createAnthropicStreamTransformer,
-  translateAnthropicToOpenAi,
-  translateOpenAiToAnthropic,
-  type AnthropicMessagesRequest,
-  type OpenAiChatResponse,
-} from './anthropic-messages.js';
 import { codexModelsResponse } from './codex-profile.js';
-import { TicketLedger } from './ticket-ledger.js';
+import type { BaseProofMetricsSnapshot } from './proof-metrics.js';
+import {
+  PAYMENT_REQUIRED_HEADER,
+  PAYMENT_RESPONSE_HEADER,
+} from '@zk-credits/x402-zk-prepaid';
+
 const MAX_REQUEST_BYTES = 2_000_000;
+const PAYMENT_HEADERS = [PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER, 'cache-control'] as const;
 
-export interface ProofGeneratorInput {
-  ticketIndex: number;
-  request: unknown;
+export interface PrepaidTransport {
+  fetch(input: string, init?: RequestInit): Promise<Response>;
 }
-
-export type ProofGenerator = (input: ProofGeneratorInput) => Promise<{
-  proof: object;
-  pubSignals: string[];
-}>;
-
-export type GatewayFetch = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface SidecarOptions {
   localToken: string;
   gatewayBaseUrl: string;
-  compatibilityKey: string;
-  ledger: TicketLedger;
-  proofGenerator: ProofGenerator;
-  gatewayFetch?: GatewayFetch;
+  prepaidClient: PrepaidTransport;
+  /** Aggregate-only proof metrics served to the authenticated local operator. */
+  metrics?: () => BaseProofMetricsSnapshot;
 }
 
 export interface RunningSidecar {
@@ -44,15 +33,11 @@ function isLoopbackAddress(address: string | undefined): boolean {
 
 function extractLocalToken(req: IncomingMessage): string | null {
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7).trim();
-  }
+  if (authHeader?.startsWith('Bearer ')) return authHeader.slice(7).trim();
   const apiKeyHeader = req.headers['x-api-key'];
-  if (typeof apiKeyHeader === 'string') {
-    return apiKeyHeader.trim();
-  }
-  return null;
+  return typeof apiKeyHeader === 'string' ? apiKeyHeader.trim() : null;
 }
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(body));
@@ -76,9 +61,31 @@ async function readJsonBody(req: IncomingMessage): Promise<{ raw: string; parsed
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+const STREAM_KEYS = ['stream', 'stream_options', 'streamOptions', 'stream-options'] as const;
+
+/**
+ * Rejects every request the pilot cannot serve before a single proof is
+ * attempted: streaming, an absent model, and any non-completion body.
+ */
+function completionRejection(body: unknown): string | undefined {
+  if (!isRecord(body)) return 'invalid_request_body';
+  if (STREAM_KEYS.some((key) => Object.prototype.hasOwnProperty.call(body, key))) return 'streaming_not_supported';
+  if (typeof body.model !== 'string' || body.model.length === 0) return 'model_required';
+  return undefined;
+}
+
 async function relayGatewayResponse(res: ServerResponse, upstream: Response): Promise<void> {
   const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
-  res.writeHead(upstream.status, { 'Content-Type': contentType });
+  const headers: Record<string, string> = { 'Content-Type': contentType };
+  for (const name of PAYMENT_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  res.writeHead(upstream.status, headers);
   if (!upstream.body) {
     res.end();
     return;
@@ -96,17 +103,9 @@ async function relayGatewayResponse(res: ServerResponse, upstream: Response): Pr
   }
 }
 
-function proofHeader(proof: { proof: object; pubSignals: string[] }): string {
-  return Buffer.from(JSON.stringify(proof)).toString('base64');
-}
-
-/**
- * Creates a loopback-only OpenAI-compatible proxy. The local bearer never
- * reaches Render; only the shared compatibility bearer and a fresh proof do.
- */
+/** Creates a loopback-only proxy whose sole spend path is x402 zk-prepaid. */
 export function createSidecarServer(options: SidecarOptions): RunningSidecar {
-  const gatewayBaseUrl = options.gatewayBaseUrl.replace(/\/$/, '');
-  const gatewayFetch = options.gatewayFetch ?? fetch;
+  const gatewayBaseUrl = options.gatewayBaseUrl.replace(/\/$/u, '');
   let server: Server | null = null;
   const inFlight = new Set<Promise<void>>();
 
@@ -121,7 +120,6 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       return;
     }
     const token = extractLocalToken(req);
-
     if (req.method === 'GET' && pathname === '/v1/models') {
       if (token !== options.localToken) {
         sendJson(res, 401, { error: 'invalid_local_token' });
@@ -130,131 +128,19 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       sendJson(res, 200, codexModelsResponse());
       return;
     }
-
-    if (req.method === 'POST' && pathname === '/v1/messages') {
+    if (req.method === 'GET' && pathname === '/metrics') {
       if (token !== options.localToken) {
         sendJson(res, 401, { error: 'invalid_local_token' });
         return;
       }
-      try {
-        const body = await readJsonBody(req);
-        const anthropicReq = body.parsed as AnthropicMessagesRequest;
-        const openAiReq = translateAnthropicToOpenAi(anthropicReq);
-        const rawOpenAiBody = JSON.stringify(openAiReq);
-
-        const reservation = await options.ledger.reserve(openAiReq);
-        const proof = await options.proofGenerator({
-          ticketIndex: reservation.index,
-          request: openAiReq,
-        });
-        const upstream = await gatewayFetch(`${gatewayBaseUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${options.compatibilityKey}`,
-            'Content-Type': 'application/json',
-            'X-ZK-Proof': proofHeader(proof),
-          },
-          body: rawOpenAiBody,
-        });
-
-        if (upstream.status >= 200 && upstream.status < 300 && upstream.status !== 202) {
-          await options.ledger.consume(reservation.requestDigest);
-        }
-
-        if (!upstream.ok) {
-          const rawText = await upstream.text();
-          let errorMsg =
-            rawText.trim() || `Gateway returned HTTP ${upstream.status}`;
-          try {
-            const errJson: unknown = JSON.parse(rawText);
-            if (errJson && typeof errJson === 'object') {
-              if ('error' in errJson && typeof errJson.error === 'string') {
-                errorMsg = errJson.error;
-              } else if (
-                'error' in errJson &&
-                errJson.error &&
-                typeof errJson.error === 'object' &&
-                'message' in errJson.error &&
-                typeof errJson.error.message === 'string'
-              ) {
-                errorMsg = errJson.error.message;
-              } else if (
-                'message' in errJson &&
-                typeof errJson.message === 'string'
-              ) {
-                errorMsg = errJson.message;
-              }
-            }
-          } catch {
-            // rawText is preserved as errorMsg
-          }
-          sendJson(res, upstream.status, {
-            type: 'error',
-            error: {
-              type: anthropicErrorType(upstream.status),
-              message: errorMsg,
-            },
-          });
-          return;
-        }
-
-        if (openAiReq.stream) {
-          res.writeHead(upstream.status, {
-            'Content-Type': 'text/event-stream; charset=utf-8',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-          });
-          if (!upstream.body) {
-            res.end();
-            return;
-          }
-          const transformer = createAnthropicStreamTransformer({
-            model: openAiReq.model,
-          });
-          const reader = upstream.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() ?? '';
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed.startsWith('data: ')) {
-                const dataStr = trimmed.slice(6);
-                if (dataStr === '[DONE]') continue;
-                try {
-                  const parsedChunk = JSON.parse(dataStr);
-                  const sseEvents = transformer.transformChunk(parsedChunk);
-                  for (const evt of sseEvents) res.write(evt);
-                } catch {
-                  // ignore non-JSON chunk
-                }
-              }
-            }
-          }
-          const finishEvents = transformer.finish();
-          for (const evt of finishEvents) res.write(evt);
-          res.end();
-        } else {
-          const openAiRes = (await upstream.json()) as OpenAiChatResponse;
-          const anthropicRes = translateOpenAiToAnthropic(openAiRes);
-          sendJson(res, upstream.status, anthropicRes);
-        }
-      } catch (error: unknown) {
-        if (!res.headersSent) {
-          const message = error instanceof Error ? error.message : 'Loopback request failed';
-          sendJson(res, 502, { error: 'sidecar_request_failed', message });
-        } else if (!res.writableEnded) {
-          res.end();
-        }
+      if (!options.metrics) {
+        sendJson(res, 404, { error: 'metrics_unavailable' });
+        return;
       }
+      sendJson(res, 200, options.metrics());
       return;
     }
-
-    if (req.method !== 'POST' || (pathname !== '/v1/chat/completions' && pathname !== '/v1/responses')) {
+    if (req.method !== 'POST' || pathname !== '/v1/chat/completions') {
       sendJson(res, 404, { error: 'unsupported_openai_path' });
       return;
     }
@@ -262,30 +148,26 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       sendJson(res, 401, { error: 'invalid_local_token' });
       return;
     }
+
     try {
       const body = await readJsonBody(req);
-      const reservation = await options.ledger.reserve(body.parsed);
-      const proof = await options.proofGenerator({
-        ticketIndex: reservation.index,
-        request: body.parsed,
-      });
-      const upstream = await gatewayFetch(`${gatewayBaseUrl}${pathname}`, {
+      const rejection = completionRejection(body.parsed);
+      if (rejection) {
+        sendJson(res, 400, { error: rejection });
+        return;
+      }
+      const upstream = await options.prepaidClient.fetch(`${gatewayBaseUrl}${pathname}`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${options.compatibilityKey}`,
-          'Content-Type': 'application/json',
-          'X-ZK-Proof': proofHeader(proof),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: body.raw,
       });
       await relayGatewayResponse(res, upstream);
-      if (upstream.status >= 200 && upstream.status < 300 && upstream.status !== 202) {
-        await options.ledger.consume(reservation.requestDigest);
-      }
     } catch (error: unknown) {
       if (!res.headersSent) {
-        const message = error instanceof Error ? error.message : 'Loopback request failed';
-        sendJson(res, 502, { error: 'sidecar_request_failed', message });
+        sendJson(res, 502, {
+          error: 'sidecar_request_failed',
+          message: error instanceof Error ? error.message : 'Loopback request failed',
+        });
       } else if (!res.writableEnded) {
         res.end();
       }

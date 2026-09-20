@@ -19,14 +19,15 @@ describe('sidecar package distribution', () => {
       types: './dist/codex-sdk-options.d.ts',
       import: './dist/codex-sdk-options.js',
     });
-    expect(packageJson.dependencies?.['@zk-credits/shared']).toBeUndefined();
     expect(packageJson.dependencies).toMatchObject({
-      '@scure/bip39': expect.any(String),
-      circomlibjs: expect.any(String),
-      keytar: expect.any(String),
+      '@zk-credits/shared': 'file:../zk-credits-shared',
+      '@zk-credits/x402-zk-prepaid': 'file:../x402-zk-prepaid',
       snarkjs: expect.any(String),
     });
-    expect(packageJson.devDependencies?.['@zk-credits/shared']).toBe('file:../zk-credits-shared');
+    expect(packageJson.dependencies).not.toHaveProperty('@scure/bip39');
+    expect(packageJson.dependencies).not.toHaveProperty('circomlibjs');
+    expect(packageJson.dependencies).not.toHaveProperty('keytar');
+    expect(packageJson.devDependencies?.['@zk-credits/shared']).toBeUndefined();
     expect(packageJson.scripts?.build).toContain('scripts/bundle.mjs');
     expect(packageJson.scripts?.start).toBe('node dist/zk-credits.js');
     expect(packageJson.engines?.node).toBe('>=20');
