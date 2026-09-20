@@ -37,6 +37,22 @@ function gatewayOptions(provider: ProviderAdapter = new MockProviderAdapter()) {
   };
 }
 
+async function requestSignalFor(
+  requirements: PaymentRequirements,
+  requestBody = body,
+  nonce = '0123456789abcdef',
+  responseKeyValue = responseKey,
+): Promise<string> {
+  return (await deriveRequestSignal({
+    method: 'POST',
+    url: 'http://test.local/v1/chat/completions',
+    body: new TextEncoder().encode(JSON.stringify(requestBody)),
+    requirements,
+    nonce,
+    responseKey: responseKeyValue,
+  })).field;
+}
+
 async function paymentFor(
   gateway: { requirements: PaymentRequirements },
   requestBody = body,
@@ -44,14 +60,7 @@ async function paymentFor(
 ): Promise<PaymentPayload> {
   const nonce = overrides.nonce ?? '0123456789abcdef';
   const key = overrides.responseKey ?? responseKey;
-  const signal = overrides.signal ?? (await deriveRequestSignal({
-    method: 'POST',
-    url: 'http://test.local/v1/chat/completions',
-    body: new TextEncoder().encode(JSON.stringify(requestBody)),
-    requirements: gateway.requirements,
-    nonce,
-    responseKey: key,
-  })).field;
+  const signal = overrides.signal ?? await requestSignalFor(gateway.requirements, requestBody, nonce, key);
   return buildPaymentPayload({
     requirements: gateway.requirements,
     proof: {},
@@ -63,6 +72,45 @@ async function paymentFor(
 
 function signalDigest(payment: PaymentPayload): string {
   return createHash('sha256').update(payment.payload.publicSignals[3]!).digest('hex');
+}
+
+function requirementsAt(gateway: { requirements: PaymentRequirements }, issuedAt: number): PaymentRequirements {
+  return buildPaymentRequirements({
+    asset: gateway.requirements.asset,
+    contract: gateway.requirements.extra.contract,
+    payTo: gateway.requirements.payTo,
+    deploymentDomain: gateway.requirements.extra.deploymentDomain,
+    circuitId: gateway.requirements.extra.circuit,
+    verifyingKeyId: gateway.requirements.extra.verifyingKey,
+    requirementsVersion: gateway.requirements.extra.requirementsVersion,
+    issuedAt,
+  });
+}
+
+/**
+ * Builds a payment whose proof timestamp is independent of the challenge it
+ * claims, which is the shape a client that ignores the challenge would send.
+ */
+async function paymentWithTimestamp(
+  requirements: PaymentRequirements,
+  timestamp: number,
+  nullifier: string,
+  requestBody = body,
+): Promise<PaymentPayload> {
+  const nonce = '0123456789abcdef';
+  const signal = await requestSignalFor(requirements, requestBody, nonce);
+  return buildPaymentPayload({
+    requirements,
+    proof: {},
+    publicSignals: ['1', String(timestamp), '3', signal, nullifier, '5'],
+    nonce,
+    responseKey,
+  });
+}
+
+function paymentRequiredError(response: { headers: Record<string, unknown> }): string | undefined {
+  const required = response.headers[PAYMENT_REQUIRED_HEADER.toLowerCase()];
+  return typeof required === 'string' ? decodeHeader<{ error?: string }>(required).error : undefined;
 }
 
 async function paidRequest(
@@ -176,6 +224,39 @@ describe('Base zk-prepaid gateway', () => {
     expect(staleResponse.status).toBe(402);
     expect(staleResponse.headers[PAYMENT_REQUIRED_HEADER.toLowerCase()]).toBeDefined();
     await expect(gateway.claimStore.lookup('1003')).resolves.toBeUndefined();
+  });
+
+  it('bounds the challenge window to [now-300s, now+5s] and binds the proof timestamp to it', async () => {
+    const provider = new CountingProvider(() => jsonResponse({ ok: true }));
+    const gateway = await createZkPrepaidGateway(gatewayOptions(provider));
+    const current = Math.floor(clockValue / 1000);
+
+    // Both window edges are still accepted, so the negatives below are the
+    // window itself and not a narrower check.
+    for (const [issuedAt, nullifier] of [[current - 300, '1301'], [current + 5, '1302']] as const) {
+      const payment = await paymentWithTimestamp(requirementsAt(gateway, issuedAt), issuedAt, nullifier);
+      const response = await paidRequest(gateway, payment);
+      expect(response.status, `issuedAt ${issuedAt}`).toBe(200);
+      await expect(gateway.claimStore.lookup(nullifier, signalDigest(payment), clockValue))
+        .resolves.toMatchObject({ state: 'committed' });
+    }
+
+    const rejected = [
+      ['stale beyond now-300', current - 301, current - 301, 'invalid_or_stale_authorization'],
+      ['future skew beyond now+5', current + 6, current + 6, 'invalid_or_stale_authorization'],
+      ['user-selected historical timestamp', current - 3600, current - 3600, 'invalid_or_stale_authorization'],
+      ['public timestamp that is not the issuedAt', current - 10, current - 20, 'issued_at_mismatch'],
+    ] as const;
+    for (const [index, [name, issuedAt, timestamp, reason]] of rejected.entries()) {
+      const nullifier = String(1020 + index);
+      const response = await paidRequest(gateway, await paymentWithTimestamp(requirementsAt(gateway, issuedAt), timestamp, nullifier));
+      expect(response.status, name).toBe(402);
+      expect(paymentRequiredError(response), name).toBe(reason);
+      await expect(gateway.claimStore.lookup(nullifier), name).resolves.toBeUndefined();
+    }
+
+    // Only the two window-edge challenges reached the provider.
+    expect(provider.calls).toBe(2);
   });
 
   it('buffers a valid provider 2xx, stages encrypted replay, commits, then sends plaintext', async () => {

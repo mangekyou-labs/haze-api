@@ -42,6 +42,8 @@ import type { PilotFundingService } from './pilot-funding.js';
 
 const MAX_REQUEST_BYTES = 2_000_000;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 10_000;
+const ISSUED_AT_MAX_AGE_SECONDS = 300;
+const ISSUED_AT_MAX_FUTURE_SKEW_SECONDS = 5;
 const DEFAULT_CONTRACT = '0x0000000000000000000000000000000000000001';
 const DEFAULT_TREASURY = '0x0000000000000000000000000000000000000002';
 const DEFAULT_DOMAIN = '84532';
@@ -232,8 +234,13 @@ async function loadGroth16Verifier(
       if (knownRoots.size === 0) return { isValid: false, invalidReason: 'contract_root_not_configured' };
       if (!root || !knownRoots.has(root)) return { isValid: false, invalidReason: 'unknown_contract_root' };
       if (!expectedDomain || domain !== expectedDomain) return { isValid: false, invalidReason: 'deployment_domain_mismatch' };
-      const nowSeconds = BigInt(Math.floor(clock() / 1000));
-      if (!timestamp || BigInt(timestamp) > nowSeconds + 30n) return { isValid: false, invalidReason: 'future_proof_timestamp' };
+      // The gateway window (paid path, facilitator routes) and the scheme's
+      // structural check already bind this challenge. This repeats the window
+      // through the same helper so the off-chain prover can never accept a
+      // timestamp the resource server would reject.
+      if (!timestamp || !issuedAtInWindow(BigInt(timestamp), currentSeconds(clock))) {
+        return { isValid: false, invalidReason: 'stale_or_future_proof_timestamp' };
+      }
       const valid = await groth16.verify(vk, payment.payload.publicSignals, payment.payload.proof);
       return valid ? { isValid: true } : { isValid: false, invalidReason: 'proof_invalid' };
     };
@@ -274,9 +281,22 @@ function requirementsForAccepted(config: GatewayConfig, accepted: unknown): Paym
   }
 }
 
+function currentSeconds(clock: () => number): bigint {
+  return BigInt(Math.floor(clock() / 1000));
+}
+
+/**
+ * The single freshness window for a gateway challenge. The paid path, the
+ * facilitator routes, and the real Groth16 verifier all read it here, so the
+ * off-chain prover cannot accept a timestamp the resource server would reject.
+ */
+function issuedAtInWindow(issuedAt: bigint, nowSeconds: bigint): boolean {
+  return issuedAt >= nowSeconds - BigInt(ISSUED_AT_MAX_AGE_SECONDS)
+    && issuedAt <= nowSeconds + BigInt(ISSUED_AT_MAX_FUTURE_SKEW_SECONDS);
+}
+
 function issuedAtFresh(requirements: PaymentRequirements, clock: () => number): boolean {
-  const current = Math.floor(clock() / 1000);
-  return requirements.extra.issuedAt >= current - 300 && requirements.extra.issuedAt <= current + 5;
+  return issuedAtInWindow(BigInt(requirements.extra.issuedAt), currentSeconds(clock));
 }
 
 async function bufferResponse(response: globalThis.Response): Promise<BufferedResponse> {
