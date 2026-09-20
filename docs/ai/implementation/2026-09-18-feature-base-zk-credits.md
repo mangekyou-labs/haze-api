@@ -26,9 +26,19 @@ the rejected share equation.
   `circuits/build/private-credit/` under Circom 2.2.2. The Circom 0.5
   artifacts at `circuits/private_credit_spend.{r1cs,wasm,sym}` are negative
   fixtures for the rejected equation and are never overwritten.
-- `contracts/src/PrivateCreditBond.sol`: immutable Base escrow and tree.
-  Target: one funded tier; `_recoverSecret` under the restored algebra.
-  Current source still has `TIER_COUNT = 3` and the old recovery.
+- `contracts/src/PrivateCreditBond.sol`: immutable Base escrow and tree, one
+  funded tier. `FUNDED_TIER_ID` 0 with in-circuit allowance 250 and
+  refundable bond `20_000_000` ($20 at six decimals); every other `tierId`
+  reverts `InvalidTier`. Slash recovers slot blinding as
+  `(share1 - share2) / (signal1 - signal2)`, then secret as
+  `share1 - slotBlinding * signal1`, and requires
+  `Poseidon(slotBlinding) == nullifier` and `Poseidon(secret) == commitment`.
+  It rejects equal signals, zero signals, a zero nullifier, a zero recovered
+  slot blinding or secret, and out-of-range field elements. `releaseBond` is
+  permissionless at expiry plus seven days and pays the refund vault. Leaves
+  stay `Poseidon(commitment, tier_id, expiry)` over a depth-20 append-only
+  tree with historical roots retained. The spend verifier remains a Foundry
+  mock until B12 supplies the generated verifier and adapter.
 - `packages/zk-credits-shared`: browser/Node crypto, canonical requests,
   encrypted credentials. B2 restored the slot-blinding statement, BN254
   field-range rejection, and the RFC 8785 length-prefixed request signal in
@@ -102,8 +112,8 @@ sidecar manifest. Hash mismatch is a proof failure.
 ## Implementation order
 
 Follow planning B2→B3→B4 for the cryptographic spine, then B5→B6→B8 for
-spend, then B7/B9 for checkout. B2 and B3 are done locally; B4 is next. Do
-not represent the restored circuit as privacy-preserving while the rejected
-root fixtures are still present and no generated Solidity verifier has been
-proven end to end. Do not onboard paid partners until planning B12 and
-founder B16 pass.
+spend, then B7/B9 for checkout. B2, B3, and B4 are done locally; B5 is next.
+Do not represent the restored circuit as privacy-preserving while the
+rejected root fixtures are still present and no generated Solidity verifier
+has been proven end to end. Do not onboard paid partners until planning B12
+and founder B16 pass.

@@ -11,9 +11,9 @@ Feature slug: `base-zk-credits`
 Status: approved 2026-09-20 on
 [Review the reconciled pilot design and implementation plan](../../wayfinder/base-zk-credits-pilot/tickets/05-reconcile-pilot-docs.md).
 
-The circuit and the shared crypto package are rewritten locally (planning
-B2/B3). The contract, gateway, and replay code still implement three-tier
-allowances, a 10 MiB replay cap, and a future-only timestamp check, and the
+The circuit, the shared crypto package (planning B2/B3), and the bond
+contract (B4) are rewritten locally. The gateway and replay code still
+implement a 10 MiB replay cap and a future-only timestamp check, and the
 root `circuits/private_credit_spend.{r1cs,wasm,sym}` Circom 0.5 artifacts
 still carry the rejected equation at 48 public / 0 private. Those artifacts
 are negative fixtures until rewritten. Do not treat their existing tests as
@@ -43,7 +43,7 @@ A proof failure (prove miss, 10s abort, hash mismatch, or failed
 self-verify) must leave no claim row, consume no slot, and must not be
 counted as a cancellation.
 
-## Local B2/B3 evidence (2026-09-20)
+## Local B2/B3/B4 evidence (2026-09-20)
 
 Run from the `feature-base-zk-credits` worktree. This is local evidence for
 the rewritten statement only; it does not close planning B12.
@@ -53,9 +53,25 @@ the rewritten statement only; it does not close planning B12.
 | S1 | `npm test` in `packages/zk-credits-shared` | 23 passed, 8 skipped (`src/base.test.ts`: 8 passed) |
 | S10 | `NODE_ENV=test npx vitest run zk-prepaid-gateway.test.ts` in `ts` | 7 passed |
 | B2 caller regression | `npm test` in `packages/zk-credits-sidecar` | 46 passed, 16 files |
-| S2–S5 | `CIRCOM=$HOME/.local/bin/circom npm test` in `circuits` | compiled with circom 2.2.2; `public inputs: 0`, `private inputs: 48`, `public outputs: 6`; witness checks passed. S2: slots 0 and 249 satisfy. S3: altered root, altered path, altered tier, altered expiry, slot ≥ 250, slot ≥ 256, `timestamp >= expiry`, zero secret, zero request signal, and a malformed field encoding are all rejected. S4: R1CS shape. S5: two-transcript recovery, one-transcript non-recovery |
+| S2, S3, S5 | `CIRCOM=$HOME/.local/bin/circom npm test` in `circuits` | compiled with circom 2.2.2; `public inputs: 0`, `private inputs: 48`, `public outputs: 6`; witness checks passed. S2: slots 0 and 249 satisfy. S3: altered root, altered path, altered tier, altered expiry, slot ≥ 250, slot ≥ 256, `timestamp >= expiry`, zero secret, zero request signal, and a malformed field encoding are all rejected. S5: two-transcript recovery, one-transcript non-recovery |
 | S4 | `r1csfile.readR1cs(file, { loadConstraints: false, loadMap: false })` | new build `{ nOutputs: 6, nPubInputs: 0, nPrvInputs: 48 }`; root fixture `{ nOutputs: 6, nPubInputs: 48, nPrvInputs: 0 }` |
+| S6, S7 | `FOUNDRY_OFFLINE=true forge test` in `contracts` | 28 passed (26 unit + 2 invariants); invariants ran 256 sequences and ~128,000 calls each with 0 reverts |
 | S34 lint | `npx ai-devkit@latest lint --feature base-zk-credits` | all checks passed |
+
+The B4 suites were written first and failed before the contract change, on
+the three-tier table (`5000 != 250`, `5000000 != 20000000`, and tier 1/2
+still fundable) and on `InvalidProof` for every restored-algebra slash.
+After the change, S6 covers the single funded tier, depth-20 append-only
+roots with historical retention, release at expiry plus seven days,
+permissionless release, terminal exclusivity, USDC accounting, verifier
+context failures, and the two fuzz properties. S7 covers two-transcript
+recovery of slot blinding then secret, the `Poseidon(slotBlinding) ==
+nullifier` and `Poseidon(secret) == commitment` bindings, equal signals,
+zero signals, a zero recovered slot blinding, out-of-range field elements,
+and the absence of any 300s spend window: evidence six hours old still
+slashes. The local S31 overlap is the 50/50 split, the rejected second
+slash, and release-versus-slash exclusivity; the full S31 path against the
+gateway stays with B20.
 
 Two reading notes. Expected-unsatisfying witnesses print `ERROR: 4 Error in
 template PrivateCreditSpend_218`; the circuit suite still exits zero and that
@@ -68,9 +84,12 @@ Three S3 clauses are not local: zero slot blinding is constrained in-circuit
 but not witness-testable (`Poseidon` has no usable zero preimage), so B2
 carries the API-level rejection instead; matching deployment domain is a
 contract check in B4, not an in-circuit one; and verifier-adapter consumption
-of reordered public signals is B12. S23 is not closed: there is still no
-independent review, no generated proof verified by a real Solidity verifier
-and adapter on Base Sepolia, and no paid-traffic gate.
+of reordered public signals is B12. S6 and S7 are Foundry evidence against a
+mocked `ISpendVerifier` and keccak Poseidon stand-ins, so they do not show
+that a real generated proof verifies, that a real Poseidon deployment agrees
+with the circuit, or that anything has happened onchain. S23 is not closed:
+there is still no independent review, no generated proof verified by a real
+Solidity verifier and adapter on Base Sepolia, and no paid-traffic gate.
 
 ## Scenario catalog
 

@@ -72,8 +72,9 @@ represent the circuit as privacy-preserving until they are closed.
 ## Live decision tickets
 
 None. The destination is the decision-complete plan, and that plan is
-approved. Planning B2 and B3 landed 2026-09-20; current implementation work is
-B4 in [the delivery plan](../../ai/planning/2026-09-18-feature-base-zk-credits.md).
+approved. Planning B2, B3, and B4 landed 2026-09-20; current implementation
+work is B5 in
+[the delivery plan](../../ai/planning/2026-09-18-feature-base-zk-credits.md).
 
 ## Not yet specified
 

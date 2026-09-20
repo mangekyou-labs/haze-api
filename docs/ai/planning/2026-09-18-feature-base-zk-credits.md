@@ -14,10 +14,13 @@ Status: approved 2026-09-20 on
 [Review the reconciled pilot design and implementation plan](../../wayfinder/base-zk-credits-pilot/tickets/05-reconcile-pilot-docs.md).
 
 This plan is a rewrite plan, not a greenfield build. Several packages and
-contracts already exist. They implement rejected algebra, three-tier SKUs,
-unsafe timestamp checks, and a 10 MiB replay cap. Status
-**present-unsafe** means the files are there and must be rewritten against
-the frozen design before paid traffic. Do not mark them complete.
+contracts already exist. The circuit, shared crypto, and bond are rewritten
+(B2/B3/B4). The gateway still enforces only a 30s future-skew timestamp
+bound and still carries a 10 MiB replay cap and a 32 MiB upstream buffer;
+the rejected algebra survives only in the gitignored root negative
+fixtures. Status **present-unsafe** means the files are there and must be
+rewritten against the frozen design before paid traffic. Do not mark them
+complete.
 
 Base mainnet and a production proving ceremony are **B22**: blocked on a
 later go/no-go map. They are not tasks on this queue.
@@ -29,7 +32,7 @@ later go/no-go map. They are not tasks on this queue.
 | `packages/zk-credits-shared` | done (B2) | rewritten against the frozen statement: restored slot-blinding algebra, BN254 field checks, RFC 8785 length-prefixed request-signal binding, encrypted credential export |
 | `circuits/private_credit_spend.circom` plus `circuits/scripts/compile-private-credit.js` and `circuits/scripts/private-credit-test.js` | done (B3) | Circom 2, restored algebra, allowance 250; compiles to `circuits/build/private-credit/` at 6 outputs / 0 extra public / 48 private |
 | Root `circuits/private_credit_spend.{r1cs,wasm,sym}` | present-unsafe, negative fixtures | Circom 0.5 output of the rejected algebra: `nullifier = Poseidon(secret, slot, domain)`; `share = secret * signal + nullifier`; allowances 5000/25000/75000; 48 public / 0 private. Never overwrite; proving artifacts stay gitignored |
-| `contracts/src/PrivateCreditBond.sol` | present-unsafe | `TIER_COUNT = 3`; `_recoverSecret` treats share as `secret * x + N` |
+| `contracts/src/PrivateCreditBond.sol` | done (B4) | One funded tier: `FUNDED_TIER_ID` 0, allowance 250, refundable bond `20_000_000` ($20 at six decimals); restored recovery requires `Poseidon(slotBlinding) == nullifier` and `Poseidon(secret) == commitment`; verifier is still a Foundry mock |
 | `packages/x402-zk-prepaid` | present-unsafe | custom scheme package exists; no `extra.issuedAt`; credit-asset fields need freeze |
 | `ts/claim-store.ts`, `ts/zk-prepaid-gateway.ts`, `ts/response-replay.ts` | present-unsafe | timestamp future-skew 30s only; `MAX_REPLAY_BYTES` 10 MiB; `MAX_UPSTREAM_BYTES` 32 MiB; charging/stream paths not frozen |
 | `packages/zk-credits-sidecar` | present-unsafe | local `fullProve` exists; development manifest is not hash-pinned for the restored circuit; self-verify/SLO/proof-failure semantics incomplete |
@@ -48,7 +51,7 @@ verifiers without implying development proving material is production-ready.
 | B1 | Worktree, lifecycle docs, AGPL, Base/ETH standards | done | Decision-complete requirements, design, testing, planning, implementation, deployment, and monitoring; no silent contradiction with closed tickets | Closed tickets 01–04 and 06 | `npx ai-devkit@latest lint --feature base-zk-credits`; `npx ai-devkit@latest lint`; explicit user approval of this set | S34 |
 | B2 | BN254 shared crypto, credential export, request canonicalization | done | Poseidon, field checks, encrypted export, and request-signal binding match the frozen ABI | B1 | 2026-09-20 local: `npm test` in `packages/zk-credits-shared` (23 passed, 8 skipped); `npm test` in `packages/zk-credits-sidecar` (46 passed); `NODE_ENV=test npx vitest run zk-prepaid-gateway.test.ts` (7 passed) | S1, S10 |
 | B3 | Circom spend circuit, development compile scripts, R1CS freeze | done | Restored slot-blinding algebra; six public signals; in-circuit allowance 250; 48 private inputs; reject zeros | B2 | 2026-09-20 local: `CIRCOM=$HOME/.local/bin/circom npm test` in `circuits` (compiled with circom 2.2.2 to 0 public inputs / 48 private / 6 public outputs; witness checks passed; rejects altered root/path/tier/expiry, slot ≥ 250, slot ≥ 256, `timestamp >= expiry`, zero secret, zero request signal, malformed field encoding); `r1csfile.readR1cs` new build `{ nOutputs: 6, nPubInputs: 0, nPrvInputs: 48 }` vs root fixture `{ nOutputs: 6, nPubInputs: 48, nPrvInputs: 0 }`; `npx ai-devkit@latest lint --feature base-zk-credits` passed. S3 is partial: zero slot blinding, cross-domain replay, and reordered-signal consumption stay with B2 and B12 | S2, S3, S4, S5 |
-| B4 | Immutable USDC bond contract, mocks, Foundry invariants | present-unsafe | Single funded tier 250; restored `_recoverSecret`; known roots; 50/50 slash; release maturity; SafeERC20 | B3 | `forge test`; slash recovery vector from S5 | S6, S7, S31 |
+| B4 | Immutable USDC bond contract, mocks, Foundry invariants | done | Single funded tier 250; restored `_recoverSecret`; known roots; 50/50 slash; release maturity; SafeERC20 | B3 | 2026-09-20 local: rewritten tests first failed on the three-tier table (`5000 != 250`, `5000000 != 20000000`) and on `InvalidProof` for restored-algebra slashes; then `FOUNDRY_OFFLINE=true forge test` in `contracts` passed 28 (26 unit + 2 invariants, 256 runs, 0 reverts). Real verifier and onchain slash remain B12. S31 stays with B20 | S6, S7 |
 | B5 | Custom x402 v2 `zk-prepaid` package, credit-asset fields, `@x402/core` registration | present-unsafe | `issuedAt` in extra; `amount`/`asset` name the credit; scheme-based selection; omit `payer`; empty transaction | B2 | Package tests and typecheck; `/supported` fixtures | S8, S9, S10, S11 |
 | B6 | Isolated claim store, facilitator, gateway reservation lifecycle | present-unsafe | Reserve-before-dispatch; commit-only-after-success; 1 MiB buffered replay; no streaming; `issuedAt` window; proof failure never inserts a claim | B5 | Concurrency, crash, freshness, streaming-reject, and replay tests | S9–S15, S21, S29 |
 | B7 | Stripe opaque orders, sponsorship/maturity/refund/dispute jobs | present-unsafe | Signed idempotent webhooks; no Stripe identity joined to nullifiers or signals; durable retry | B4, B6 | Webhook/job integration tests; privacy scan of billing rows | S18, S21, S22 |
@@ -71,10 +74,10 @@ verifiers without implying development proving material is production-ready.
 ## Sequencing
 
 1. B1 is done (document set approved 2026-09-20).
-2. B2 → B3 → B4 is the cryptographic spine. Do not onboard partners on the
-   current compiled circuit.
-3. B5 → B6 → B8 can overlap with B4 after the public-signal ABI is frozen
-   in B3.
+2. B2 → B3 → B4, the cryptographic spine, is done locally and committed.
+   Do not onboard partners until B12 replaces the mock verifier with a real
+   generated one and closes the paid-traffic gate.
+3. B5 → B6 → B8 follow the public-signal ABI frozen in B3.
 4. B7 and B9 follow a working reservation machine.
 5. B11 is local verification. B12 is the paid-traffic gate. B16 founder
    dry-run must pass before any partner dry-run.
@@ -111,8 +114,8 @@ external keys and user authorization.
 
 ## Next actions
 
-1. B4 `PrivateCreditBond.sol`: one funded 250-slot tier and restored
-   `_recoverSecret`, failing Foundry tests first.
-2. B6 `issuedAt` window and 1 MiB non-streaming commit path.
-3. B8 sidecar hash-pinned manifest and self-verify against the compiled
+1. B5 custom x402 v2 `zk-prepaid` package, then B6: `issuedAt` window and
+   1 MiB non-streaming commit path.
+2. B8 sidecar hash-pinned manifest and self-verify against the compiled
    `circuits/build/private-credit/` artifacts.
+3. B11 fresh local verification matrix before any paid-traffic claim.
