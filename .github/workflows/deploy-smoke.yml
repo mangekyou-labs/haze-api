@@ -1,14 +1,8 @@
 name: Deploy Smoke
 
-# Post-deploy smoke against the hosted testnet (M3.2/3.3/3.4). Template —
-# activates once the Fly.io / Vercel URLs exist and GATEWAY_URL / WEB_URL /
-# FEE_SPONSOR_URL secrets are configured. Runs manually, or automatically
-# after a successful main-branch CI.
-#
-# The full hosted E2E (M4.1/4.2/4.3) — scripts/e2e-test.js and
-# scripts/slash-demo.js against the public URLs — is the launch-validation gate
-# and runs from a machine/runner with the demo credentials, not from this
-# health-only smoke.
+# Hosted health smoke for the Base Sepolia gateway and web app. It is safe to
+# schedule before deployment secrets exist: each probe is skipped when its URL
+# is not configured.
 
 on:
   workflow_dispatch:
@@ -25,53 +19,81 @@ concurrency:
 
 jobs:
   smoke:
-    name: Hosted health + client smoke
+    name: Hosted Base/x402 health smoke
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       github.event.workflow_run.conclusion == 'success'
     env:
       GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
       WEB_URL: ${{ secrets.WEB_URL }}
-      FEE_SPONSOR_URL: ${{ secrets.FEE_SPONSOR_URL }}
     steps:
-      # NOTE: `secrets` context is not available in job-level `if`, so the
-      # GATEWAY_URL guard lives here rather than in the job `if` above.
-      - name: Require GATEWAY_URL (guards until M3.2/3.3/3.4 secrets exist)
-        if: env.GATEWAY_URL == ''
-        run: echo "::notice::GATEWAY_URL not configured; skipping hosted smoke (template pre-deploy)"
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install root deps
-        run: npm ci
       - name: Gateway health
+        if: env.GATEWAY_URL != ''
         run: curl -fsS -o /dev/null -w 'gateway /health -> %{http_code}\n' "$GATEWAY_URL/health"
-      - name: Fee-relay health
-        if: env.FEE_SPONSOR_URL != ''
-        run: curl -fsS -o /dev/null -w 'fee-relay /health -> %{http_code}\n' "$FEE_SPONSOR_URL/health"
+      - name: Gateway supported schemes
+        if: env.GATEWAY_URL != ''
+        run: curl -fsS "$GATEWAY_URL/x402/facilitator/supported" | grep -q 'zk-prepaid'
       - name: Web landing renders
-        run: curl -fsS "$WEB_URL" | grep -q "ZK API Credits" && echo "web landing OK"
-      - name: Web contract-status proxy reachable
-        run: curl -fsS -o /dev/null -w 'contract-status -> %{http_code}\n' "$WEB_URL/api/dashboard/status"
-
-  level4-synthetic:
-    name: Level 4 cold/warm synthetic monitor
-    # Repository variables are non-secret URLs. The monitor itself never
-    # prints them and fails closed if any service is not configured.
-    runs-on: ubuntu-latest
-    env:
-      LEVEL4_FRONTEND_URL: ${{ vars.LEVEL4_FRONTEND_URL }}
-      LEVEL4_GATEWAY_URL: ${{ vars.LEVEL4_GATEWAY_URL }}
-      LEVEL4_FEE_SPONSOR_URL: ${{ vars.LEVEL4_FEE_SPONSOR_URL }}
-      LEVEL4_SYNTHETIC_PASSES: '3'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Run three cold/warm passes
-        run: node scripts/level4-synthetic.mjs
+        if: env.WEB_URL != ''
+        run: curl -fsS "$WEB_URL" | grep -q 'ZK API Credits'
+      - name: Removed web payment routes return 404
+        if: env.WEB_URL != ''
+        run: |
+          set -euo pipefail
+          for probe in \
+            "POST /api/checkout" \
+            "POST /api/webhooks/stripe" \
+            "GET /api/orders/ord_000000000000" \
+            "GET /api/wallet/link?address=0x0000000000000000000000000000000000000001"; do
+            method="${probe%% *}"
+            path="${probe#* }"
+            status=$(curl -sS -o /dev/null -w '%{http_code}' -X "$method" "$WEB_URL$path")
+            echo "$method $path -> $status"
+            test "$status" = "404"
+          done
+      - name: Removed gateway billing and wallet-link APIs return 404
+        if: env.GATEWAY_URL != ''
+        run: |
+          set -euo pipefail
+          for probe in \
+            "POST /v1/billing/orders" \
+            "GET /v1/billing/orders/ord_000000000000" \
+            "POST /v1/billing/stripe-event" \
+            "POST /v1/accounts/wallet-link"; do
+            method="${probe%% *}"
+            path="${probe#* }"
+            status=$(curl -sS -o /dev/null -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL$path")
+            echo "$method $path -> $status"
+            test "$status" = "404"
+          done
+      - name: Pilot pages render no checkout or payment action
+        if: env.WEB_URL != ''
+        run: |
+          set -euo pipefail
+          # Anonymous dashboard access must be gated by GitHub sign-in.
+          gated=$(curl -sS -o /dev/null -w '%{http_code}' "$WEB_URL/dashboard")
+          echo "anonymous GET /dashboard -> $gated"
+          test "$gated" != "200"
+          for path in /sign-in /onboarding /recover; do
+            body=$(curl -fsSL "$WEB_URL$path")
+            echo "$path rendered"
+            if printf '%s' "$body" | grep -qiE 'stripe|/api/checkout|buy credits|checkout\.sessions'; then
+              echo "$path still advertises a checkout or payment path" >&2
+              exit 1
+            fi
+          done
+      - name: Pilot invite and funding endpoints exist
+        if: env.GATEWAY_URL != ''
+        run: |
+          set -euo pipefail
+          # The routes exist when the gateway answers anything but 404. Invalid
+          # input yields 400, and an unconfigured store yields 503; both prove
+          # the route is mounted.
+          funding=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL/v1/pilot/funding")
+          echo "POST /v1/pilot/funding -> $funding"
+          test "$funding" != "404"
+          bundle=$(curl -sS -o /dev/null -w '%{http_code}' "$GATEWAY_URL/v1/pilot/bundles/1")
+          echo "GET /v1/pilot/bundles/1 -> $bundle"
+          test "$bundle" != "404"

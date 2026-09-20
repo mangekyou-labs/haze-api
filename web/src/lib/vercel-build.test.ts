@@ -13,8 +13,8 @@ describe('Vercel build configuration', () => {
       path.resolve(process.cwd(), 'scripts/prepare-shared-package.mjs'),
       'utf8',
     );
-    expect(materializer.indexOf("'vendor/zk-credits-shared'")).toBeLessThan(
-      materializer.indexOf("'../packages/zk-credits-shared'"),
+    expect(materializer.indexOf("'../packages/zk-credits-shared'")).toBeLessThan(
+      materializer.indexOf("'vendor/zk-credits-shared'"),
     );
   });
 
@@ -31,11 +31,18 @@ describe('Vercel build configuration', () => {
     expect(dependencies.circomlibjs).toBeTruthy();
   });
 
-  it('vendors the current withdrawal-proof export for isolated builds', () => {
+  it('vendors the active Base credential export for isolated builds', () => {
     const sharedIndex = fs.readFileSync(
       path.resolve(process.cwd(), 'vendor/zk-credits-shared/dist/index.js'),
       'utf8',
     );
-    expect(sharedIndex).toContain('generateMembershipRemovalProofSelfVerified');
+    expect(sharedIndex).toContain('computeCommitment');
+    expect(sharedIndex).toContain('decryptAnyCredentialExport');
+    expect(sharedIndex).not.toContain('generateMembershipRemovalProofSelfVerified');
+  });
+
+  it('keeps the Vercel output directory out of lint', () => {
+    const eslintConfig = fs.readFileSync(path.resolve(process.cwd(), 'eslint.config.mjs'), 'utf8');
+    expect(eslintConfig).toContain('.vercel/**');
   });
 });

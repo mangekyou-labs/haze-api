@@ -296,13 +296,18 @@ describe('Base zk-prepaid gateway', () => {
     expect(JSON.stringify(response.body)).not.toMatch(/nullifier|request.?signal|proof|wallet|account|commitment/i);
   });
 
-  it('keeps optional wallet links outside the spend response surface', async () => {
+  it('removed the Stripe billing and wallet-link routes from the unpaid runtime', async () => {
     const gateway = await createZkPrepaidGateway(gatewayOptions());
-    const linked = await request(gateway.app)
-      .post('/v1/accounts/wallet-link')
-      .send({ accountId: 'github-user', address: '0x00000000000000000000000000000000000000A1' });
-    expect(linked.status).toBe(200);
-    expect(linked.body).toEqual({ linked: true, address: '0x00000000000000000000000000000000000000a1' });
-    expect(JSON.stringify(linked.body)).not.toMatch(/commitment|secret|order|claim|proof/i);
+    for (const [method, path] of [
+      ['post', '/v1/billing/orders'],
+      ['get', '/v1/billing/orders/ord_000000000000'],
+      ['post', '/v1/billing/stripe-event'],
+      ['post', '/v1/accounts/wallet-link'],
+    ] as const) {
+      const response = method === 'get'
+        ? await request(gateway.app).get(path)
+        : await request(gateway.app).post(path).send({});
+      expect(response.status).toBe(404);
+    }
   });
 });

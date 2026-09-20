@@ -47,14 +47,55 @@ the rejected share equation.
   adapters. Core `amount`/`asset` name the credit asset
   `coding-deepseek-v4-flash-v1`. `extra.issuedAt` is gateway-issued unix
   seconds. The bond address lives in `extra.contract`.
-- `ts/zk-prepaid-gateway.ts`, `ts/claim-store.ts`, `ts/response-replay.ts`,
-  `ts/stripe-billing.ts`: isolated claim store, facilitator, gateway
-  middleware, buffered replay, durable billing jobs.
+- `ts/zk-prepaid-gateway.ts`, `ts/claim-store.ts`, `ts/response-replay.ts`: isolated claim
+  store, facilitator, gateway middleware, buffered replay. The pilot routes
+  (`/v1/pilot/invites/redeem`, `/v1/pilot/funding`, `/v1/pilot/bundles/:commitment`)
+  are mounted here and fail closed with 503 when no pilot store is injected.
+- `ts/pilot-invites.ts`, `ts/pilot-funding.ts`, `ts/pilot-admin.ts`: control-plane
+  invites, detached provisioning capabilities, and the founder CLI. The two plane
+  modules never import each other; redemption crosses the boundary through an
+  issuer that takes no arguments.
 - `packages/zk-credits-sidecar`: operator-local credential, hash-pinned
-  WASM/zkey, Groth16 `fullProve` plus self-verify, x402 client, replay.
-- `web`: Stripe and Base-aware account/dashboard. No remaining-credit or
-  usage history.
+  WASM/zkey, Groth16 `fullProve` plus self-verify, x402 client, replay. It accepts
+  version-2 activated credentials and legacy version-1 exports.
+- `web`: invite-only unpaid onboarding. Five-step state machine on `/dashboard`
+  (invite, capsule, re-import, funding, activated), local-only recovery, sanitized
+  Base Sepolia status. No checkout, order, webhook, wallet-link, or Stripe code.
 - `archive/stellar` plus historical evaluation migrations: reference only.
+
+## Invite-only unpaid onboarding (B9)
+
+Migration `ts/db/migrations/0015_pilot_invites.sql` adds two deliberately
+unjoinable schemas. `control_plane.pilot_invites` holds a SHA-256 code digest,
+the invited GitHub account id, expiry, redemption, and revocation state, and
+no commitment or funding token. `pilot_provisioning.funding_capabilities`
+holds a SHA-256 token digest, capability expiry, funding state, the commitment
+bound on the first attempt, the authoritative bundle expiry, and the funding
+transaction, and no account, invite, or session identifier.
+
+Codes and capabilities are 32 random bytes (base64url) shown once; invites
+default to seven days and capabilities to 30 minutes with a two-minute attempt
+lease. Redemption requires a matching GitHub account, is claimed with a single
+conditional `UPDATE`, and mints the capability through an issuer that receives
+no identity. Funding binds one commitment permanently: retries return the
+stored result, reuse with another commitment is `funding_commitment_conflict`,
+and a failed sponsorship stays retryable for the same commitment.
+
+The browser export is two-stage. The version-2 recovery capsule encrypts only
+`{ version: 2, secret }` and must be re-imported successfully before funding;
+after funding the unchanged capsule is wrapped with the gateway's authoritative
+tier, expiry, deployment domain, network, contract, and transaction hash, then
+verified locally against the secret. Version-1 exports remain readable by the
+recovery page and the sidecar.
+
+Removed from the deployed pilot path: `POST /api/checkout`,
+`GET /api/orders/:orderId`, `POST /api/webhooks/stripe`,
+`GET|POST /api/wallet/link`, `POST /v1/billing/orders`,
+`GET /v1/billing/orders/:orderId`, `POST /v1/billing/stripe-event`, and
+`POST /v1/accounts/wallet-link`. The Stripe npm packages, `STRIPE_SECRET_KEY`,
+`STRIPE_WEBHOOK_SECRET`, and the Stripe refund adapter are gone from the active
+tree. Base event synchronization still feeds proof roots and no longer calls
+order reconciliation.
 
 ## Non-negotiable invariants
 
@@ -112,8 +153,9 @@ sidecar manifest. Hash mismatch is a proof failure.
 ## Implementation order
 
 Follow planning B2→B3→B4 for the cryptographic spine, then B5→B6→B8 for
-spend, then B7/B9 for checkout. B2, B3, and B4 are done locally; B5 is next.
-Do not represent the restored circuit as privacy-preserving while the
-rejected root fixtures are still present and no generated Solidity verifier
-has been proven end to end. Do not onboard paid partners until planning B12
-and founder B16 pass.
+spend, then B9 for invite-only onboarding. B2, B3, B4, and the B9 onboarding
+rewrite are done locally; B5/B6/B8 remain **present-unsafe** where the notes
+above say so. Do not represent the restored circuit as privacy-preserving
+while the rejected root fixtures are still present and no generated Solidity
+verifier has been proven end to end. Do not onboard paid partners until
+planning B12 and founder B16 pass.

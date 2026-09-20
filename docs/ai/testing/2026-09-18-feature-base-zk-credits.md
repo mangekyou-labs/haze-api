@@ -91,6 +91,27 @@ with the circuit, or that anything has happened onchain. S23 is not closed:
 there is still no independent review, no generated proof verified by a real
 Solidity verifier and adapter on Base Sepolia, and no paid-traffic gate.
 
+## Local B9 evidence (2026-09-20)
+
+Run from the `feature-base-zk-credits` worktree on 2026-09-20. `NODE_ENV` was
+`production` in the ambient shell, so the gateway's internal guard failed
+closed until a token was supplied; that is recorded rather than hidden.
+
+| Scenarios | Command | Result |
+| --- | --- | --- |
+| S1 | `npx vitest run` in `packages/zk-credits-shared` | 29 passed, 8 skipped; `src/recovery-capsule.test.ts` covers version-2 capsule round trip, wrong password, tamper, activation-metadata binding, version-1 acceptance |
+| S19, S20, S21, S22 | `npx vitest run` in `ts` (no DB) | 80 passed, 12 skipped across 16 files; `pilot-invites.test.ts`, `pilot-funding.test.ts`, `pilot-admin.test.ts`, `pilot-routes.test.ts`, `pilot-plane-separation.test.ts` cover digests-only storage, expiry, revocation, single redemption under concurrency, account binding, commitment binding, idempotent retries, concurrent funding, invalid commitments, sponsor-failure recovery, response scans, and fail-closed 503s |
+| S21, S22, migration | `RUN_DB_TESTS=1 TEST_DATABASE_URL=postgres://localhost:5432/zk_credits_test npx vitest run` in `ts` | 92 passed against local Postgres; `pilot-store.integration.test.ts` covers digest-only rows, no cross-plane columns, one-redemption and one-commitment under concurrent service instances, the SQL expiry claim, and failed-sponsorship recovery |
+| S19, S20 | `npm run typecheck`, `npm test`, `npm run lint`, `npm run build` in `web` | all passed; the production route table contains only `/api/invites/redeem`, `/api/pilot/funding`, `/api/network-status`, and `/api/auth/[...nextauth]` |
+| S19, S20 | `E2E_PORT=3313 npx playwright test` in `web` | 7 passed: invite denial, backup gating, full onboarding with local activation verification, funding rejection plus retry with the same capability, version-1 and version-2 recovery, wrong password, tamper |
+| S21 | smoke probes against locally booted gateway (`:3401`) and `next start` (`:3402`) | `/v1/billing/orders`, `/v1/billing/orders/:id`, `/v1/billing/stripe-event`, `/v1/accounts/wallet-link`, `/api/checkout`, `/api/webhooks/stripe`, `/api/orders/:id`, `/api/wallet/link` all 404; anonymous `/dashboard` 307 to sign-in; `/sign-in`, `/onboarding`, `/recover` contain no Stripe, checkout, or purchase action |
+| B8 boundary | `npx vitest run` in `packages/zk-credits-sidecar` | 64 passed, 2 failed; the two failures are `src/pinned-artifacts.artifact.test.ts` real-Groth16 prove cases timing out at 120s, reproduced twice with no other load. They are in B8's proving path, not the credential-loading change, and are not claimed as passing |
+
+Not verified and not claimed: real GitHub OAuth in a deployed environment,
+real Base Sepolia sponsorship, hosted smoke runs, and any change to the
+`present-unsafe` B5/B6/B8 status notes above. The landing page and README SKU
+copy still describe the retired paid path; that is B21.
+
 ## Local B5 evidence (2026-09-20)
 
 | Scenarios | Command | Result |

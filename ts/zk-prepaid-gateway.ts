@@ -37,8 +37,8 @@ import {
   MAX_REPLAY_BYTES,
 } from './response-replay.js';
 import { claimFence, claimStoreErrorCode, LocalClaimStore } from './claim-store.js';
-import { StripeBillingService, type TierId } from './stripe-billing.js';
-import { MemoryWalletLinkStore, type WalletLinkStore } from './wallet-links.js';
+import type { PilotInviteService } from './pilot-invites.js';
+import type { PilotFundingService } from './pilot-funding.js';
 
 const MAX_REQUEST_BYTES = 2_000_000;
 const DEFAULT_PROVIDER_TIMEOUT_MS = 10_000;
@@ -76,13 +76,17 @@ export interface ZkPrepaidGatewayOptions {
   now?: () => number;
   /** Used by focused tests only; production uses the configured VK. */
   allowUnverifiedProofs?: boolean;
-  billing?: StripeBillingService;
-  walletLinks?: WalletLinkStore;
   facilitatorServiceToken?: string;
   operatorToken?: string;
   providerTimeoutMs?: number;
   /** Reads the latest finalized root set maintained by the Base event indexer. */
   rootSnapshot?: () => GatewayRootSnapshot | Promise<GatewayRootSnapshot>;
+  /** Control-plane invites; absent means the pilot endpoints fail closed. */
+  pilotInvites?: PilotInviteService;
+  /** Provisioning-plane detached funding; absent means the pilot endpoints fail closed. */
+  pilotFunding?: PilotFundingService;
+  /** Internal service token for control-plane calls. Defaults to BILLING_INTERNAL_TOKEN. */
+  internalServiceToken?: string;
 }
 
 interface BufferedResponse {
@@ -342,6 +346,34 @@ function sameFence(left: ClaimFence, right: ClaimFence): boolean {
     && left.fencingToken === right.fencingToken;
 }
 
+const PILOT_ERROR_STATUS: Record<string, number> = {
+  invalid_invite_code: 400,
+  invalid_invite_request: 400,
+  invalid_github_account: 400,
+  invalid_funding_request: 400,
+  invalid_funding_token: 400,
+  invalid_commitment: 400,
+  invite_account_mismatch: 403,
+  invite_already_redeemed: 409,
+  funding_commitment_conflict: 409,
+  funding_in_progress: 409,
+  invite_expired: 410,
+  invite_revoked: 410,
+  funding_capability_expired: 410,
+  funding_unavailable: 503,
+};
+
+/** Maps pilot domain errors onto HTTP without echoing storage internals. */
+function pilotError(res: ExpressResponse, error: unknown, fallback = 'pilot_request_failed'): void {
+  const code = error instanceof Error ? error.message : '';
+  const status = PILOT_ERROR_STATUS[code];
+  if (!status) {
+    jsonError(res, 500, fallback);
+    return;
+  }
+  jsonError(res, status, code);
+}
+
 function isClaimSemanticError(code: string): boolean {
   return new Set([
     'conflicting_signal',
@@ -434,8 +466,8 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     : { currentRoot: config.currentRoot, knownRoots: config.knownRoots };
   const proofVerifier = options.verifyProof ?? await loadGroth16Verifier(config, now, readRoots);
   const facilitator = createZkPrepaidFacilitator({ claimStore, verifyProof: proofVerifier, now, hashSignal: signalHash });
-  const billing = options.billing ?? new StripeBillingService({ now });
-  const walletLinks = options.walletLinks ?? new MemoryWalletLinkStore();
+  const pilotInvites = options.pilotInvites;
+  const pilotFunding = options.pilotFunding;
   const inFlight = new Map<string, Promise<BufferedResponse>>();
   const app = express();
 
@@ -590,66 +622,65 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     });
   });
 
-  function billingAuthorized(req: Request): boolean {
-    const configured = process.env.BILLING_INTERNAL_TOKEN;
+  /**
+   * Guards control-plane calls. Real checkout and Stripe billing routes were
+   * removed from the unpaid pilot runtime; only invite redemption remains.
+   */
+  function internalAuthorized(req: Request): boolean {
+    const configured = options.internalServiceToken ?? process.env.BILLING_INTERNAL_TOKEN;
     if (!configured) return process.env.NODE_ENV !== 'production';
     return req.header('authorization') === `Bearer ${configured}`;
   }
 
-  app.post('/v1/accounts/wallet-link', async (req, res) => {
-    if (!billingAuthorized(req)) { jsonError(res, 401, 'billing_auth_required'); return; }
+  /**
+   * Internal control-plane redemption. The GitHub account is supplied by the
+   * authenticated web session, never by the browser, and the response carries
+   * a one-time detached funding token instead of any credential material.
+   */
+  app.post('/v1/pilot/invites/redeem', async (req, res) => {
+    if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    if (!pilotInvites) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
     const body = isRecord(req.body) ? req.body : {};
-    if (typeof body.accountId !== 'string' || typeof body.address !== 'string') {
-      jsonError(res, 400, 'invalid_wallet_link');
+    if (typeof body.code !== 'string' || typeof body.githubAccountId !== 'string') {
+      jsonError(res, 400, 'invalid_invite_request');
       return;
     }
     try {
-      await walletLinks.link(body.accountId, body.address, now());
-      res.json({ linked: true, address: body.address.toLowerCase() });
+      const redeemed = await pilotInvites.redeem({ code: body.code, githubAccountId: body.githubAccountId });
+      res.json({ fundingToken: redeemed.fundingToken, expiresAt: redeemed.expiresAt });
     } catch (error) {
-      jsonError(res, 409, error instanceof Error ? error.message : 'wallet_link_failed');
+      pilotError(res, error);
     }
   });
 
-  app.post('/v1/billing/orders', async (req, res) => {
-    if (!billingAuthorized(req)) { jsonError(res, 401, 'billing_auth_required'); return; }
+  /**
+   * Sessionless detached funding. The capability token in the body is the only
+   * authorization: the endpoint accepts no session, no cookie, and no account
+   * identifier, and it never receives a GitHub identity.
+   */
+  app.post('/v1/pilot/funding', async (req, res) => {
+    if (!pilotFunding) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
+    const body = isRecord(req.body) ? req.body : {};
+    if (typeof body.fundingToken !== 'string' || typeof body.commitment !== 'string') {
+      jsonError(res, 400, 'invalid_funding_request');
+      return;
+    }
     try {
-      const body = isRecord(req.body) ? req.body : {};
-      if ((body.tierId !== 0 && body.tierId !== 1 && body.tierId !== 2) || typeof body.commitment !== 'string' || typeof body.accountId !== 'string' || body.accountId.length === 0 || body.accountId.length > 255) {
-        jsonError(res, 400, 'invalid_order');
-        return;
-      }
-      res.status(201).json(await billing.createOrder({ tierId: body.tierId as TierId, commitment: body.commitment, accountId: body.accountId }));
+      res.json(await pilotFunding.fund({ fundingToken: body.fundingToken, commitment: body.commitment }));
     } catch (error) {
-      jsonError(res, 400, error instanceof Error ? error.message : 'order_creation_failed');
+      pilotError(res, error, 'funding_failed');
     }
   });
 
-  app.get('/v1/billing/orders/:orderId', async (req, res) => {
-    if (!billingAuthorized(req)) { jsonError(res, 401, 'billing_auth_required'); return; }
-    const accountId = req.header('x-billing-account-id');
-    const status = await billing.getPublicStatus(req.params.orderId, accountId);
-    if (!status) { jsonError(res, 404, 'order_not_found'); return; }
-    res.json(status);
-  });
-
-  app.post('/v1/billing/stripe-event', async (req, res) => {
-    if (!billingAuthorized(req)) { jsonError(res, 401, 'billing_auth_required'); return; }
+  /** Public recovery lookup: immutable funding metadata for one commitment. */
+  app.get('/v1/pilot/bundles/:commitment', async (req, res) => {
+    if (!pilotFunding) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
     try {
-      const body = isRecord(req.body) ? req.body : {};
-      const result = await billing.handleWebhook({
-        eventId: typeof body.eventId === 'string' ? body.eventId : '',
-        eventType: typeof body.eventType === 'string' ? body.eventType : '',
-        orderId: typeof body.orderId === 'string' ? body.orderId : undefined,
-        sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
-        amountTotalCents: typeof body.amountTotalCents === 'number' ? body.amountTotalCents : undefined,
-        currency: typeof body.currency === 'string' ? body.currency : undefined,
-      });
-      res.json(result);
+      const bundle = await pilotFunding.lookupByCommitment(req.params.commitment);
+      if (!bundle) { jsonError(res, 404, 'bundle_not_found'); return; }
+      res.json(bundle);
     } catch (error) {
-      // A non-2xx response deliberately causes Stripe's caller to retry a
-      // failed sponsorship/refund workflow.
-      jsonError(res, 503, error instanceof Error ? error.message : 'stripe_event_retryable');
+      pilotError(res, error);
     }
   });
 
@@ -834,5 +865,5 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     }
     jsonError(res, 400, 'malformed_json');
   });
-  return { app, requirements, claimStore, billing, walletLinks };
+  return { app, requirements, claimStore };
 }

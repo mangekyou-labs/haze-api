@@ -1,35 +1,69 @@
-# Wayfinder map: paid private-credit pilot on Base Sepolia
+# Wayfinder map: invite-only unpaid x402-agent pilot on Base Sepolia
 
-Status: destination reached — hand off to implementation  
-Created: 2026-09-20  
-Scope: planning and design decisions only
+Status: strategy amended — hand off to implementation
+Created: 2026-09-20
+Amended: 2026-09-20
+Scope: unpaid pilot launch and two-week market validation; paid production work is deferred
 
 ## Destination
 
-Produce a decision-complete, internally consistent requirements, design,
-testing, and implementation plan for a paid Base Sepolia pilot. The handoff
-must be safe enough to implement, narrow enough to ship quickly, and capable of
-testing whether multi-agent and coding-agent operators will pay for payer and
-credential unlinkability.
+Ship an invite-only, unpaid, experimental Base Sepolia pilot to three real
+coding-agent or multi-agent operators, including adapter-enabled x402 agents,
+then make an explicit market-validation decision after two weeks.
 
-The pilot continuation gate is:
+The launch must preserve the custom x402 v2 `zk-prepaid` scheme and existing
+wire format, sidecar-local hash-pinned proving and self-verification, the
+self-hosted facilitator and isolated claim store, and the narrow promise of
+payer/credential unlinkability for ordinary valid spends. Every counted real
+call must complete the actual challenge, local proof, `PAYMENT-SIGNATURE`,
+facilitator settlement, and `PAYMENT-RESPONSE` exchange.
 
-- three activated design partners;
-- two partners completing at least 1,000 real calls;
-- two partners with a two-agent deployment;
-- two partners with renewal intent at the live SKU;
-- p95 proving latency within each partner's accepted proving latency; and
-- zero manual recoveries.
+The first cohort is three **unpaid pilot participants**:
+
+- at least one coding-agent operator using the OpenAI-compatible sidecar;
+- at least one **adapter-enabled x402 agent** deliberately registering the
+  project `zk-prepaid` adapter; and
+- a third participant using either supported path.
+
+Start the two-week clock when the first participant is activated. Continue
+only if at least two participants return with a real call on another calendar
+day and at least two show **credible payment intent**. Otherwise record an
+explicit iterate-or-stop decision and the dominant failure: demand,
+onboarding, x402 compatibility, proving latency, reliability, or pricing.
 
 ## Notes
 
-Every session working this map should use `wayfinder`, `grilling`,
-`domain-modeling`, `ai-devkit:dev-design`, and `ai-devkit:dev-planning`.
+This is an amendment to the resolved paid-pilot decision record. The original
+paid destination, continuation thresholds, and resolved decision files remain
+historical context; this amendment changes the first cohort and validation
+loop without weakening the technical correctness boundary.
 
-Use the [pilot domain glossary](CONTEXT.md) consistently in tickets and
-lifecycle documents.
+Every session working this map should use `wayfinder`, `domain-modeling`, and
+the repository's implementation and verification guidance. Use the [pilot
+domain glossary](CONTEXT.md) consistently in tickets and lifecycle documents.
 
-Read these evidence files before resolving a ticket:
+Preserve these product and protocol boundaries:
+
+- custom x402 v2 `zk-prepaid`, `/v1/chat/completions`, scheme-based acceptance
+  selection, `/supported`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE`;
+- project sidecar/SDK and agents that deliberately register the project
+  adapter, not generic unmodified x402 agents;
+- local, hash-pinned proving and self-verification inside the operator's
+  sidecar;
+- a self-hosted facilitator and isolated claim store;
+- no generic x402 wallet claim, generic-agent claim, public facilitator,
+  Bazaar, MCP, or standard `exact` rail claim; and
+- no prompts, responses, secrets, proofs, nullifiers, request signals, or
+  payer/spend-plane joins in pilot telemetry.
+
+The independent cryptographer review is a paid-traffic gate, not an unpaid
+pilot prerequisite. Cryptographic correctness remains mandatory: corrected
+artifacts, pinned hashes, a real Solidity verifier and adapter on Base
+Sepolia, timestamp-bound authorization tests, negative cases, and
+two-transcript recovery must pass before inviting participants.
+
+Read the existing evidence and lifecycle documents before changing protocol
+or release behavior:
 
 - [Circuit and proving-system research](../../research/zk-api-credits-circuit-and-proving-system.md)
 - [x402 and Base ecosystem research](../../research/x402-base-ecosystem-fit.md)
@@ -39,60 +73,91 @@ Read these evidence files before resolving a ticket:
 - [Current testing plan](../../ai/testing/2026-09-18-feature-base-zk-credits.md)
 - [Current implementation plan](../../ai/planning/2026-09-18-feature-base-zk-credits.md)
 
-Security facts are intentionally kept local:
+Security facts remain intentionally local. The root compiled artifacts are
+still negative Circom 0.5 fixtures with the rejected share equation; the new
+Circom 2 compile is not yet a shippable verifier path; historical timestamps
+must not bypass expiry; and no generated Solidity verifier and adapter have
+been proven end to end. These are pilot correctness blockers. Do not activate
+participants or call the circuit privacy-preserving until they are closed.
 
-- The leak is still in the repository. The root compiled artifacts
-  `circuits/private_credit_spend.{r1cs,wasm,sym}` remain Circom 0.5 negative
-  fixtures with 48 public inputs and zero private inputs, while the transport
-  supplies only six public signals. The B3 rewrite did not remove them.
-- The rejected share equation `share = secret * signal + nullifier` in those
-  fixtures exposes the credential secret from one ordinary proof because
-  `secret = (share - nullifier) / requestSignal`.
-- The new Circom 2 compile under `circuits/build/private-credit/` is 6 outputs
-  / 0 extra public inputs / 48 private inputs. That directory is gitignored,
-  holds no proving key, and has no real verifier behind it yet.
-- A user-selected historical timestamp can bypass bundle expiry because the
-  gateway enforces only a future-skew bound.
-- No generated Solidity verifier and adapter have been proven end to end.
+## Strategy amendment
 
-These are release blockers. Do not run a ceremony, onboard pilot traffic, or
-represent the circuit as privacy-preserving until they are closed.
+The original map selected a paid design-partner pilot. The fast-shipping route
+now makes the first cohort unpaid and invite-only:
+
+- founder-provisioned test credits replace real checkout; GitHub sign-in,
+  credential backup, and Base Sepolia status remain in onboarding;
+- Stripe lifecycle work, refunds, disputes, paid checkout, independent
+  cryptographer review, and formal benchmarks remain open but are labeled
+  `deferred:post-validation` and detached from this active map;
+- the pilot validates behavior in two weeks rather than waiting for twelve
+  interviews, 1,000-call thresholds, two-agent deployment thresholds, or
+  renewal thresholds;
+- the validation ledger records onboarding time, client type, adapter
+  failures, proving latency, proof failures, founder assistance, repeated
+  usage, objections, returns, and credible payment intent; and
+- the product copy must say invite-only, unpaid, experimental, Base Sepolia,
+  and limited to custom-adapter x402 agents. It must not claim generic x402
+  compatibility, production readiness, or audited privacy.
 
 ## Decisions so far
 
-- [Name the pilot destination and validation boundary](decisions/001-pilot-destination.md): run a paid Base Sepolia design-partner pilot for multi-agent and coding-agent operators, promising payer/credential unlinkability only.
-- [Choose the first production proving-system direction](decisions/002-proving-system-direction.md): repair and review the construction, then retain Circom 2 plus BN254 Groth16 for v1; defer any ceremony until artifacts are frozen.
-- [Define the pilot credit unit and economic safety envelope](tickets/01-credit-unit-and-economics.md): launch one 250-credit coding bundle with a versioned DeepSeek V4 Flash service class, success-only charging, bounded retries, and provider-spend caps that preserve positive contribution in the two-dispatch worst case.
-- [Choose the pilot x402 interoperability posture](tickets/02-x402-interoperability.md): custom `zk-prepaid` requiring the project adapter; `amount`/`asset` name the credit asset, not the bond; no generic wallets, public facilitator, Bazaar, MCP, or `exact` rail.
-- [Freeze the pilot proof and authorization boundary](tickets/03-proof-and-authorization-boundary.md): restore hidden slot-blinding shares; six-signal ABI; gateway-issued `issuedAt`; in-circuit allowance 250; paid traffic gated on review, R1CS, negative tests, real verifier, and two-transcript recovery.
-- [Define pilot activation and continuation evidence](tickets/04-validation-evidence.md): twelve past-behavior interviews then at most three live-SKU partners; sidecar-local aggregates; continuation adds two-agent deployments and keeps 1,000 real calls, written renewal, and zero manual recovery.
-- [Choose the pilot prover topology and operational SLOs](tickets/06-prover-topology-and-slos.md): sidecar-only Groth16 prove+self-verify; published SLO p50 ≤ 1.5s / p95 ≤ 3.0s hot prove time; proof failure is not a claim; hash-pinned local keys; no remote, browser, or helper path.
-- [Review the reconciled pilot design and implementation plan](tickets/05-reconcile-pilot-docs.md): approved lifecycle set; rewrite in place; keep current proving artifacts as negative fixtures; README SKU freeze is planning B21.
+The links below are the resolved paid-pilot decision files and tickets. They
+are preserved as historical context; this amendment supersedes only their
+paid cohort and market-validation thresholds.
 
-## Live decision tickets
+- [Name the pilot destination and validation boundary](decisions/001-pilot-destination.md): the historical paid Base Sepolia design-partner destination and its payer/credential unlinkability boundary.
+- [Choose the first production proving-system direction](decisions/002-proving-system-direction.md): retain Circom 2 plus BN254 Groth16 for v1 and defer ceremony until artifacts are frozen.
+- [Define the pilot credit unit and economic safety envelope](tickets/01-credit-unit-and-economics.md): the bounded service-class and success-only claim semantics retained for the unpaid pilot's test credits.
+- [Choose the pilot x402 interoperability posture](tickets/02-x402-interoperability.md): custom `zk-prepaid` requiring the project adapter; `amount`/`asset` name the credit asset, not the bond.
+- [Freeze the pilot proof and authorization boundary](tickets/03-proof-and-authorization-boundary.md): hidden slot-blinding shares, six-signal ABI, gateway-issued `issuedAt`, and the correctness evidence retained; the independent review is deferred for this cohort.
+- [Define pilot activation and continuation evidence](tickets/04-validation-evidence.md): the historical paid-partner funnel and thresholds retained for later comparison, not an unpaid-pilot gate.
+- [Choose the pilot prover topology and operational SLOs](tickets/06-prover-topology-and-slos.md): sidecar-only Groth16 prove+self-verify, hash-pinned local keys, and no remote, browser, or helper path.
+- [Review the reconciled pilot design and implementation plan](tickets/05-reconcile-pilot-docs.md): the approved lifecycle set and negative-fixture rule remain the implementation baseline.
+- [Separate the invite control plane from detached funding provisioning](decisions/003-detached-funding-provisioning.md): single-use hashed invites bound to a GitHub account in `control_plane`, detached 30-minute funding capabilities bound to one commitment in `pilot_provisioning`, no foreign key and no durable join, and a two-stage version-2 export where the recovery capsule is re-imported before funding and only then wrapped with the gateway's authoritative activation metadata.
 
-None. The destination is the decision-complete plan, and that plan is
-approved. Planning B2, B3, and B4 landed 2026-09-20; current implementation
-work is B5 in
-[the delivery plan](../../ai/planning/2026-09-18-feature-base-zk-credits.md).
+## Active execution frontier
+
+The active GitHub child issues are:
+
+- [B6 — Isolated claim store, facilitator, gateway reservation lifecycle](https://github.com/mangekyou-labs/haze-api/issues/9) — closed and unchanged.
+- [B8 — Sidecar proving and OpenAI-compatible request path](https://github.com/mangekyou-labs/haze-api/issues/11) — adds the adapter-enabled x402-agent exchange.
+- [B9 — Invite-only unpaid onboarding](https://github.com/mangekyou-labs/haze-api/issues/12) — implemented 2026-09-20: invite/capability planes, founder CLI, detached funding endpoints, five-step web onboarding, two-stage export, and the removal of checkout, orders, Stripe webhooks, and wallet linking from the pilot runtime.
+- [B11 — Pilot correctness and release verification](https://github.com/mangekyou-labs/haze-api/issues/14) — the correctness gate for both client paths.
+- [B21 — Invite-only unpaid pilot copy freeze](https://github.com/mangekyou-labs/haze-api/issues/24) — the truthful pilot contract.
+- [B22 — Invite-only unpaid x402-agent pilot launch](https://github.com/mangekyou-labs/haze-api/issues/26) — blocked only by B11 and B21.
+- [B13 — Two-week x402-agent market-validation readout](https://github.com/mangekyou-labs/haze-api/issues/16) — blocked only by B22.
 
 ## Not yet specified
 
-None on this map. Ceremony logistics and mainnet operating controls belong
-to a later production go/no-go map if the pilot passes; they are out of
-scope here.
+Post-validation pricing, paid conversion, independent review, formal
+benchmarks, and any mainnet or ceremony decision depend on the two-week
+readout. Do not split those questions into active tickets before the pilot
+produces evidence.
+
+## Deferred post-validation
+
+These remain open for later work and do not block the unpaid pilot:
+
+- Stripe sponsorship, refunds, disputes, and paid checkout ([B7](https://github.com/mangekyou-labs/haze-api/issues/10)).
+- Full Stellar/evaluation archival ([B10](https://github.com/mangekyou-labs/haze-api/issues/13)).
+- Independent cryptographer review and paid-traffic approval ([B12](https://github.com/mangekyou-labs/haze-api/issues/15)).
+- Formal [B14 unit-economics](https://github.com/mangekyou-labs/haze-api/issues/17),
+  [B15 load](https://github.com/mangekyou-labs/haze-api/issues/18),
+  [B16 proof-latency](https://github.com/mangekyou-labs/haze-api/issues/19),
+  [B17 storage-growth](https://github.com/mangekyou-labs/haze-api/issues/20),
+  [B18 claim-store](https://github.com/mangekyou-labs/haze-api/issues/21),
+  [B19 event-cursor/slash-revocation](https://github.com/mangekyou-labs/haze-api/issues/22),
+  and [B20 slashing-path](https://github.com/mangekyou-labs/haze-api/issues/23)
+  benchmarks.
 
 ## Out of scope
 
 - Base mainnet deployment and production ceremony execution.
-- Generic public-facilitator or Bazaar distribution for the first pilot.
-- Generic x402 wallet compatibility and a standard `exact` payment rail as a
-  supported product path.
-- MCP transport, `/v1/responses`, and Anthropic translation as pilot
-  acceptance requirements.
+- Generic x402 compatibility, public facilitators, Bazaar, MCP,
+  `/v1/responses`, Anthropic translation, and a standard `exact` rail.
 - Prompt confidentiality, provider blindness, network anonymity, or broad
   claims of user anonymity.
+- Paid traffic or production readiness before a later paid-traffic gate.
 - Arbitrary providers, arbitrary models, variable-cost refund accounting, and
   unbounded token usage.
-- Replacing conventional API keys for users without a demonstrated
-  unlinkability requirement.

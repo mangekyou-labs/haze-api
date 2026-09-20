@@ -367,64 +367,268 @@ export async function createCredential(
   return validateCredentialShape(credential);
 }
 
-/** Encrypts the credential locally; the returned value is safe to download, not to log. */
-export async function encryptCredentialExport(
-  credential: CreditCredential,
+async function deriveExportKey(password: string, salt: Uint8Array, usage: 'encrypt' | 'decrypt'): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.importKey('raw', textEncoder.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: asArrayBuffer(salt), iterations: 310_000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    [usage],
+  );
+}
+
+interface EncryptedPayload {
+  version: number;
+  algorithm: 'PBKDF2-AES-GCM';
+  salt: string;
+  iv: string;
+  ciphertext: string;
+}
+
+async function encryptExportPayload(
+  payload: unknown,
   password: string,
-): Promise<EncryptedCredentialExport> {
+  version: number,
+): Promise<EncryptedPayload> {
   requirePassword(password);
   const salt = new Uint8Array(16);
   const iv = new Uint8Array(12);
   crypto.getRandomValues(salt);
   crypto.getRandomValues(iv);
-  const keyMaterial = await crypto.subtle.importKey('raw', textEncoder.encode(password), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: asArrayBuffer(salt), iterations: 310_000, hash: 'SHA-256' },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt'],
-  );
-  const plaintext = textEncoder.encode(canonicalizeBaseJson(credential));
+  const key = await deriveExportKey(password, salt, 'encrypt');
+  const plaintext = textEncoder.encode(canonicalizeBaseJson(payload));
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: asArrayBuffer(iv) }, key, plaintext));
-  return { version: CREDENTIAL_VERSION, algorithm: 'PBKDF2-AES-GCM', salt: toBase64Url(salt), iv: toBase64Url(iv), ciphertext: toBase64Url(ciphertext) };
+  return { version, algorithm: 'PBKDF2-AES-GCM', salt: toBase64Url(salt), iv: toBase64Url(iv), ciphertext: toBase64Url(ciphertext) };
 }
 
-export async function decryptCredentialExport(
-  exported: EncryptedCredentialExport,
+async function decryptExportPayload(
+  exported: EncryptedPayload,
   password: string,
-): Promise<CreditCredential> {
+  expectedVersion: number,
+): Promise<unknown> {
   requirePassword(password);
-  if (exported.version !== CREDENTIAL_VERSION || exported.algorithm !== 'PBKDF2-AES-GCM') {
+  if (exported.version !== expectedVersion || exported.algorithm !== 'PBKDF2-AES-GCM') {
     throw new Error('Unsupported credential export');
   }
   const salt = fromBase64Url(exported.salt);
   const iv = fromBase64Url(exported.iv);
   const ciphertext = fromBase64Url(exported.ciphertext);
-  const keyMaterial = await crypto.subtle.importKey('raw', textEncoder.encode(password), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: asArrayBuffer(salt), iterations: 310_000, hash: 'SHA-256' },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt'],
-  );
+  const key = await deriveExportKey(password, salt, 'decrypt');
   let plaintext: ArrayBuffer;
   try {
     plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: asArrayBuffer(iv) }, key, asArrayBuffer(ciphertext));
   } catch {
     throw new Error('Credential export password or ciphertext is invalid');
   }
-  let parsed: Partial<CreditCredential>;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<CreditCredential>;
+    return JSON.parse(new TextDecoder().decode(plaintext));
   } catch {
     throw new Error('Credential export is malformed');
   }
+}
+
+/** Encrypts the credential locally; the returned value is safe to download, not to log. */
+export async function encryptCredentialExport(
+  credential: CreditCredential,
+  password: string,
+): Promise<EncryptedCredentialExport> {
+  const encrypted = await encryptExportPayload(credential, password, CREDENTIAL_VERSION);
+  return encrypted as EncryptedCredentialExport;
+}
+
+export async function decryptCredentialExport(
+  exported: EncryptedCredentialExport,
+  password: string,
+): Promise<CreditCredential> {
+  const parsed = await decryptExportPayload(exported, password, CREDENTIAL_VERSION) as Partial<CreditCredential>;
   const credential = validateCredentialShape(parsed);
   const secret = secretFromBase64Url(credential.secret);
   if (await computeCommitment(secret) !== credential.commitment) throw new Error('Credential commitment mismatch');
   return credential;
+}
+
+export const CREDENTIAL_EXPORT_FORMAT = 'zk-credits-credential';
+export const RECOVERY_CAPSULE_VERSION = 2;
+
+/** Version-2 capsule payload. It holds only the locally generated secret. */
+export interface RecoveryCapsulePayload {
+  version: typeof RECOVERY_CAPSULE_VERSION;
+  secret: string;
+}
+
+export interface RecoveryCapsule {
+  version: typeof RECOVERY_CAPSULE_VERSION;
+  algorithm: 'PBKDF2-AES-GCM';
+  salt: string;
+  iv: string;
+  ciphertext: string;
+}
+
+/** Locally generated, downloaded, and re-imported before funding. */
+export interface RecoveryCapsuleFile {
+  format: typeof CREDENTIAL_EXPORT_FORMAT;
+  version: typeof RECOVERY_CAPSULE_VERSION;
+  kind: 'recovery-capsule';
+  capsule: RecoveryCapsule;
+}
+
+/** Authoritative funding metadata returned by the gateway, never locally invented. */
+export interface ActivatedCredentialMetadata {
+  commitment: string;
+  tierId: number;
+  expiry: number;
+  deploymentDomain: string;
+  network: string;
+  contractAddress: string;
+  transactionHash: string;
+}
+
+/** The same encrypted capsule wrapped with authoritative funding metadata. */
+export interface ActivatedCredentialFile {
+  format: typeof CREDENTIAL_EXPORT_FORMAT;
+  version: typeof RECOVERY_CAPSULE_VERSION;
+  kind: 'activated-credential';
+  capsule: RecoveryCapsule;
+  activation: ActivatedCredentialMetadata;
+}
+
+export type CredentialExportFile = RecoveryCapsuleFile | ActivatedCredentialFile;
+
+function validateActivationMetadata(activation: Partial<ActivatedCredentialMetadata>): ActivatedCredentialMetadata {
+  if (activation.tierId !== FUNDED_TIER_ID) throw new Error('Invalid tier id');
+  if (
+    typeof activation.commitment !== 'string'
+    || typeof activation.expiry !== 'number'
+    || !Number.isSafeInteger(activation.expiry)
+    || activation.expiry <= 0
+    || typeof activation.deploymentDomain !== 'string'
+    || typeof activation.network !== 'string'
+    || activation.network.length === 0
+    || typeof activation.contractAddress !== 'string'
+    || activation.contractAddress.length === 0
+    || typeof activation.transactionHash !== 'string'
+    || activation.transactionHash.length === 0
+  ) {
+    throw new Error('Activated credential metadata is malformed');
+  }
+  return {
+    commitment: toField(activation.commitment, 'credential commitment').toString(),
+    tierId: activation.tierId,
+    expiry: activation.expiry,
+    deploymentDomain: toField(activation.deploymentDomain, 'deployment domain').toString(),
+    network: activation.network,
+    contractAddress: activation.contractAddress,
+    transactionHash: activation.transactionHash,
+  };
+}
+
+export async function createRecoveryCapsule(secret: Uint8Array, password: string): Promise<RecoveryCapsule> {
+  const encoded = secretToBase64Url(secretFromBase64Url(secretToBase64Url(secret)));
+  const payload: RecoveryCapsulePayload = { version: RECOVERY_CAPSULE_VERSION, secret: encoded };
+  const encrypted = await encryptExportPayload(payload, password, RECOVERY_CAPSULE_VERSION);
+  return {
+    version: RECOVERY_CAPSULE_VERSION,
+    algorithm: 'PBKDF2-AES-GCM',
+    salt: encrypted.salt,
+    iv: encrypted.iv,
+    ciphertext: encrypted.ciphertext,
+  };
+}
+
+export async function createRecoveryCapsuleFile(secret: Uint8Array, password: string): Promise<RecoveryCapsuleFile> {
+  return {
+    format: CREDENTIAL_EXPORT_FORMAT,
+    version: RECOVERY_CAPSULE_VERSION,
+    kind: 'recovery-capsule',
+    capsule: await createRecoveryCapsule(secret, password),
+  };
+}
+
+/** Opens a capsule locally. The decrypted secret never leaves the caller. */
+export async function openRecoveryCapsule(capsule: RecoveryCapsule, password: string): Promise<Uint8Array> {
+  if (!capsule || capsule.algorithm !== 'PBKDF2-AES-GCM') throw new Error('Unsupported credential export');
+  const payload = await decryptExportPayload(capsule, password, RECOVERY_CAPSULE_VERSION) as Partial<RecoveryCapsulePayload>;
+  if (!payload || payload.version !== RECOVERY_CAPSULE_VERSION || typeof payload.secret !== 'string') {
+    throw new Error('Recovery capsule is malformed');
+  }
+  const secret = secretFromBase64Url(payload.secret);
+  if (secretToField(secret) === '0') throw new Error('Credential secret must not be zero');
+  return secret;
+}
+
+/** Pre-funding re-import check: the capsule decrypts and still yields the same commitment. */
+export async function verifyRecoveryCapsule(
+  file: RecoveryCapsuleFile,
+  password: string,
+): Promise<{ secret: Uint8Array; commitment: string }> {
+  if (
+    !file
+    || file.format !== CREDENTIAL_EXPORT_FORMAT
+    || file.version !== RECOVERY_CAPSULE_VERSION
+    || file.kind !== 'recovery-capsule'
+  ) {
+    throw new Error('Unsupported credential export');
+  }
+  const secret = await openRecoveryCapsule(file.capsule, password);
+  return { secret, commitment: await computeCommitment(secret) };
+}
+
+/** Wraps the untouched capsule with the gateway's authoritative funding metadata. */
+export function wrapActivatedCredential(
+  capsule: RecoveryCapsule,
+  activation: ActivatedCredentialMetadata,
+): ActivatedCredentialFile {
+  if (!capsule || capsule.version !== RECOVERY_CAPSULE_VERSION || capsule.algorithm !== 'PBKDF2-AES-GCM') {
+    throw new Error('Unsupported credential export');
+  }
+  return {
+    format: CREDENTIAL_EXPORT_FORMAT,
+    version: RECOVERY_CAPSULE_VERSION,
+    kind: 'activated-credential',
+    capsule,
+    activation: validateActivationMetadata(activation),
+  };
+}
+
+/** Verifies the activated credential locally against the secret it wraps. */
+export async function verifyActivatedCredential(
+  file: ActivatedCredentialFile,
+  password: string,
+): Promise<CreditCredential> {
+  if (
+    !file
+    || file.format !== CREDENTIAL_EXPORT_FORMAT
+    || file.version !== RECOVERY_CAPSULE_VERSION
+    || file.kind !== 'activated-credential'
+  ) {
+    throw new Error('Unsupported credential export');
+  }
+  const activation = validateActivationMetadata(file.activation);
+  const secret = await openRecoveryCapsule(file.capsule, password);
+  const commitment = await computeCommitment(secret);
+  if (commitment !== activation.commitment) throw new Error('Credential commitment mismatch');
+  return {
+    version: CREDENTIAL_VERSION,
+    secret: secretToBase64Url(secret),
+    commitment,
+    tierId: activation.tierId,
+    expiry: activation.expiry,
+    deploymentDomain: activation.deploymentDomain,
+  };
+}
+
+/** Accepts both the version-2 activated credential and the legacy version-1 export. */
+export async function decryptAnyCredentialExport(file: unknown, password: string): Promise<CreditCredential> {
+  const candidate = (file ?? {}) as { format?: unknown; version?: unknown; encrypted?: unknown };
+  if (candidate.format !== CREDENTIAL_EXPORT_FORMAT) throw new Error('Unsupported credential export');
+  if (candidate.version === RECOVERY_CAPSULE_VERSION) {
+    return verifyActivatedCredential(file as ActivatedCredentialFile, password);
+  }
+  if (candidate.version === CREDENTIAL_VERSION && candidate.encrypted && typeof candidate.encrypted === 'object') {
+    return decryptCredentialExport(candidate.encrypted as EncryptedCredentialExport, password);
+  }
+  throw new Error('Unsupported credential export');
 }
 
 export interface MerkleWitness {

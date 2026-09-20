@@ -27,7 +27,8 @@ describe('migrations (offline, static)', () => {
 
   it('init migration provisions the original three isolated schemas', () => {
     const sql = readFileSync(join(MIGRATIONS_DIR, '0001_init.sql'), 'utf8');
-    for (const s of SCHEMAS.filter((schema) => schema !== 'evaluation')) {
+    const privateSchemas = SCHEMAS.filter((schema) => !['evaluation', 'spend_plane', 'control_plane', 'pilot_provisioning'].includes(schema));
+    for (const s of privateSchemas) {
       expect(sql).toMatch(new RegExp(`CREATE SCHEMA IF NOT EXISTS "${s}"`, 'i'));
     }
   });
@@ -80,10 +81,10 @@ describe('migrations (offline, static)', () => {
     expect(sql).not.toMatch(/ALTER TABLE\s+gateway\.accepted_calls/i);
   });
 
-  it('evaluation migration is the ninth migration and isolates restricted records', () => {
+  it('evaluation migration remains historical and isolates restricted records', () => {
     const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
     expect(files).toContain('0009_evaluation.sql');
-    expect(files.indexOf('0009_evaluation.sql')).toBe(files.length - 1);
+    expect(files.indexOf('0009_evaluation.sql')).toBe(files.indexOf('0010_base_private_credits.sql') - 1);
     expect(SCHEMAS).toContain('evaluation');
 
     const sql = readFileSync(join(MIGRATIONS_DIR, '0009_evaluation.sql'), 'utf8');
@@ -97,6 +98,30 @@ describe('migrations (offline, static)', () => {
     expect(sql).toMatch(/wallet_fingerprint\s+text\s+UNIQUE/i);
     expect(sql).toMatch(/wallet_fingerprint IS NULL OR wallet_fingerprint ~ '\^\[a-f0-9\]\{64\}\$'/i);
     expect(sql).toMatch(/amount_cents\s+integer\s+NOT NULL\s+CHECK\s*\(amount_cents\s*=\s*100\)/i);
+  });
+
+  it('Base migration isolates x402 replay state from customer records', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0010_base_private_credits.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE SCHEMA IF NOT EXISTS spend_plane/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS spend_plane\.claims/i);
+    expect(sql).toMatch(/nullifier\s+TEXT\s+PRIMARY KEY/i);
+    expect(sql).not.toMatch(/\b(commitment|account|wallet|prompt|response)\s+(text|varchar|json|jsonb|uuid)/i);
+  });
+
+  it('Base chain migration persists public event and root synchronization state', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0012_base_chain_events.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS billing\.base_contract_events/i);
+    expect(sql).toMatch(/event_id\s+TEXT PRIMARY KEY/i);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS billing\.base_chain_state/i);
+    expect(sql).toMatch(/known_roots\s+TEXT\[\]/i);
+  });
+
+  it('account wallet-link migration stays outside the spend plane', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0013_account_wallet_links.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS billing\.account_wallet_links/i);
+    expect(sql).toMatch(/account_id\s+TEXT PRIMARY KEY/i);
+    expect(sql).toMatch(/wallet_address\s+TEXT NOT NULL UNIQUE/i);
+    expect(sql).not.toMatch(/CREATE TABLE IF NOT EXISTS spend_plane/i);
   });
 
   it('claim lifecycle migration adds durable fencing, replay expiry, and bounded dispatch', () => {
@@ -116,6 +141,32 @@ describe('migrations (offline, static)', () => {
     expect(sql).toMatch(/dispatch_count BETWEEN 0 AND 2/i);
     expect(sql).toMatch(/claims_nullifier_signal_idx/i);
     expect(sql).toMatch(/encrypted_replay[\s\S]*plaintext is never stored/i);
+  });
+
+  it('pilot invite migration keeps the control plane and provisioning plane unjoinable', () => {
+    const invites = readFileSync(join(MIGRATIONS_DIR, '0015_pilot_invites.sql'), 'utf8');
+    expect(invites).toMatch(/CREATE SCHEMA IF NOT EXISTS control_plane/i);
+    expect(invites).toMatch(/CREATE SCHEMA IF NOT EXISTS pilot_provisioning/i);
+    expect(invites).toMatch(/CREATE TABLE IF NOT EXISTS control_plane\.pilot_invites/i);
+    expect(invites).toMatch(/CREATE TABLE IF NOT EXISTS pilot_provisioning\.funding_capabilities/i);
+
+    // Codes and tokens exist only as SHA-256 digests.
+    expect(invites).toMatch(/code_hash\s+TEXT NOT NULL UNIQUE CHECK \(code_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/i);
+    expect(invites).toMatch(/token_hash\s+TEXT NOT NULL UNIQUE CHECK \(token_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/i);
+
+    // Control plane holds no spend-plane data and provisioning holds no identity.
+    const ddl = invites.replace(/--[^\n]*/gu, '');
+    const inviteTable = ddl.slice(ddl.indexOf('control_plane.pilot_invites'), ddl.indexOf('pilot_provisioning.funding_capabilities'));
+    expect(inviteTable).not.toMatch(/commitment|transaction_hash|nullifier|proof/i);
+    const capabilityTable = ddl.slice(ddl.indexOf('pilot_provisioning.funding_capabilities'));
+    expect(capabilityTable).not.toMatch(/github|account_id|invite_id|session|email/i);
+
+    // One commitment funds once, and only a funded row carries a result.
+    expect(capabilityTable).toMatch(/commitment\s+TEXT UNIQUE/i);
+    expect(capabilityTable).toMatch(/state\s+TEXT NOT NULL DEFAULT 'issued' CHECK \(state IN \('issued', 'funding', 'funded', 'failed'\)\)/i);
+    expect(capabilityTable).toMatch(/CHECK \(state <> 'funded' OR \(commitment IS NOT NULL AND bundle_expiry IS NOT NULL AND transaction_hash IS NOT NULL AND funded_at IS NOT NULL\)\)/i);
+    // 30-minute detached capability, seven-day invite default are enforced in code.
+    expect(invites).toMatch(/expires_at\s+TIMESTAMPTZ NOT NULL/i);
   });
 });
 
@@ -144,6 +195,8 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
     await pool.query('DROP SCHEMA IF EXISTS "fee-sponsor" CASCADE');
     await pool.query('DROP SCHEMA IF EXISTS evaluation CASCADE');
     await pool.query('DROP SCHEMA IF EXISTS spend_plane CASCADE');
+    await pool.query('DROP SCHEMA IF EXISTS control_plane CASCADE');
+    await pool.query('DROP SCHEMA IF EXISTS pilot_provisioning CASCADE');
     await pool.query('DROP TABLE IF EXISTS public.schema_migrations');
   });
 
@@ -162,9 +215,9 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
 
     const res = await pool.query(
       `SELECT schema_name FROM information_schema.schemata
-       WHERE schema_name IN ('gateway', 'billing', 'fee-sponsor', 'evaluation', 'spend_plane')`,
+       WHERE schema_name IN ('gateway', 'billing', 'fee-sponsor', 'evaluation', 'spend_plane', 'control_plane', 'pilot_provisioning')`,
     );
     const names = res.rows.map((r) => r.schema_name).sort();
-    expect(names).toEqual(['billing', 'evaluation', 'fee-sponsor', 'gateway', 'spend_plane']);
+    expect(names).toEqual(['billing', 'control_plane', 'evaluation', 'fee-sponsor', 'gateway', 'pilot_provisioning', 'spend_plane']);
   });
 });

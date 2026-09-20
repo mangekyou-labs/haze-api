@@ -26,7 +26,8 @@ export default async function SignInPage() {
             Sign in
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
-            Anonymous API credits for coding agents on Stellar.
+            Invite-only, unpaid, experimental pilot on Base Sepolia. GitHub
+            sign-in is required; there is no checkout and no wallet purchase.
           </p>
 
           <form
@@ -51,8 +52,8 @@ export default async function SignInPage() {
           {!oauthConfigured && (
             <p className="mt-3 text-xs text-amber-400/90">
               GitHub OAuth is not configured on this deployment
-              (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing). Mnemonic
-              recovery below always works.
+              (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing). Encrypted
+              credential exports can be restored locally.
             </p>
           )}
 
@@ -74,12 +75,12 @@ export default async function SignInPage() {
           )}
 
           <p className="mt-6 text-sm text-zinc-500">
-            Lost access?{' '}
+            Already invited and funded?{' '}
             <Link
               href="/recover"
               className="text-indigo-400 transition-colors hover:text-indigo-300"
             >
-              Recover from mnemonic
+              Restore an encrypted credential
             </Link>
           </p>
         </div>
@@ -89,4 +90,3 @@ export default async function SignInPage() {
     </main>
   );
 }
-

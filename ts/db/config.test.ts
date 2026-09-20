@@ -31,6 +31,6 @@ describe('getDbConfig', () => {
   });
 
   it('exposes all isolated schemas', () => {
-    expect([...SCHEMAS]).toEqual(['gateway', 'billing', 'fee-sponsor', 'evaluation']);
+    expect([...SCHEMAS]).toEqual(['gateway', 'billing', 'evaluation', 'spend_plane', 'control_plane', 'pilot_provisioning']);
   });
 });

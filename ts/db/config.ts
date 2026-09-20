@@ -1,10 +1,14 @@
-// PostgreSQL connection configuration for the stellar-launch gateway.
+// PostgreSQL connection configuration for the Base zk-prepaid gateway.
 // Fails closed: calling getDbConfig() with no DATABASE_URL and no PG* vars
 // throws DbConfigError instead of silently defaulting to localhost.
 
 import type { PoolConfig } from 'pg';
 
-export const SCHEMAS = ['gateway', 'billing', 'fee-sponsor', 'evaluation'] as const;
+// `evaluation` and the legacy fee-sponsor migration remain historical. They
+// are intentionally not part of the active application schema registry.
+// `control_plane` (GitHub-facing invites) and `pilot_provisioning` (detached
+// funding capabilities) are separate schemas with no durable join.
+export const SCHEMAS = ['gateway', 'billing', 'evaluation', 'spend_plane', 'control_plane', 'pilot_provisioning'] as const;
 export type SchemaName = (typeof SCHEMAS)[number];
 
 export class DbConfigError extends Error {
