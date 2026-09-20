@@ -1,17 +1,19 @@
 {
   "name": "circuits",
   "version": "1.0.0",
-  "description": "",
+  "description": "BN254 Groth16 circuits for Base private prepaid credits",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:private-credit": "node scripts/compile-private-credit.js",
+    "test": "npm run build:private-credit && node scripts/private-credit-test.js"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "dependencies": {
     "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
     "snarkjs": "^0.7.6"
   }
 }
