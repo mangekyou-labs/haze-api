@@ -93,8 +93,9 @@ there is still no independent review and no paid-traffic gate.
 Superseded in part by [Local B11 evidence](#local-b11-evidence-2026-09-20):
 the generated verifier, the adapter, and the real Poseidon deployments now
 carry real-proof Foundry evidence, and the adapter's reordered/altered/malformed
-payload cases are covered there. The Base Sepolia half of S23 and the
-independent review are still open.
+payload cases are covered there. The Base Sepolia half of S23 is recorded in
+[Base Sepolia B11 evidence](#base-sepolia-b11-evidence-2026-09-21); the
+independent review is still open.
 
 ## Local B9 evidence (2026-09-20)
 
@@ -186,13 +187,55 @@ its payload layout against `groth16.exportSolidityCallData`; the parity suite
 caught a bad literal in an earlier draft, so the literals are pinned against
 `packages/zk-credits-shared/src/base.test.ts` rather than transcribed.
 
-Not covered here and not claimed: a Base Sepolia verifier or adapter
-deployment (that needs explicit authorization and a funded keystore), the
-independent cryptographic review, paid traffic, and any production ceremony.
+Not covered here and not claimed: the independent cryptographic review, paid
+traffic, and any production ceremony. The Base Sepolia verifier and adapter
+deployment that this section lacked is recorded in
+[Base Sepolia B11 evidence](#base-sepolia-b11-evidence-2026-09-21).
 `post-expiry` is enforced by the circuit (`timestamp < expiry`) and by the
 bond's proof-context check, not by the gateway, which does not know a
 credential's expiry; the gateway's equivalent negative is the
 `[now-300s, now+5s]` window above.
+
+## Base Sepolia B11 evidence (2026-09-21)
+
+Run from the `feature-base-zk-credits` worktree at commit `9a596c3e7957` with
+the three deployed-from sources clean at HEAD, a dedicated keystore, and the
+public `https://sepolia.base.org` RPC. This is the real-chain half of S23: a
+generated proof verified by the deployed Solidity verifier and the
+`ISpendVerifier` adapter on Base Sepolia. It is not an independent review and
+not a paid-traffic claim.
+
+| Scenarios | Command | Result |
+| --- | --- | --- |
+| S23 (Base Sepolia half) | `forge create src/PrivateCreditSpendVerifier.sol:Groth16Verifier` with `--chain 84532 --broadcast --verify` | deployed `0xC66CC4866f945Ce39c207729CF136fd03d58207E` in block 47,096,589, gas 445,789, cost 2,674,734,000,000 wei; runtime bytecode 1816 bytes, sha256 `572b3914765f05316d56c13448303645614f6ca0de95725f014923ed345fa12b`, identical to the compiled `deployedBytecode`; BaseScan `Pass - Verified` |
+| S23 (Base Sepolia half) | `forge create src/SpendVerifier.sol:SpendVerifier` with the verifier address as its only constructor argument | deployed `0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD` in block 47,096,600, gas 386,525, cost 2,319,150,000,000 wei; runtime bytecode 1531 bytes, sha256 `7d855c799850a90d06bff9db3db87791f740aba72719c5d00e44712a49f9b025`, differing from the artifact only by the immutable `verifier()` slot, which reads back the verifier address; BaseScan `Pass - Verified` |
+| S23 (Base Sepolia half) | `cast call <adapter> "verifySpend(bytes32,uint256,uint256,uint256,bytes)(bool,bytes32,uint256,bytes32)"` with `COMMITMENT`, `SIGNAL_1`, `NULLIFIER`, `SHARE_1`, `PROOF_1` | `true`, `0x0d246a2afb766521d94437474ef6377058f7987bbe8a588005f37c8e3aa70831`, `1797400000`, `0x00000000000000000000000000000000000000000000000000000000000004d2` |
+| S23 (Base Sepolia half) | the same call with `SIGNAL_2`, `SHARE_2`, `PROOF_2` | `true`; the second transcript of the same nullifier verifies on the deployed pair |
+| S34 | `FOUNDRY_OFFLINE=true forge test --match-contract SpendVerifierTest` in `contracts` | 8 passed, 0 failed |
+
+Transactions: `0xa38ccbe4650027fc55a2f8459c62b15f94c54ba4243c193f6128b04d1a943183`
+(verifier) and
+`0x1832be22b0928ec7b3e340b006385ad7652faf91e1b45a62930db0da6b9557c8` (adapter).
+Both paid the 0.006 gwei effective price, 4,993,884,000,000 wei in total,
+against a pinned 13,200,000 wei max fee and the 0.0001 ETH preflight ceiling.
+The preflight that authorized the broadcast required chain ID `84532`, the three
+sources tracked and clean at HEAD, a green focused suite, a projection inside
+the ceiling, and a balance covering that projection. Redacted excerpts of the
+two broadcasts, the focused suite, and the command record are in
+`~/.local/state/haze/logs/`; the run's timestamped JSON evidence is
+`/private/tmp/haze-b11-base-sepolia-evidence-20260921T032831Z.json`, and the
+durable copy of its values is this section.
+
+The two receipts, both runtime bytecodes, the immutable, and the proof call were
+re-checked independently from this checkout after the run: both receipts return
+status `0x1` with a matching `contractAddress`, `cast code` re-derives the two
+hashes above, and the fixture call still returns `true` with the fixture root,
+timestamp, and domain.
+
+Not covered here: the independent cryptographic review, the R1CS and
+negative-test review packet, paid traffic, and any production ceremony. The
+deployed pair runs the development proving material, so S23 stays open on the
+paid-traffic gate (B12).
 
 ## Scenario catalog
 
@@ -269,7 +312,8 @@ Record numeric fixtures, not slogans.
 
 - Independent cryptographic review of the restored statement and implemented
   artifacts (S23).
-- Real Base Sepolia verifier+adapter (S23).
+- Real Base Sepolia verifier+adapter (S23): obtained 2026-09-21 and recorded in
+  [Base Sepolia B11 evidence](#base-sepolia-b11-evidence-2026-09-21).
 - Partner-written accepted proving latency before first paid claim (S25).
 - Interview notes plus pointer, not full transcripts (S32).
 - Dated written renewal intent at live SKU (S32).

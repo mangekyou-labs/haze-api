@@ -195,7 +195,23 @@ the resource server would reject. Token-issuance `expiry` is not known to the
 gateway; the circuit and the bond enforce `timestamp < expiry`.
 
 Deployment for this ticket is the verifier and the adapter only. The bond,
-USDC escrow, and Poseidon libraries are not part of the B11 broadcast.
+USDC escrow, and Poseidon libraries are not part of the B11 broadcast. That
+broadcast ran on 2026-09-21 from commit `9a596c3e7957`: `Groth16Verifier` at
+`0xC66CC4866f945Ce39c207729CF136fd03d58207E` (block 47,096,589, runtime bytecode
+identical to the compiled artifact) and `SpendVerifier` at
+`0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD` (block 47,096,600, immutable
+`verifier()` reading back the verifier address). Both are BaseScan-verified and
+the fixture transcript verifies through the deployed pair. The exact commands,
+the pinned 13,200,000 wei max fee, and the preconditions that authorized the
+broadcast are in the
+[deployment document](../deployment/2026-09-18-feature-base-zk-credits.md); the
+recorded addresses, transactions, and proof output are in the
+[testing document](../testing/2026-09-18-feature-base-zk-credits.md#base-sepolia-b11-evidence-2026-09-21).
+
+One calling detail the broadcast exposed: `cast` cannot parse the fixture's
+76-digit decimals into `bytes32`, so a receipt call passes each public signal as
+a left-padded 32-byte word. The verifier still receives the six words in
+canonical order, which is what the adapter's positional checks rely on.
 
 ## Error and logging policy
 
@@ -228,6 +244,7 @@ Follow planning B2→B3→B4 for the cryptographic spine, then B5→B6→B8 for
 spend, then B9 for invite-only onboarding. B2, B3, B4, and the B9 onboarding
 rewrite are done locally; B5/B6/B8 remain **present-unsafe** where the notes
 above say so. Do not represent the restored circuit as privacy-preserving
-while the rejected root fixtures are still present and the generated verifier
-has no Base Sepolia receipt. Do not onboard paid partners until
-planning B12 and founder B16 pass.
+while the rejected root fixtures are still present and the independent
+cryptographic review is outstanding; the generated verifier and the adapter do
+now carry Base Sepolia receipts (2026-09-21). Do not onboard paid partners
+until planning B12 and founder B16 pass.

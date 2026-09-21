@@ -62,36 +62,89 @@ They are not an automatic promotion from Sepolia.
    outstanding.
 7. Enable durable workers and alerts only after reconciliation passes.
 
-## B11 verifier and adapter broadcast (pending authorization)
+## B11 verifier and adapter broadcast (executed 2026-09-21)
 
 B11 has to show a generated proof verified by the real Solidity verifier and
 the `ISpendVerifier` adapter on Base Sepolia. That broadcast is the verifier
 and the adapter only: no `PrivateCreditBond`, no USDC, no Poseidon libraries,
-no mainnet, and no production ceremony. It has not been authorized or run, so
-there is no receipt.
+no mainnet, and no production ceremony. It ran on 2026-09-21 from commit
+`9a596c3e7957` with the three deployed-from sources committed and clean at HEAD
+(`PrivateCreditSpendVerifier.sol` `267649570b3ec684…`, `SpendVerifier.sol`
+`36b2d15fa5c9b57c…`, `PrivateCreditSpendFixture.sol` `6960155a6b529ee6…`) and
+with a dedicated keystore, so no private key was committed, exported, or
+displayed.
 
-Prerequisites: a Foundry keystore funded on Base Sepolia (`cast wallet import`;
-never a committed key or `.env`), an HTTPS RPC (`https://sepolia.base.org` or
-`BASE_SEPOLIA_RPC_URL`), and a BaseScan API key for `--verify`. At the
-measured 0.006 gwei base fee the two creations cost about 841,000 gas in total
-(verifier ~450,500, adapter ~390,800), roughly 0.000005 ETH, so one CDP faucet
-claim of 0.0001 ETH covers them. No builder-code attribution is configured in
-this repository; ERC-8021 applies to wallet and app transaction paths, not to
-a one-off `forge create`.
+| Contract | Address | Transaction | Block | Gas | Cost |
+| --- | --- | --- | --- | --- | --- |
+| `Groth16Verifier` | `0xC66CC4866f945Ce39c207729CF136fd03d58207E` | `0xa38ccbe4650027fc55a2f8459c62b15f94c54ba4243c193f6128b04d1a943183` | 47,096,589 | 445,789 | 0.00000267 ETH |
+| `SpendVerifier` | `0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD` | `0x1832be22b0928ec7b3e340b006385ad7652faf91e1b45a62930db0da6b9557c8` | 47,096,600 | 386,525 | 0.00000232 ETH |
 
-From `contracts/`, each command prompts for the keystore password:
+Both creations paid the 0.006 gwei effective price, 4,993,884,000,000 wei in
+total, against a pinned 13,200,000 wei max fee and the 0.0001 ETH ceiling. The
+verifier runtime bytecode hashes to the compiled artifact exactly
+(`572b3914765f0531…`); the adapter differs only by its immutable `verifier()`
+slot, which reads back `0xC66CC4866f945Ce39c207729CF136fd03d58207E`. BaseScan
+verified both through the Etherscan V2 API (`Pass - Verified`, GUIDs
+`zum2tr64kcer8zycbjteaubzdhapvumay51tj2yssdj5afybsk` and
+`d4nbreimqlrgzsr4s4y5tzmacwb7qx9zwbhicpdnbxdl2a5hf7`). A generated proof then
+verified through the deployed pair: `verifySpend` with the fixture transcript
+returned `true` with root
+`0x0d246a2afb766521d94437474ef6377058f7987bbe8a588005f37c8e3aa70831`,
+timestamp `1797400000`, and domain `1234`, and the second transcript of the same
+nullifier returned `true` as well. The timestamped evidence file for the run is
+`/private/tmp/haze-b11-base-sepolia-evidence-20260921T032831Z.json`; the values
+above are its durable copy in this document set.
+
+### Reproducing the broadcast
+
+Preconditions the run enforced before authorizing anything: chain ID `84532`
+from the configured RPC, the three sources above tracked and clean at HEAD, a
+green `forge build` plus the focused `SpendVerifierTest` suite (8 passed), a
+signer balance covering the projection, and a projected cost no greater than
+0.0001 ETH. The projection is `gas × pinned max fee`, so the pinned fee is also
+the spend ceiling; a base fee above it stops the run instead of the wallet.
+
+`forge create` in Foundry 1.5.1 has no `--dry-run`: omitting `--broadcast`
+prints the projected transaction (gas, `maxFeePerGas`) and sends nothing, which
+is how the projection is taken. `--constructor-args` is variadic and must be the
+last flag, or it swallows the flags that follow it.
 
 ```bash
+# from contracts/, with the keystore password in a 0600 file
 forge create src/PrivateCreditSpendVerifier.sol:Groth16Verifier \
-  --rpc-url https://sepolia.base.org --account <keystore> --verify
+  --rpc-url https://sepolia.base.org --chain 84532 --broadcast \
+  --keystore ~/.foundry/keystores/base-sepolia-zk-credits-deployer \
+  --password-file ~/.config/haze/base-sepolia-zk-credits-deployer.password \
+  --gas-price 13200000 --priority-gas-price 1000000 \
+  --verify --verifier etherscan --etherscan-api-key "$ETHERSCAN_API_KEY" \
+  --retries 2 --delay 5
+
 forge create src/SpendVerifier.sol:SpendVerifier \
-  --rpc-url https://sepolia.base.org --account <keystore> --verify \
-  --constructor-args <verifier address>
+  --rpc-url https://sepolia.base.org --chain 84532 --broadcast \
+  --keystore ~/.foundry/keystores/base-sepolia-zk-credits-deployer \
+  --password-file ~/.config/haze/base-sepolia-zk-credits-deployer.password \
+  --gas-price 13200000 --priority-gas-price 1000000 \
+  --verify --verifier etherscan --etherscan-api-key "$ETHERSCAN_API_KEY" \
+  --retries 2 --delay 5 \
+  --constructor-args 0xC66CC4866f945Ce39c207729CF136fd03d58207E
 ```
 
-Then record the receipt by calling the adapter with the fixture transcript from
+`BASESCAN_API_KEY` must also be exported, because `contracts/foundry.toml`
+interpolates `${BASESCAN_API_KEY}` whenever verification runs; the key is an
+Etherscan V2 key. Let Foundry resolve the verifier URL itself: it appends its
+own query parameters and needs the `chainid` baked into its default,
+`https://api.etherscan.io/v2/api?chainid=84532`. A hand-written
+`--verifier-url` loses that chain parameter, and the deprecated
+`api-sepolia.basescan.org` V1 endpoint now answers with a migration error.
+Verification failure never invalidates a successful creation: the receipt and
+the bytecode are checked first, and explorer verification is retried separately
+with `forge verify-contract`.
+
+Receipts are recorded by calling the adapter with the fixture transcript from
 `contracts/test/fixtures/PrivateCreditSpendFixture.sol`
-(`COMMITMENT`, `SIGNAL_1`, `NULLIFIER`, `SHARE_1`, `PROOF_1`):
+(`COMMITMENT`, `SIGNAL_1`, `NULLIFIER`, `SHARE_1`, `PROOF_1`). Each decimal
+constant is passed as a left-padded 32-byte word, because `cast` cannot parse a
+76-digit decimal into `bytes32`:
 
 ```bash
 cast call <adapter> \
@@ -100,9 +153,11 @@ cast call <adapter> \
 ```
 
 The call must return `true` with the fixture's `ROOT`, `TIMESTAMP`, and
-`DOMAIN`. Persist the addresses, transaction hashes, block numbers, and that
-return value in the testing document. A local fork test against those
-addresses is optional.
+`DOMAIN`. The addresses, transaction hashes, block numbers, gas, and that return
+value are recorded in the testing document.
+
+No builder-code attribution is configured in this repository; ERC-8021 applies
+to wallet and app transaction paths, not to a one-off `forge create`.
 
 ## Paid-traffic gate (before design partners)
 
