@@ -294,9 +294,22 @@ export class PostgresClaimStore implements ClaimStore {
       [reservationId, now],
     );
   }
+
+  /**
+   * Durable aggregate counts by claim state. Returns only integers, so a
+   * monitoring read can never expose a nullifier, signal digest, or reservation.
+   */
+  async stateCounts(): Promise<Record<string, number>> {
+    const result = await this.pool.query(
+      `SELECT state, COUNT(*)::int AS total FROM spend_plane.claims GROUP BY state`,
+    );
+    const counts: Record<string, number> = { reserved: 0, ready: 0, committed: 0, cancelled: 0 };
+    for (const row of result.rows as Record<string, unknown>[]) counts[String(row.state)] = Number(row.total);
+    return counts;
+  }
 }
 
-export function createClaimStore(pool?: Pool): ClaimStore {
+export function createClaimStore(pool?: Pool): PostgresClaimStore | LocalClaimStore {
   if (pool) return new PostgresClaimStore(pool);
   return new LocalClaimStore({ operatorToken: process.env.CLAIM_STORE_OPERATOR_TOKEN });
 }

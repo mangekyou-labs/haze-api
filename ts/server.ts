@@ -3,11 +3,12 @@
  * runtime has no Stripe checkout, order, refund, dispute, or wallet-link path. */
 
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createZkPrepaidGateway } from './zk-prepaid-gateway.js';
 import { createBaseBondSponsor } from './base-chain.js';
 import { createPool, runMigrations } from './db/index.js';
-import { createClaimStore } from './claim-store.js';
+import { PostgresClaimStore, createClaimStore } from './claim-store.js';
 import {
   BaseContractEventSynchronizer,
   MemoryBaseEventStore,
@@ -16,6 +17,8 @@ import {
 import { createBasePublicClient } from './base-chain.js';
 import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
 import { PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
+import { LaunchControl, PostgresLaunchControlStore, MemoryLaunchControlStore } from './launch-control.js';
+import { LaunchMetrics } from './metrics.js';
 import type { Pool } from 'pg';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -84,10 +87,35 @@ const pilotInvites = pool && pilotFunding
     })
   : undefined;
 
-const { app, claimStore } = await createZkPrepaidGateway({
-  claimStore: pool ? createClaimStore(pool) : undefined,
+// The launch controls are durable whenever Postgres is configured: the manual
+// kill switch and the micro-USD provider-spend caps must survive a restart.
+const launchControl = new LaunchControl({
+  store: pool ? new PostgresLaunchControlStore(pool) : new MemoryLaunchControlStore(),
+});
+const metrics = new LaunchMetrics();
+const basePublicClient = process.env.BASE_RPC_URL ? createBasePublicClient() : undefined;
+const verifyingKeyPath = process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
+
+const claimStore = createClaimStore(pool);
+const { app } = await createZkPrepaidGateway({
+  claimStore,
   pilotInvites,
   pilotFunding,
+  launchControl,
+  metrics,
+  claimCounts: claimStore instanceof PostgresClaimStore ? () => claimStore.stateCounts() : undefined,
+  readiness: {
+    database: pool
+      ? async () => { await pool.query('SELECT 1'); }
+      : undefined,
+    baseHead: basePublicClient
+      ? async () => await basePublicClient.getBlockNumber()
+      : undefined,
+    // Fails closed when no pinned verifying key is configured or readable.
+    verifierAssets: verifyingKeyPath
+      ? async () => { JSON.parse(await readFile(verifyingKeyPath, 'utf8')); }
+      : undefined,
+  },
   rootSnapshot: () => baseEventSync
     ? baseEventSync.snapshot()
     : { currentRoot: initialBaseState.currentRoot, knownRoots: initialBaseState.knownRoots },

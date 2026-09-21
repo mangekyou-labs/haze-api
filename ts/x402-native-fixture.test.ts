@@ -154,7 +154,7 @@ describe('x402-native agent fixture', () => {
   it('selects zk-prepaid even when it is not the first acceptance', async () => {
     const { baseUrl } = await startGateway();
     const url = `${baseUrl}/v1/chat/completions`;
-    const body = '{"model":"openai/gpt-4o-mini","messages":[]}';
+    const body = '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}';
     const unpaid = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
     const required = new x402HTTPClient(new x402Client()).getPaymentRequiredResponse((name) => unpaid.headers.get(name));
     const [zkPrepaid] = required.accepts as PaymentRequirements[];
@@ -175,7 +175,7 @@ describe('x402-native agent fixture', () => {
   it('returns an unsupported-scheme result for a generic unregistered client with no fallback rail', async () => {
     const { baseUrl } = await startGateway();
     const url = `${baseUrl}/v1/chat/completions`;
-    const body = '{"model":"openai/gpt-4o-mini","messages":[]}';
+    const body = '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}';
     const http = new x402HTTPClient(new x402Client());
 
     const unpaid = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body });

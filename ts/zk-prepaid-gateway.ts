@@ -37,11 +37,22 @@ import {
   MAX_REPLAY_BYTES,
 } from './response-replay.js';
 import { claimFence, claimStoreErrorCode, LocalClaimStore } from './claim-store.js';
+import {
+  MAX_DISPATCH_COST_MICRO_USD,
+  MAX_REQUEST_BYTES,
+  normalizeServiceClassRequest,
+  PROVIDER_TIMEOUT_MS,
+} from './service-class.js';
+import {
+  InvalidPauseReasonError,
+  MAX_PAUSE_REASON_LENGTH,
+  type LaunchControl,
+} from './launch-control.js';
+import type { LaunchMetrics } from './metrics.js';
+import { checkReadiness } from './readiness.js';
 import type { PilotInviteService } from './pilot-invites.js';
 import type { PilotFundingService } from './pilot-funding.js';
 
-const MAX_REQUEST_BYTES = 2_000_000;
-const DEFAULT_PROVIDER_TIMEOUT_MS = 10_000;
 const ISSUED_AT_MAX_AGE_SECONDS = 300;
 const ISSUED_AT_MAX_FUTURE_SKEW_SECONDS = 5;
 const DEFAULT_CONTRACT = '0x0000000000000000000000000000000000000001';
@@ -68,6 +79,8 @@ export interface GatewayConfig {
 export interface GatewayRootSnapshot {
   currentRoot?: string;
   knownRoots?: string[];
+  /** Latest finalized block already folded into this snapshot. */
+  lastScannedBlock?: bigint;
 }
 
 export interface ZkPrepaidGatewayOptions {
@@ -89,6 +102,19 @@ export interface ZkPrepaidGatewayOptions {
   pilotFunding?: PilotFundingService;
   /** Internal service token for control-plane calls. Defaults to BILLING_INTERNAL_TOKEN. */
   internalServiceToken?: string;
+  /** Durable kill switch and provider-spend caps. Absent disables both gates. */
+  launchControl?: LaunchControl;
+  /** Bounded aggregate counters. Absent disables metric recording. */
+  metrics?: LaunchMetrics;
+  /** Readiness probes beyond the ones the gateway already knows. */
+  readiness?: {
+    database?: () => Promise<void>;
+    baseHead?: () => Promise<bigint>;
+    verifierAssets?: () => Promise<void>;
+    maxRootLagBlocks?: bigint;
+  };
+  /** Durable, unlinked count of claims per state. */
+  claimCounts?: () => Promise<Record<string, number>>;
 }
 
 interface BufferedResponse {
@@ -254,21 +280,6 @@ function bodyForSignal(req: Request): Uint8Array {
   return raw ? new Uint8Array(raw) : new Uint8Array();
 }
 
-function validateCompletionRequest(pathname: string, body: unknown): string | undefined {
-  if (pathname === '/v1/responses') return 'unsupported_endpoint';
-  if (!isRecord(body)) return 'invalid_request_body';
-
-  const streamKeys = ['stream', 'stream_options', 'streamOptions'];
-  if (streamKeys.some((key) => Object.prototype.hasOwnProperty.call(body, key))) return 'streaming_not_supported';
-
-  const serviceClassKeys = ['serviceClass', 'service_class', 'service-class'];
-  for (const key of serviceClassKeys) {
-    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
-    if (typeof body[key] !== 'string' || body[key] !== CODING_DEEPSEEK_V4_FLASH_V1) return 'invalid_service_class';
-  }
-  return undefined;
-}
-
 function requirementsForAccepted(config: GatewayConfig, accepted: unknown): PaymentRequirements | undefined {
   if (!isRecord(accepted) || !isRecord(accepted.extra)) return undefined;
   const issuedAt = accepted.extra.issuedAt;
@@ -349,9 +360,11 @@ function sendPaymentRequired(
   res: ExpressResponse,
   url: string,
   requirements: PaymentRequirements,
+  metrics: LaunchMetrics | undefined,
   reason?: string,
 ): void {
   const required = buildPaymentRequired(url, requirements, reason);
+  metrics?.increment('challenge_issued');
   res.setHeader(PAYMENT_REQUIRED_HEADER, encodeHeader(required));
   res.status(402).json({ error: 'payment_required' });
 }
@@ -428,11 +441,13 @@ async function cancelIfReserved(
   claimStore: ClaimStore,
   context: ReservationContext,
   clock: () => number,
+  metrics: LaunchMetrics | undefined,
 ): Promise<void> {
   try {
     const current = await claimStore.lookup(context.nullifier, context.signalHash, clock());
     if (!current || current.state !== 'reserved' || !sameFence(claimFence(current), context.fence)) return;
     await claimStore.cancel(context.fence, clock());
+    metrics?.increment('claim_cancelled');
   } catch {
     // Cancellation is best-effort. A ready/committed record is deliberately
     // never cancelled, and a persistence outage must not use a stale fence.
@@ -480,7 +495,15 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   const provider = options.provider ?? new OpenRouterAdapter();
   const providerTimeoutMs = Number.isFinite(options.providerTimeoutMs) && (options.providerTimeoutMs ?? 0) > 0
     ? Math.floor(options.providerTimeoutMs!)
-    : DEFAULT_PROVIDER_TIMEOUT_MS;
+    : PROVIDER_TIMEOUT_MS;
+  const launchControl = options.launchControl;
+  const metrics = options.metrics;
+  // The real OpenRouter adapter needs a credential. An injected provider (the
+  // focused-test mock) and the explicit test-only bypass do not, so readiness
+  // and the dispatch gate ask the same question: can this deployment dispatch?
+  const providerConfigured = options.allowUnverifiedProofs === true
+    || provider.id !== 'openrouter'
+    || Boolean(config.openRouterApiKey);
   const readRoots = async (): Promise<GatewayRootSnapshot> => options.rootSnapshot
     ? await options.rootSnapshot()
     : { currentRoot: config.currentRoot, knownRoots: config.knownRoots };
@@ -501,8 +524,32 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     },
   }));
 
+  /** Liveness: the process is up. Never depends on a downstream dependency. */
   app.get('/health', (_req, res) => {
     res.json({ service: 'zk-credits-gateway', status: 'ok', network: requirements.network, scheme: requirements.scheme });
+  });
+
+  /**
+   * Readiness: the service can honestly accept new work. A paused launch, a
+   * missing root, stale Base data, absent verifier assets, or an unconfigured
+   * provider all report `503` so nothing routes new traffic to a service that
+   * would fail closed anyway.
+   */
+  app.get('/ready', async (_req, res) => {
+    try {
+      const report = await checkReadiness({
+        launchControl,
+        database: options.readiness?.database,
+        baseHead: options.readiness?.baseHead,
+        verifierAssets: options.readiness?.verifierAssets,
+        maxRootLagBlocks: options.readiness?.maxRootLagBlocks,
+        rootSnapshot: () => readRoots(),
+        providerConfigured,
+      });
+      res.status(report.ready ? 200 : 503).json(report);
+    } catch {
+      res.status(503).json({ ready: false, launchControl: 'unknown', checks: [], generatedAt: new Date(now()).toISOString() });
+    }
   });
 
   // Discovery is intentionally public. Mutating facilitator operations below
@@ -653,12 +700,113 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   }
 
   /**
+   * The kill switch gate for new work. Funding and inference are refused while
+   * paused; health, readiness, the public bundle lookup, the committed-claim
+   * replay, and the authenticated admin routes stay reachable for recovery.
+   */
+  async function refuseWhenPaused(res: ExpressResponse): Promise<boolean> {
+    if (!launchControl) return false;
+    try {
+      if (!(await launchControl.isPaused())) return false;
+    } catch {
+      // An unreadable launch state is not permission to keep spending.
+      jsonError(res, 503, 'launch_control_unavailable');
+      return true;
+    }
+    metrics?.increment('paused_rejected');
+    jsonError(res, 503, 'pilot_paused');
+    return true;
+  }
+
+  /** Authenticated aggregate monitoring: counts, spend headroom, Base lag. */
+  app.get('/v1/admin/status', async (req, res) => {
+    if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    try {
+      const [launch, spend, roots] = await Promise.all([
+        launchControl ? launchControl.status() : Promise.resolve(undefined),
+        launchControl ? launchControl.spend() : Promise.resolve(undefined),
+        readRoots(),
+      ]);
+      let lagBlocks: bigint | undefined;
+      if (options.readiness?.baseHead && roots.lastScannedBlock !== undefined) {
+        try {
+          const head = await options.readiness.baseHead();
+          lagBlocks = head > roots.lastScannedBlock ? head - roots.lastScannedBlock : 0n;
+        } catch {
+          lagBlocks = undefined;
+        }
+      }
+      res.json({
+        launchControl: launch
+          ? { state: launch.state, reason: launch.reason, updatedAt: new Date(launch.updatedAt).toISOString() }
+          : { state: 'disabled', reason: null, updatedAt: null },
+        network: requirements.network,
+        spend: spend
+          ? {
+              utcDayMicroUsd: spend.utcDayMicroUsd.toString(),
+              rolling30dMicroUsd: spend.rolling30dMicroUsd.toString(),
+              dailyCapMicroUsd: spend.dailyCapMicroUsd.toString(),
+              rollingCapMicroUsd: spend.rollingCapMicroUsd.toString(),
+              dailyHeadroomMicroUsd: spend.dailyHeadroomMicroUsd.toString(),
+              rollingHeadroomMicroUsd: spend.rollingHeadroomMicroUsd.toString(),
+              debits: spend.debits,
+            }
+          : null,
+        metrics: metrics?.snapshot() ?? null,
+        claims: options.claimCounts ? await options.claimCounts().catch(() => null) : null,
+        base: {
+          currentRoot: roots.currentRoot ?? null,
+          knownRootCount: (roots.knownRoots ?? []).length,
+          lastScannedBlock: roots.lastScannedBlock?.toString() ?? null,
+          lagBlocks: lagBlocks?.toString() ?? null,
+        },
+        // Proving happens only inside an operator's sidecar, so the gateway has
+        // no latency to report. Aggregate hot-prove time is participant-reported
+        // through the weekly export and is never derived here.
+        provingLatency: { source: 'participant-reported', value: null },
+        generatedAt: new Date(now()).toISOString(),
+      });
+    } catch {
+      jsonError(res, 503, 'launch_control_unavailable');
+    }
+  });
+
+  app.post('/v1/admin/pause', async (req, res) => {
+    if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    if (!launchControl) { jsonError(res, 503, 'launch_control_unavailable'); return; }
+    const body = isRecord(req.body) ? req.body : {};
+    const reason = typeof body.reason === 'string' ? body.reason : '';
+    if (reason.trim().length === 0 || reason.trim().length > MAX_PAUSE_REASON_LENGTH) {
+      jsonError(res, 400, 'invalid_pause_reason');
+      return;
+    }
+    try {
+      const status = await launchControl.pause(reason);
+      res.json({ state: status.state, reason: status.reason, updatedAt: new Date(status.updatedAt).toISOString() });
+    } catch (error) {
+      jsonError(res, 503, error instanceof InvalidPauseReasonError ? 'invalid_pause_reason' : 'launch_control_unavailable');
+    }
+  });
+
+  app.post('/v1/admin/resume', async (req, res) => {
+    if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    if (!launchControl) { jsonError(res, 503, 'launch_control_unavailable'); return; }
+    try {
+      const status = await launchControl.resume();
+      res.json({ state: status.state, reason: status.reason, updatedAt: new Date(status.updatedAt).toISOString() });
+    } catch {
+      jsonError(res, 503, 'launch_control_unavailable');
+    }
+  });
+
+  /**
    * Internal control-plane redemption. The GitHub account is supplied by the
    * authenticated web session, never by the browser, and the response carries
    * a one-time detached funding token instead of any credential material.
    */
   app.post('/v1/pilot/invites/redeem', async (req, res) => {
     if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    if (await refuseWhenPaused(res)) return;
     if (!pilotInvites) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
     const body = isRecord(req.body) ? req.body : {};
     if (typeof body.code !== 'string' || typeof body.githubAccountId !== 'string') {
@@ -679,6 +827,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
    * identifier, and it never receives a GitHub identity.
    */
   app.post('/v1/pilot/funding', async (req, res) => {
+    if (await refuseWhenPaused(res)) return;
     if (!pilotFunding) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
     const body = isRecord(req.body) ? req.body : {};
     if (typeof body.fundingToken !== 'string' || typeof body.commitment !== 'string') {
@@ -705,13 +854,21 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   });
 
   const handleCompletion = async (req: Request, res: ExpressResponse): Promise<void> => {
-    const localError = validateCompletionRequest(req.path, req.body);
-    if (localError) { jsonError(res, 400, localError); return; }
+    // The kill switch is checked first: a paused pilot refuses new inference
+    // before any challenge, reservation, or provider cost exists.
+    if (await refuseWhenPaused(res)) return;
+
+    const normalized = normalizeServiceClassRequest(req.body);
+    if (!normalized.ok) {
+      metrics?.increment('request_rejected');
+      jsonError(res, 400, normalized.error);
+      return;
+    }
 
     const url = requestUrl(req, config);
     const parsed = parsePaymentHeader(req);
     if (parsed.kind === 'missing') {
-      sendPaymentRequired(res, url, freshChallenge());
+      sendPaymentRequired(res, url, freshChallenge(), metrics);
       return;
     }
     if (parsed.kind === 'malformed') {
@@ -721,7 +878,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     const payment = parsed.payment;
     const candidateRequirements = requirementsForAccepted(config, payment.accepted);
     if (!candidateRequirements || !issuedAtFresh(candidateRequirements, now)) {
-      sendPaymentRequired(res, url, freshChallenge(), 'invalid_or_stale_authorization');
+      sendPaymentRequired(res, url, freshChallenge(), metrics, 'invalid_or_stale_authorization');
       return;
     }
 
@@ -736,7 +893,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
         responseKey: payment.payload.responseKey,
       })).field;
     } catch {
-      sendPaymentRequired(res, url, freshChallenge(), 'invalid_request_binding');
+      sendPaymentRequired(res, url, freshChallenge(), metrics, 'invalid_request_binding');
       return;
     }
 
@@ -747,9 +904,11 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       structural = { isValid: false, invalidReason: 'verification_failed' };
     }
     if (!structural.isValid) {
-      sendPaymentRequired(res, url, freshChallenge(), structural.invalidReason);
+      metrics?.increment('proof_invalid');
+      sendPaymentRequired(res, url, freshChallenge(), metrics, structural.invalidReason);
       return;
     }
+    metrics?.increment('proof_valid');
 
     const nullifier = payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.nullifier]!;
     const hash = signalHash(payment);
@@ -759,12 +918,14 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     } catch (error) {
       const code = claimStoreErrorCode(error);
       if (code === 'conflicting_signal') {
-        sendPaymentRequired(res, url, freshChallenge(), 'conflicting_signal');
+        metrics?.increment('claim_conflict');
+        sendPaymentRequired(res, url, freshChallenge(), metrics, 'conflicting_signal');
         return;
       }
       jsonError(res, 503, 'claim_store_unavailable');
       return;
     }
+    metrics?.increment(reservation.kind === 'existing' ? 'reservation_existing' : 'reservation_new');
 
     const key = `${nullifier}:${hash}`;
     const paymentResponse: SettlementResponse = { success: true, transaction: '', network: candidateRequirements.network };
@@ -781,13 +942,14 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       }
       if (reservation.record.state === 'cancelled') {
         if (reservation.record.dispatchCount >= 2) {
-          sendPaymentRequired(res, url, freshChallenge(), 'dispatch_budget_exhausted');
+          sendPaymentRequired(res, url, freshChallenge(), metrics, 'dispatch_budget_exhausted');
         } else {
-          sendPaymentRequired(res, url, freshChallenge(), 'reservation_cancelled');
+          sendPaymentRequired(res, url, freshChallenge(), metrics, 'reservation_cancelled');
         }
         return;
       }
       if (reservation.record.state === 'committed') {
+        metrics?.increment('claim_replayed');
         res.setHeader(PAYMENT_RESPONSE_HEADER, encodeHeader(paymentResponse));
         if (reservation.record.encryptedReplay) {
           res.status(409).json({
@@ -815,17 +977,46 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     };
     const operation = (async (): Promise<BufferedResponse> => {
       let readyStaged = false;
+      let dispatched = false;
+      let debitId: string | undefined;
       try {
-        if (!config.openRouterApiKey && provider.id === 'openrouter' && !options.allowUnverifiedProofs) {
+        if (!providerConfigured) {
           throw new GatewayError('provider_not_configured', 503);
         }
 
         const dispatchIdempotencyKey = `${context.nullifier}:${context.signalHash}:${context.fence.generation}:dispatch`;
         await claimCall(() => claimStore.beginDispatch(context.fence, dispatchIdempotencyKey, now()));
-        const upstream = await withTimeout(
-          provider.forwardRequest(req.body, config.openRouterApiKey ?? '', 'chat.completions'),
-          providerTimeoutMs,
-        );
+
+        // Admission control. The conservative class ceiling is debited before
+        // the request can leave the process, so an exhausted cap refuses the
+        // dispatch, cancels the reservation below, and consumes no credit.
+        if (launchControl) {
+          let admission;
+          try {
+            admission = await launchControl.beginDispatch(MAX_DISPATCH_COST_MICRO_USD);
+          } catch {
+            throw new GatewayError('launch_control_unavailable', 503);
+          }
+          if (admission.kind === 'paused') throw new GatewayError('pilot_paused', 503);
+          if (admission.kind === 'cap_exhausted') {
+            metrics?.increment(admission.window === 'utc_day' ? 'cap_exhausted_utc_day' : 'cap_exhausted_rolling_30d');
+            throw new GatewayError('provider_spend_cap_exhausted', 503);
+          }
+          debitId = admission.debitId;
+        }
+
+        // `dispatched` flips only once a dispatch promise exists. A synchronous
+        // throw while building the request is still a pre-dispatch failure and
+        // releases the debit; anything after this point may be on the wire and
+        // keeps it.
+        let upstream: globalThis.Response;
+        try {
+          const inFlightRequest = provider.forwardRequest(normalized.request, config.openRouterApiKey ?? '', 'chat.completions');
+          dispatched = true;
+          upstream = await withTimeout(inFlightRequest, providerTimeoutMs);
+        } catch (error) {
+          throw error instanceof GatewayError ? error : new GatewayError('provider_request_failed', 502);
+        }
         if (upstream.status < 200 || upstream.status >= 300) {
           throw new GatewayError('provider_non_2xx', 502);
         }
@@ -844,6 +1035,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
         const commitIdempotencyKey = `${context.nullifier}:${context.signalHash}:${context.fence.generation}:commit`;
         try {
           await claimCall(() => claimStore.commit(context.fence, commitIdempotencyKey, now()));
+          metrics?.increment('claim_committed');
         } catch (error) {
           // A timeout or connection break can leave a durable ready row. Keep
           // its fence for reconciliation; never cancel or dispatch again.
@@ -852,10 +1044,26 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
           }
           throw error;
         }
+        metrics?.increment('dispatch_ok');
         return buffered;
       } catch (error) {
-        if (!readyStaged) await cancelIfReserved(claimStore, context, now);
+        if (error instanceof GatewayError && error.message === 'provider_timeout') metrics?.increment('dispatch_timeout');
+        else if (dispatched) metrics?.increment('dispatch_error');
+        if (!readyStaged) await cancelIfReserved(claimStore, context, now, metrics);
         throw error;
+      } finally {
+        // A dispatch that began always keeps its debit, including provider
+        // errors and timeouts. Only a failure before the network call releases
+        // it. A settlement failure leaves the row held, which still counts
+        // against the caps, so accounting never under-reports.
+        if (debitId && launchControl) {
+          try {
+            if (dispatched) await launchControl.retain(debitId);
+            else await launchControl.release(debitId);
+          } catch {
+            // Fail closed: the held debit keeps counting toward the cap.
+          }
+        }
       }
     })();
     inFlight.set(key, operation);

@@ -10,7 +10,10 @@
     "dev": "ts-node server.ts",
     "invite:issue": "tsx pilot-admin.ts issue-invite",
     "invite:inspect": "tsx pilot-admin.ts inspect-invite",
-    "invite:revoke": "tsx pilot-admin.ts revoke-invite"
+    "invite:revoke": "tsx pilot-admin.ts revoke-invite",
+    "launch:status": "tsx pilot-admin.ts launch-status",
+    "launch:pause": "tsx pilot-admin.ts launch-pause",
+    "launch:resume": "tsx pilot-admin.ts launch-resume"
   },
   "keywords": [],
   "author": "",

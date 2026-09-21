@@ -4,6 +4,9 @@
  *   npm run invite:issue -- --github-id <id> [--days 7]
  *   npm run invite:inspect -- <inviteId>
  *   npm run invite:revoke -- <inviteId>
+ *   npm run launch:status
+ *   npm run launch:pause -- --reason <text>
+ *   npm run launch:resume
  *
  * The issue command prints the plaintext code exactly once. Only its SHA-256
  * digest is durable, so a lost code is replaced, never recovered.
@@ -16,16 +19,21 @@ import type { Pool } from 'pg';
 import { createPool, runMigrations } from './db/index.js';
 import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
 import { PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
+import { LaunchControl, PostgresLaunchControlStore } from './launch-control.js';
 import { createBaseBondSponsor } from './base-chain.js';
 
 export interface PilotAdminDependencies {
   invites: PilotInviteService;
+  launchControl: LaunchControl;
 }
 
 const USAGE = `usage:
   invite:issue -- --github-id <github account id> [--days <n>]
   invite:inspect -- <inviteId>
-  invite:revoke -- <inviteId>`;
+  invite:revoke -- <inviteId>
+  launch:status
+  launch:pause -- --reason <text>
+  launch:resume`;
 
 function readFlag(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(`--${name}`);
@@ -84,6 +92,31 @@ export async function runPilotAdmin(args: readonly string[], dependencies: Pilot
     return `invite ${inviteId} revoked: ${revoked}`;
   }
 
+  if (command === 'launch-status') {
+    const status = await dependencies.launchControl.status();
+    const spend = await dependencies.launchControl.spend();
+    return [
+      `launch state: ${status.state}`,
+      `reason: ${status.reason ?? 'none'}`,
+      `updated: ${new Date(status.updatedAt).toISOString()}`,
+      `spend today: ${spend.utcDayMicroUsd} micro-USD of ${spend.dailyCapMicroUsd}`,
+      `spend 30d: ${spend.rolling30dMicroUsd} micro-USD of ${spend.rollingCapMicroUsd}`,
+      `debits: held ${spend.debits.held}, retained ${spend.debits.retained}, released ${spend.debits.released}`,
+    ].join('\n');
+  }
+
+  if (command === 'launch-pause') {
+    const reason = readFlag(rest, 'reason');
+    if (!reason) throw new Error('--reason is required');
+    const status = await dependencies.launchControl.pause(reason);
+    return `launch paused: ${status.reason} at ${new Date(status.updatedAt).toISOString()}`;
+  }
+
+  if (command === 'launch-resume') {
+    const status = await dependencies.launchControl.resume();
+    return `launch state: ${status.state} at ${new Date(status.updatedAt).toISOString()}`;
+  }
+
   throw new Error(`unknown command\n${USAGE}`);
 }
 
@@ -114,7 +147,8 @@ async function main(): Promise<void> {
       store: new PostgresInviteStore(pool),
       capabilities: capabilityIssuerFor(pool),
     });
-    console.log(await runPilotAdmin(process.argv.slice(2), { invites }));
+    const launchControl = new LaunchControl({ store: new PostgresLaunchControlStore(pool) });
+    console.log(await runPilotAdmin(process.argv.slice(2), { invites, launchControl }));
   } finally {
     await pool.end();
   }

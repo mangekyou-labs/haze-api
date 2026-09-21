@@ -11,8 +11,6 @@ export interface ProviderAdapter {
     providerAuth: string,
     endpoint?: ProviderEndpoint,
   ): Promise<Response>;
-
-  computeCost?(userPayload: unknown): bigint;
 }
 
 export interface ProviderResponse {
@@ -23,7 +21,6 @@ export interface ProviderResponse {
 // ─── OpenRouter Adapter (v1) ──────────────────────────────────────
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const FLAT_COST_PER_CALL = 1000n;
 
 function openRouterPath(endpoint: ProviderEndpoint): string {
   return endpoint === 'chat.completions' ? 'chat/completions' : 'responses';
@@ -46,10 +43,6 @@ export class OpenRouterAdapter implements ProviderAdapter {
       body: JSON.stringify(userPayload),
     });
     return response;
-  }
-
-  computeCost(_userPayload: unknown): bigint {
-    return FLAT_COST_PER_CALL;
   }
 }
 
@@ -77,10 +70,6 @@ export class MockProviderAdapter implements ProviderAdapter {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-  }
-
-  computeCost(_userPayload: unknown): bigint {
-    return 0n;
   }
 }
 
