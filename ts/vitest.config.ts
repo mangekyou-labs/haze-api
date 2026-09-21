@@ -5,6 +5,7 @@ const circuitsDir = resolve(process.cwd(), '..', 'circuits');
 
 export default defineConfig({
   test: {
+    exclude: ['**/node_modules/**', '**/archive/**', '**/dist/**'],
     env: {
       TEST_MODE: 'true',
       CIRCUITS_DIR: circuitsDir,

@@ -1,15 +1,14 @@
-# Brand — Stellar Launch
+# Brand — ZK API Credits
 
 _Status: deferred_
 
-The user chose to defer brand setup. This project is currently using shadcn's default neutral palette and no custom typography. The `frontend-design-guidelines` skill will quietly use defaults and will not prompt again.
+The project is using the neutral dark palette already established in the
+application. Product copy and UI decisions in this migration use Base,
+USDC, private prepaid credits, and x402 terminology without introducing a
+second accent system.
 
-To set up a real brand palette, typography, and voice at any time, run:
+To set up a dedicated brand palette later, run:
 
     /brand-design
 
-or say: "pick brand colors"
-
-When `brand-design` runs, it will detect this deferred state, skip the "confirm overwrite" step, and proceed directly to the full brand setup. The resulting palette will be applied to `app/globals.css` and this file will be replaced with the real brand documentation.
-
-_Deferred at: 2026-09-12_
+_Deferred at: 2026-09-19_

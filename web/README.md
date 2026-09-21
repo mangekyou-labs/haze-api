@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ZK API Credits — web app
 
-## Getting Started
+Next.js App Router app for the invite-only, unpaid, experimental Base Sepolia
+pilot: GitHub sign-in, invite redemption, local credential creation and backup,
+founder-provisioned test credits, and local credential recovery.
 
-First, run the development server:
+There is no payment step in this app: no card, no wallet flow, no paid plan,
+and no recurring charge. Credits are founder-provisioned test credits. The
+circuit is experimental and not independently audited.
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The app needs `AUTH_SECRET`, `AUTH_URL`, and GitHub OAuth credentials
+(`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`); copy `.env.example` to
+`.env.local` and fill in only what the environment needs. `GATEWAY_URL` points
+at the Base gateway, and `ENABLE_DEV_LOGIN=1` enables the test-only credential
+provider used by the browser suites.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Start the development server |
+| `npm run build` / `npm start` | Production build and serve |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | TypeScript, after preparing the vendored shared package |
+| `npm test -- --run` | Vitest unit and copy-contract suites |
+| `npm run test:e2e` | Playwright browser suites (builds and serves the app) |
 
-To learn more about Next.js, take a look at the following resources:
+## Supported clients
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The pilot serves one spend path: `POST /v1/chat/completions` through the
+project sidecar, or an x402-native agent that explicitly registers the custom
+`zk-prepaid` adapter. Generic x402 clients, unmodified agents, public
+facilitators, Bazaar, MCP, and the standard `exact` rail are unsupported. The
+deployed resource server advertises x402 v2, `zk-prepaid`, `eip155:84532`,
+`prepaid-claim`, and `escrow` at `/supported`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Privacy boundary
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Pilot telemetry does not collect prompts, responses, secrets, proofs,
+nullifiers, request signals, or payer/spend-plane joins. The gateway and the
+upstream inference provider can still observe request content and traffic
+metadata.

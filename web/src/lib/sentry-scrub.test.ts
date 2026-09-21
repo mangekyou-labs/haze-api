@@ -12,7 +12,7 @@ describe('web Sentry recursive scrubber', () => {
       contexts: {
         nested: [{ walletAddress: 'GSECRET', status: 'failed' }],
       },
-      tags: { route: '/api/evaluation/status' },
+      tags: { route: '/v1/chat/completions' },
     });
 
     expect(scrubbed).toEqual({
@@ -21,7 +21,7 @@ describe('web Sentry recursive scrubber', () => {
       contexts: {
         nested: [{ walletAddress: '[Filtered]', status: 'failed' }],
       },
-      tags: { route: '/api/evaluation/status' },
+      tags: { route: '/v1/chat/completions' },
     });
   });
 

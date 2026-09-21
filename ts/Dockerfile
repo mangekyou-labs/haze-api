@@ -1,51 +1,39 @@
-# ─── Gateway Docker image (stellar-launch M3.2) ───────────────────
-# Build:  docker build -t zk-gateway -f ts/Dockerfile .
-# Run:    docker run -p 3001:3001 --env-file .env zk-gateway
-#
-# The gateway needs the shared crypto package and its own ts/ sources.
-# All deps are installed at build time; tsx serves as the runtime.
+# Base/x402 gateway image.
 
 FROM node:24-alpine AS builder
 
 WORKDIR /app
 
-# ── Shared package (needed by both gateway and fee-sponsor) ──────
 COPY packages/zk-credits-shared/package.json packages/zk-credits-shared/package-lock.json* packages/zk-credits-shared/
 RUN cd packages/zk-credits-shared && npm ci
-
 COPY packages/zk-credits-shared/ packages/zk-credits-shared/
 RUN cd packages/zk-credits-shared && npm run build
 
-# ── Gateway ──────────────────────────────────────────────────────
+COPY packages/x402-zk-prepaid/package.json packages/x402-zk-prepaid/package-lock.json* packages/x402-zk-prepaid/
+RUN cd packages/x402-zk-prepaid && npm ci
+COPY packages/x402-zk-prepaid/ packages/x402-zk-prepaid/
+RUN cd packages/x402-zk-prepaid && npm run build
+
 COPY ts/package.json ts/package-lock.json* ts/
 RUN cd ts && npm ci
-
 COPY ts/ ts/
 
-# ── Runtime ──────────────────────────────────────────────────────
 FROM node:24-alpine
 WORKDIR /app
 
-# Copy shared package dist + node_modules + package.json + gateway with deps
 COPY --from=builder /app/packages/zk-credits-shared /app/packages/zk-credits-shared
+COPY --from=builder /app/packages/x402-zk-prepaid /app/packages/x402-zk-prepaid
 COPY --from=builder /app/ts/node_modules /app/ts/node_modules
 COPY --from=builder /app/ts /app/ts
 
-# Fix file: symlink — Docker COPY doesn't preserve npm symlinks reliably.
-# Replace the symlink with a real copy of the built shared package.
-RUN rm -rf /app/ts/node_modules/@zk-credits/shared && \
+# Docker COPY does not preserve local file dependency symlinks reliably.
+RUN rm -rf /app/ts/node_modules/@zk-credits/shared /app/ts/node_modules/@zk-credits/x402-zk-prepaid && \
     mkdir -p /app/ts/node_modules/@zk-credits && \
-    cp -a /app/packages/zk-credits-shared /app/ts/node_modules/@zk-credits/shared
-
-# Circuit verification keys (the gateway verifies RLN proofs at startup).
-# Only the small JSON VKs are needed — the large zkey/wasm stay client-side.
-COPY circuits/verification_key_deposit.json circuits/verification_key_rln.json circuits/verification_key_slash.json /app/circuits/
-ENV CIRCUITS_DIR=/app/circuits
+    cp -a /app/packages/zk-credits-shared /app/ts/node_modules/@zk-credits/shared && \
+    cp -a /app/packages/x402-zk-prepaid /app/ts/node_modules/@zk-credits/x402-zk-prepaid
 
 EXPOSE 3001
-
 ENV PORT=3001
 ENV NODE_ENV=production
-
 WORKDIR /app/ts
 CMD ["npx", "tsx", "server.ts"]

@@ -69,12 +69,28 @@ export default async function DashboardPage() {
 
         <p className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-sm leading-6 text-zinc-400">
           This pilot is invite-only, unpaid, and experimental. Founder-issued
-          invites provision Base Sepolia test credits; there is no checkout, no
-          card, and no wallet purchase. The service never receives your
-          credential secret, backup password, proofs, or spend identifiers.
+          invites provision Base Sepolia test credits; there is no payment
+          step, no card, and no wallet flow. Your credential secret and backup
+          password never leave this browser. Pilot telemetry does not collect
+          prompts, responses, secrets, proofs, nullifiers, request signals, or
+          payer/spend-plane joins; the gateway and the upstream provider can
+          still observe request content and traffic metadata.
         </p>
 
         <PilotOnboardingFlow network={network} gatewayBaseUrl={process.env.PUBLIC_GATEWAY_URL ?? 'https://your-gateway.example'} />
+
+        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Supported clients</p>
+          <h2 className="mt-2 text-lg font-semibold text-zinc-100">One spend path, two client shapes</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+            Use the project sidecar for <code className="font-mono text-xs text-cyan-300">POST /v1/chat/completions</code>,
+            or register the custom <code className="font-mono text-xs text-cyan-300">zk-prepaid</code> adapter in
+            an x402-native agent. The deployed resource server advertises x402 v2, zk-prepaid, eip155:84532,
+            prepaid-claim, and escrow at <code className="font-mono text-xs text-cyan-300">/supported</code>;
+            generic x402 clients, unmodified agents, public facilitators, Bazaar, MCP, and the standard exact
+            rail are unsupported.
+          </p>
+        </section>
 
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Already have a credential?</p>

@@ -1,13 +1,8 @@
-# Render Blueprint for the Stellar testnet gateway.
+# Render blueprint for the Base Sepolia zk-prepaid gateway.
 #
-# This is intentionally a demo/testnet deployment:
-# - Free web services sleep after inactivity.
-# - Free Postgres is ephemeral/limited and should not hold production data.
-#
-# Both services use the same database because gateway billing and fee-relay
-# idempotency are durable concerns. The fee-sponsor is a public web service
-# on the free plan; the gateway only sends transaction XDR to it, never card
-# or Stripe data.
+# Production must use a managed Postgres instance, protected Base sponsor and
+# Stripe keys, and a durable worker/reconciliation process. The free plan is
+# suitable only for integration testing because instances and databases sleep.
 
 services:
   - type: web
@@ -27,67 +22,31 @@ services:
         value: "3001"
       - key: NODE_ENV
         value: production
-      - key: STELLAR_NETWORK
-        value: testnet
-      - key: STELLAR_NETWORK_PASSPHRASE
-        value: "Test SDF Network ; September 2015"
-      - key: STELLAR_RPC_URL
-        value: https://soroban-testnet.stellar.org
-      - key: DEFAULT_EPOCH_QUOTA
-        value: "100"
-      - key: PRICE_PER_CALL_USDC
-        value: "1000"
-      - key: SPEND_WORKER_INTERVAL_MS
-        value: "10000"
-      - key: EVALUATION_PURGE_INTERVAL_MS
-        value: "86400000"
-      - key: FEE_SPONSOR_URL
-        value: https://zk-credits-fee-sponsor.onrender.com
-      - key: GATEWAY_SECRET_KEY
+      - key: BASE_RPC_URL
         sync: false
-      - key: GATEWAY_ADDRESS
+      - key: BASE_PRIVATE_CREDIT_BOND_ADDRESS
         sync: false
-      - key: GATEWAY_SECRET
+      - key: BASE_DEPLOYMENT_DOMAIN
         sync: false
-      - key: ZK_CONTRACT_ID
+      - key: BASE_SPONSOR_PRIVATE_KEY
         sync: false
-      - key: USDC_CONTRACT_ID
+      - key: BASE_TREASURY_ADDRESS
         sync: false
-      - key: USDC_ISSUER
+      - key: ZK_PREPAID_VERIFYING_KEY_PATH
+        value: /app/circuits/private_credit_spend/verification_key.json
+      - key: ZK_PREPAID_CIRCUIT_ID
+        value: private-credit-spend-bn254-dev
+      - key: ZK_PREPAID_VERIFYING_KEY_ID
+        value: private-credit-spend-vk-dev
+      - key: ZK_PREPAID_REQUIREMENTS_VERSION
+        value: zk-prepaid-v1
+      - key: BILLING_INTERNAL_TOKEN
+        sync: false
+      - key: STRIPE_SECRET_KEY
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
-      - key: EVALUATION_PURGE_SECRET
-        sync: false
-      - key: SENTRY_DSN
-        sync: false
-      - key: SENTRY_ENVIRONMENT
-        value: production
-
-  - type: web
-    name: zk-credits-fee-sponsor
-    runtime: docker
-    plan: free
-    region: singapore
-    dockerfilePath: ./services/fee-sponsor/Dockerfile
-    dockerContext: .
-    healthCheckPath: /health
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: zk-credits-db
-          property: connectionString
-      - key: PORT
-        value: "3002"
-      - key: NODE_ENV
-        value: production
-      - key: STELLAR_NETWORK_PASSPHRASE
-        value: "Test SDF Network ; September 2015"
-      - key: STELLAR_RPC_URL
-        value: https://soroban-testnet.stellar.org
-      - key: ZK_CONTRACT_ID
-        sync: false
-      - key: FEE_SPONSOR_SECRET_KEY
+      - key: PUBLIC_GATEWAY_URL
         sync: false
       - key: SENTRY_DSN
         sync: false

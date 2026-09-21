@@ -2,6 +2,9 @@
 
 Loopback sidecar that attaches a hash-pinned BN254 Groth16 proof to each
 coding-agent LLM request through the experimental x402 `zk-prepaid` scheme.
+Built for the invite-only, unpaid, experimental Base Sepolia pilot; credits
+are founder-provisioned test credits, and the circuit is not independently
+audited.
 
 ```bash
 npm install --global zk-credits
@@ -9,9 +12,10 @@ npm install --global zk-credits
 
 ## First run
 
-1. Get a Base Sepolia private-credit bundle from the invite-only pilot and
-   download the password-encrypted credential backup.
-2. Install the pinned proving bundle. The package ships
+1. Redeem an invite to the unpaid, experimental Base Sepolia pilot and
+   download the password-encrypted credential backup. Credits are
+   founder-provisioned test credits; there is no payment step.
+2. Install the pinned proving artifacts. The package ships
    `circuits/manifest.json`, which fixes the SHA-256 of the frozen
    `private_credit_spend.wasm`, `private_credit_spend.zkey`, and
    `verification_key_private_credit.json`. The bytes are installed out of
@@ -55,7 +59,11 @@ The sidecar binds `127.0.0.1:3210` only. It does not modify `~/.cline` or
 ## Supported route
 
 The pilot serves one spend path: non-streaming `POST /v1/chat/completions`
-on the loopback listener.
+on the loopback listener, either through this sidecar (the supported
+OpenAI-compatible client) or through an x402-native agent that explicitly
+registers the project `zk-prepaid` adapter. Generic x402 clients, unmodified
+agents, public facilitators, Bazaar, MCP, and the standard `exact` rail are
+unsupported; the sidecar never falls back to another rail.
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
@@ -125,7 +133,7 @@ import { buildCodexSdkOptions, buildCodexThreadOptions } from 'zk-credits/codex'
 
 The credential secret is decrypted only in local memory. The sidecar cache
 contains public Base event leaves and never stores the secret, prompt, response,
-proof, order, account, or wallet.
+proof, account, or wallet.
 
 ## Validation
 
@@ -140,6 +148,6 @@ The opt-in artifact test needs an installed bundle and the built
 `dist/proof-child.js`. CI stays deterministic through injected worker and
 crypto fixtures; the default suites stay green with no bundle installed.
 
-Base Sepolia only. Development proving material is not suitable for mainnet;
-the repository's release gates require an audited production circuit and
-ceremony.
+Base Sepolia only. The circuit is experimental and not independently audited.
+Development proving material is not suitable for mainnet; the repository's
+release gates require an audited production circuit and ceremony.

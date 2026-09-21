@@ -10,18 +10,23 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./base": {
+      "import": "./dist/base.js",
+      "require": "./dist/base.js",
+      "types": "./dist/base.d.ts",
+      "default": "./dist/base.js"
     }
   },
   "files": ["dist", "src"],
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@scure/bip39": "^2.2.0",
-    "circomlibjs": "^0.1.7",
-    "snarkjs": "^0.7.6"
+    "circomlibjs": "^0.1.7"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -1,7 +1,5 @@
-# ─── Gateway Fly.io config (stellar-launch M3.2) ─────────────────
-# Deploy from repo root:  fly launch  (reads this fly.toml)
-# Secrets: fly secrets set GATEWAY_SECRET_KEY=... etc.
-# Postgres: fly pg create  then  fly pg attach
+# Base Sepolia zk-prepaid gateway.
+# Secrets are set separately with `fly secrets set`.
 
 app = "zk-credits-gateway"
 primary_region = "iad"
@@ -12,11 +10,9 @@ primary_region = "iad"
 [env]
   PORT = "3001"
   NODE_ENV = "production"
-  STELLAR_NETWORK = "testnet"
-  STELLAR_RPC_URL = "https://soroban-testnet.stellar.org"
-  DEFAULT_EPOCH_QUOTA = "100"
-  PRICE_PER_CALL_USDC = "1000"
-  SPEND_WORKER_INTERVAL_MS = "10000"
+  ZK_PREPAID_CIRCUIT_ID = "private-credit-spend-bn254-dev"
+  ZK_PREPAID_VERIFYING_KEY_ID = "private-credit-spend-vk-dev"
+  ZK_PREPAID_REQUIREMENTS_VERSION = "zk-prepaid-v1"
 
 [[services]]
   protocol = "tcp"

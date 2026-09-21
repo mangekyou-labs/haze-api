@@ -1,0 +1,16 @@
+{
+  "artifacts": [
+    {
+      "file": "rln_nullifier.wasm",
+      "sha256": "38370baebbafb76562d5c94e15354c04152c388bffe1bf85faeeb4dd221538c1"
+    },
+    {
+      "file": "rln_nullifier_final.zkey",
+      "sha256": "11cd9e881437283701dcebd75be469d57ec7428de3495d229268eb75f2413cc8"
+    },
+    {
+      "file": "verification_key_rln.json",
+      "sha256": "9a521e0e19dc272c281f1a41abf79571bb0094cda653c890bdd95aa5b4c5f1ee"
+    }
+  ]
+}

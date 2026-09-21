@@ -1,4 +1,4 @@
-// USDC on Stellar uses 6 decimals: 1 dollar = 1_000_000 units.
+// Base USDC uses 6 decimals: 1 dollar = 1_000_000 units.
 const USDC_UNITS_PER_DOLLAR = 1_000_000;
 
 /**

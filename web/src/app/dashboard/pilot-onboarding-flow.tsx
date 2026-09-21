@@ -298,7 +298,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
           index="04"
           title="Fund on Base Sepolia"
           state={step === 'fund' ? 'current' : step === 'active' ? 'done' : 'upcoming'}
-          description="The gateway funds tier 0 (250 private calls) for your commitment and returns the authoritative expiry and transaction hash."
+          description="The gateway provisions tier 0 (250 private calls) of founder-funded test credits for your commitment on Base Sepolia and returns the authoritative expiry and transaction hash. No payment is involved."
         />
         {step === 'fund' && (
           <button
@@ -362,14 +362,17 @@ export ZK_CREDITS_GATEWAY_URL=${gatewayBaseUrl}
 zk-credits setup`}
         </pre>
         <p className="mt-3 text-sm text-zinc-400">
-          The proxy decrypts the credential locally and proves each prepaid
-          request. Prompts, responses, secrets, proofs, and spend identifiers
-          stay out of this dashboard.
+          The sidecar decrypts the credential locally and proves each prepaid
+          request; an x402-native agent that registers the custom zk-prepaid
+          adapter can present the same proof. Pilot telemetry does not collect
+          prompts, responses, secrets, proofs, nullifiers, request signals, or
+          payer/spend-plane joins, and the gateway and the upstream provider
+          can still observe request content and traffic metadata.
         </p>
         <p className="mt-2 text-sm text-zinc-500">
-          Invite-only, unpaid, experimental pilot on Base Sepolia. Nothing here
-          is audited, production-ready, or compatible with generic x402
-          clients.
+          Invite-only, unpaid, experimental pilot on Base Sepolia. The circuit
+          is experimental and not independently audited, nothing here is
+          production-ready, and generic x402 clients are unsupported.
         </p>
       </section>
 

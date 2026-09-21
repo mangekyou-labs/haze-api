@@ -4,20 +4,20 @@ import { SiteFooter } from '@/components/site-footer';
 
 const STEPS = [
   {
-    title: '1. Sign in & generate secret',
-    body: 'Sign in with GitHub. Your browser generates a private secret key backed up by a 24-word recovery phrase (never leaves your device).',
+    title: '1. Get invited',
+    body: 'Access is invite-only. A founder issues a single-use invite bound to your GitHub account; there is no open registration and no payment step.',
   },
   {
-    title: '2. Fund Starter on testnet',
-    body: 'Purchase Starter ($1.00 for 100 tickets) with testnet USDC/card to register your commitment in the on-chain Merkle tree.',
+    title: '2. Sign in and create your credential',
+    body: 'GitHub is the account system. Your browser generates the private secret and a password-encrypted recovery capsule that you download and re-import.',
   },
   {
-    title: '3. Import to local CLI',
-    body: 'Import your 24-word mnemonic into zk-credits sidecar (OS keychain) to run Cline, Claude, or Codex.',
+    title: '3. Founder provisions test credits',
+    body: 'A founder funds tier 0 on Base Sepolia for your commitment. You verify the activated credential locally before using it.',
   },
   {
-    title: '4. Prove, don’t reveal',
-    body: 'Call LLMs through the loopback sidecar with client-side ZK-RLN proofs (100 tickets per deposit).',
+    title: '4. Install a supported client',
+    body: 'Run the project sidecar for /v1/chat/completions, or register the custom zk-prepaid adapter in an x402-native agent, then make a call.',
   },
 ];
 
@@ -33,15 +33,16 @@ export default function Home() {
         />
         <div className="relative mx-auto max-w-6xl px-6 pb-20 pt-24 text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/80 px-3 py-1 font-mono text-xs text-zinc-300">
-            ZK-RLN &middot; Stellar CAP-0059 (BLS12-381)
+            Base Sepolia &middot; invite-only unpaid pilot &middot; experimental x402 v2 zk-prepaid
           </span>
 
           <h1 className="mx-auto mt-6 max-w-3xl text-5xl font-bold tracking-tight text-white sm:text-6xl">
             ZK API Credits
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-zinc-400">
-            Anonymous RLN-rate-limited API credits for coding agents on
-            Stellar.
+            Invite-only, unpaid, experimental pilot for private prepaid API
+            credits on Base Sepolia. Founder-provisioned test credits, no card
+            or wallet flow, and no recurring charge.
           </p>
 
           <div className="mt-10 flex justify-center gap-4">
@@ -80,56 +81,46 @@ export default function Home() {
 
           <div className="mt-4 grid gap-4 text-left lg:grid-cols-2">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <h2 className="font-semibold text-zinc-100">Privacy</h2>
+              <h2 className="font-semibold text-zinc-100">Supported clients</h2>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                ZK-RLN proofs verified on-chain via Stellar&apos;s native
-                BLS12-381 (CAP-0059). The gateway sees your proof and binds the
-                request body, but cannot determine which deposit funded your
-                call.
+                One spend path:{' '}
+                <code className="font-mono text-xs text-cyan-300">
+                  POST /v1/chat/completions
+                </code>{' '}
+                through the project sidecar, or an x402-native agent that
+                explicitly registers the custom{' '}
+                <code className="font-mono text-xs text-cyan-300">
+                  zk-prepaid
+                </code>{' '}
+                adapter. <span className="font-medium text-zinc-300">/supported</span>{' '}
+                advertises x402 v2, zk-prepaid, eip155:84532, prepaid-claim, and
+                escrow.
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <h2 className="font-semibold text-zinc-100">
-                Rate Limiting &amp; Slashing
-              </h2>
+              <h2 className="font-semibold text-zinc-100">Privacy boundary</h2>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                100 tickets per deposit (indices 0..99). Over-quota
-                double-spend reveals the secret key and triggers an on-chain
-                slash: 50% to protocol treasury, 50% to the reporter.
+                Pilot telemetry does not collect prompts, responses, secrets,
+                proofs, nullifiers, request signals, or payer/spend-plane joins.
+                The gateway and the upstream provider can still observe request
+                content and traffic metadata.
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <h2 className="font-semibold text-zinc-100">
-                Hosted Infrastructure
-              </h2>
-              <div className="mt-2 space-y-1 text-sm leading-relaxed text-zinc-400">
-                <p>
-                  <span className="font-medium text-zinc-300">Gateway:</span>{' '}
-                  <a
-                    href="https://zk-credits-gateway.onrender.com/health"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-xs text-indigo-400 hover:underline"
-                  >
-                    https://zk-credits-gateway.onrender.com
-                  </a>
-                </p>
-                <p className="break-all font-mono text-xs text-zinc-400">
-                  <span className="font-sans font-medium text-zinc-300">
-                    Contract:
-                  </span>{' '}
-                  CBDGHYF5CQM527IM3GVDDWXLDB4XNPA5BT4KXFVCSJZTQIOFZGOIHAIT
-                </p>
-              </div>
+              <h2 className="font-semibold text-zinc-100">Experimental circuit</h2>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+                The circuit is experimental and has not been independently
+                audited. Base Sepolia test credits only: not production-ready,
+                and no audited-privacy or generic x402 compatibility claim.
+              </p>
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-              <h2 className="font-semibold text-zinc-100">Honest Caveats</h2>
+              <h2 className="font-semibold text-zinc-100">Honest caveats</h2>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                Testnet only &middot; 100-ticket specialization &middot;
-                Variable-cost refunds deferred &middot; Single-contributor
-                setup &middot; Gateway-mediated withdrawal &middot; Async
-                settlement audit &middot; Single gateway timing &middot; Browser
-                proving latency &middot; IP not hidden.
+                Sepolia-only test credits &middot; requires the project sidecar
+                or a registered adapter &middot; one active local proxy per
+                credential &middot; proving adds latency &middot; your network
+                identity / IP is not hidden.
               </p>
             </div>
           </div>
@@ -140,4 +131,3 @@ export default function Home() {
     </main>
   );
 }
-

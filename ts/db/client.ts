@@ -1,4 +1,4 @@
-// PostgreSQL Pool factory for the stellar-launch gateway. Fails closed via
+// PostgreSQL Pool factory for the Base zk-prepaid gateway. Fails closed via
 // getDbConfig() — a missing database config throws at construction time.
 
 import { Pool } from 'pg';

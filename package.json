@@ -1,6 +1,6 @@
 {
+  "license": "AGPL-3.0-or-later",
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.0.1",
     "@zk-credits/shared": "file:packages/zk-credits-shared",
     "snarkjs": "^0.7.6"
   }

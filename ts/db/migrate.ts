@@ -1,4 +1,4 @@
-// Idempotent SQL migration runner for the stellar-launch gateway.
+// Idempotent SQL migration runner for the Base zk-prepaid gateway.
 // Applies `.sql` files in `migrations/` in filename order, each inside a
 // transaction, and records applied files in `public.schema_migrations`.
 

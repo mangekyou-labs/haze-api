@@ -5,10 +5,15 @@ credit at a time. The scheme is designed for the Base Sepolia `PrivateCreditBond
 deployment and uses a Groth16 proof as an authorization envelope. It does not
 broadcast a blockchain transaction for each API request.
 
+Part of the invite-only, unpaid, experimental Base Sepolia pilot. Credits are
+founder-provisioned test credits, and the circuit is experimental and not
+independently audited.
+
 This is a custom adapter, not general x402 or Bazaar compatibility. Generic
 x402 clients and facilitators do not discover it unless they register the
-adapters in this package. The scheme is experimental and is not a mainnet
-security claim.
+adapters in this package; an unmodified generic client fails closed with an
+unsupported-scheme result. There is no public facilitator, MCP, or standard
+`exact` rail, and this is not a production or mainnet security claim.
 
 ## Install
 
@@ -69,11 +74,11 @@ The `PAYMENT-SIGNATURE` value is the base64-encoded JSON `PaymentPayload`:
 
 The production payload contains the complete accepted requirements; the
 abridged example only shows the important fields. It must not contain a
-commitment, tier, account, Stripe order, wallet, payer, secret, or subject.
+commitment, tier, account, order, wallet, payer, secret, or subject.
 
 The request signal is derived from the HTTP method, canonical URL, canonical
 JSON body, complete accepted requirements, nonce, and response-encryption key.
-The proof binds that signal to the private bundle, current known Merkle root,
+The proof binds that signal to the private credential, current known Merkle root,
 deployment domain, timestamp, nullifier, and share. Reusing the same signal is
 an exact retry; a different settled signal under the same nullifier is a
 cryptographic slash condition.
@@ -102,8 +107,10 @@ are not persisted by this package.
 
 ## Integration
 
-For direct HTTP clients, use the request-aware client so the signal includes the
-actual request:
+The supported clients are the project sidecar and an x402-native agent that
+deliberately registers this adapter; an unmodified generic x402 client is not
+supported. For direct HTTP clients, use the request-aware client so the signal
+includes the actual request:
 
 ```ts
 const client = createZkPrepaidClient({

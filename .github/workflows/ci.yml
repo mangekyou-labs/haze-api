@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [feature-stellar-launch, feature-stellar-launch-level4, main]
+    branches: [feature-base-zk-credits, main]
   pull_request:
 
 concurrency:
@@ -10,39 +10,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gateway:
-    name: Gateway (ts)
+  x402:
+    name: x402 zk-prepaid package
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ts
+        working-directory: packages/x402-zk-prepaid
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
           cache: npm
-          cache-dependency-path: ts/package-lock.json
-      - name: Install
-        run: npm ci
-      - name: Build @zk-credits/shared package (file dep needs dist before typecheck)
-        working-directory: packages/zk-credits-shared
-        run: npm ci && npm run build
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Unit tests
-        run: npm test
-      - name: Coverage
-        run: npm test -- --coverage
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gateway-coverage
-          path: ts/coverage
-          retention-days: 14
+          cache-dependency-path: packages/x402-zk-prepaid/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
 
   shared:
-    name: Shared package (packages/zk-credits-shared)
+    name: Shared Base crypto package
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -54,15 +40,35 @@ jobs:
           node-version: 24.20.0
           cache: npm
           cache-dependency-path: packages/zk-credits-shared/package-lock.json
-      - name: Install
-        run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Unit tests
-        run: npm test
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
+
+  gateway:
+    name: Gateway (Base/x402)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: ts/package-lock.json
+      - name: Build shared package dependency
+        working-directory: packages/zk-credits-shared
+        run: npm ci && npm run build
+      - name: Build x402 package dependency
+        working-directory: packages/x402-zk-prepaid
+        run: npm ci && npm run build
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --run
 
   sidecar:
-    name: Proof-aware sidecar (packages/zk-credits-sidecar)
+    name: Base zk-prepaid sidecar
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -74,48 +80,19 @@ jobs:
           node-version: 24.20.0
           cache: npm
           cache-dependency-path: packages/zk-credits-sidecar/package-lock.json
-      - name: Install Linux keytar runtime
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-0
-      - name: Build @zk-credits/shared package (file dependency)
+      - name: Build shared package dependency
         working-directory: packages/zk-credits-shared
         run: npm ci && npm run build
-      - name: Install
-        run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Unit tests
-        run: npm test
-      - name: Package contents
-        run: npm pack --dry-run
-
-  fee-sponsor:
-    name: Fee-sponsor service (services/fee-sponsor)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/fee-sponsor
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.20.0
-          cache: npm
-          cache-dependency-path: services/fee-sponsor/package-lock.json
-      - name: Install fee-sponsor deps
-        run: npm ci
-      - name: Install gateway deps (fee-sponsor type-checks the shared ts/ sources via @gateway/*)
-        working-directory: ts
-        run: npm ci
-      - name: Build @zk-credits/shared package (file dep needs dist before typecheck)
-        working-directory: packages/zk-credits-shared
+      - name: Build x402 package dependency
+        working-directory: packages/x402-zk-prepaid
         run: npm ci && npm run build
-      - name: Typecheck
-        run: npm run typecheck
-      # Behavior tests for the fee-relay (method gate, idempotency, fee-only
-      # authority) live in ts/ and run in the Gateway job.
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
+      - run: npm pack --dry-run
 
   web:
-    name: Web (web)
+    name: Web (Base/Stripe)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -127,30 +104,20 @@ jobs:
           node-version: 24.20.0
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install
-        run: npm ci
-      - name: Build @zk-credits/shared package (file dep needs dist before typecheck)
+      - name: Build shared package dependency
         working-directory: packages/zk-credits-shared
         run: npm ci && npm run build
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Unit tests
-        run: npm test
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test -- --run
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
-      - name: Browser E2E smoke
-        # The Playwright webServer runs `npm run build && npm run start`, so
-        # `next build` is validated as part of this step.
+      - name: Browser smoke
         run: npm run test:e2e
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: web/playwright-report
-          retention-days: 14
 
   circuits:
-    name: Circuits (circom + snarkjs)
+    name: BN254 private-credit circuit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -162,26 +129,24 @@ jobs:
           node-version: 24.20.0
           cache: npm
           cache-dependency-path: circuits/package-lock.json
-      - name: Install
-        run: npm ci
-      - name: Off-chain prove + verify
-        run: node scripts/test.js
+      - run: npm ci
+      - name: Install Circom 2
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -L https://github.com/iden3/circom/releases/download/v2.2.2/circom-linux-amd64 -o "$HOME/.local/bin/circom"
+          chmod +x "$HOME/.local/bin/circom"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/circom" --version
+      - run: npm test -- --run
 
   contract:
-    name: Soroban contract (zk-credits-contract)
+    name: PrivateCreditBond (Foundry)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: zk-credits-contract
+        working-directory: contracts
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.94.0
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: zk-credits-contract
-      - name: Contract unit tests
-        run: cargo test
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: FOUNDRY_OFFLINE=true forge build
+      - run: FOUNDRY_OFFLINE=true forge test

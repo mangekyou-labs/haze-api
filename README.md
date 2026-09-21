@@ -1,23 +1,40 @@
 # zk-credits
 
-Private prepaid API credits for OpenAI-compatible clients. Stripe is the only
-customer payment rail in v1. The platform sponsor supplies Base USDC and gas;
-customers do not need a wallet, ETH, or USDC to purchase or use a bundle.
+Invite-only, unpaid, experimental pilot on Base Sepolia (`eip155:84532`) for
+private prepaid API credits with the custom x402 v2 `zk-prepaid` scheme.
 
-The initial network is Base Sepolia (`eip155:84532`). Each bundle has a fixed
-30-day validity period and a seven-day challenge window:
+- **Access is invite-only.** A founder issues a single-use invite bound to one
+  GitHub account. There is no open registration.
+- **The pilot is unpaid.** Every credential receives founder-provisioned test
+  credits. There is no payment step, no card or wallet flow, no paid plan, no
+  plan selection, and no recurring charge.
+- **Everything is experimental and testnet-only.** The circuit has not been
+  independently audited, and none of this is production software.
 
-| Bundle | Service fee | Refundable bond | Private requests |
-| --- | ---: | ---: | ---: |
-| Starter | $5 | $5 | 5,000 |
-| Builder | $20 | $20 | 25,000 |
-| Scale | $50 | $50 | 75,000 |
+## Supported clients
 
-The browser creates the secret and Poseidon commitment locally. An encrypted
-credential export is required before Stripe Checkout. The secret is never sent
-to Stripe, GitHub, the gateway, or the spend-plane database. GitHub OAuth is
-the account system; optional SIWE wallet linking proves an additional identity
-but is not required for purchase or API calls.
+The pilot serves one spend path: non-streaming `POST /v1/chat/completions`
+through the project sidecar, or an x402-native agent that explicitly registers
+the project's versioned `zk-prepaid` adapter.
+
+The deployed resource server advertises exactly one capability at
+`/supported`:
+
+| Field | Value |
+| --- | --- |
+| x402 version | `2` |
+| scheme | `zk-prepaid` |
+| network | `eip155:84532` (Base Sepolia) |
+| asset transfer method | `prepaid-claim` |
+| payment flow | `escrow` |
+
+Not supported: generic x402 clients, unmodified agents, public facilitators,
+Bazaar, MCP, the standard `exact` rail, and any production or audited-privacy
+claim. A generic x402 client that does not register the adapter fails closed
+with an unsupported-scheme result.
+
+See `packages/zk-credits-sidecar/README.md` for the supported client install
+path and `packages/x402-zk-prepaid/README.md` for adapter registration.
 
 ## Run the local services
 
@@ -30,7 +47,7 @@ cd packages/zk-credits-sidecar && npm ci && npm test -- --run && cd ../..
 
 The gateway needs `OPENROUTER_API_KEY` and a configured Base contract/verifying
 key in a real environment. Its local fallback claim store is for development;
-production runs use the isolated `spend_plane.claims` Postgres table.
+pilot runs use the isolated `spend_plane.claims` Postgres table.
 
 ## Local credential proxy
 
@@ -40,12 +57,12 @@ proof locally. It then follows x402 v2 over the gateway:
 ```sh
 export ZK_CREDITS_CREDENTIAL_PATH=/path/to/credential.zkcred
 export ZK_CREDITS_CREDENTIAL_PASSWORD='use-a-local-secret'
-export ZK_CREDITS_ARTIFACT_DIR=/path/to/pinned-bundle
+export ZK_CREDITS_ARTIFACT_DIR=/path/to/pinned-artifacts
 export ZK_CREDITS_WITNESS_PATH=/path/to/witness.json
 zk-credits serve --gateway http://127.0.0.1:3001 --port 3210
 ```
 
-`ZK_CREDITS_ARTIFACT_DIR` holds the frozen proving bundle whose SHA-256
+`ZK_CREDITS_ARTIFACT_DIR` holds the frozen proving artifacts whose SHA-256
 digests are pinned in `packages/zk-credits-sidecar/circuits/manifest.json`.
 The bytes are installed out of band; a missing, relocated, or altered
 artifact fails closed before any prove.
@@ -56,10 +73,9 @@ with base64 `PAYMENT-REQUIRED`; the sidecar retries with a proof-bound
 signature. Settlement is a durable escrow claim, not a per-request chain
 transaction, so `PAYMENT-RESPONSE.transaction` is intentionally empty.
 
-The reusable implementation is in
-`packages/x402-zk-prepaid/`. It is not automatically supported by generic x402
-clients: integrations must register this custom scheme and use the published
-requirements/payload format. See
+The reusable implementation is in `packages/x402-zk-prepaid/`. It is not
+automatically supported by generic x402 clients: integrations must register
+this custom scheme and use the published requirements/payload format. See
 `docs/ai/design/2026-09-18-feature-base-zk-credits.md` for the protocol
 boundary and security model.
 
@@ -78,21 +94,25 @@ forge script script/DeployBaseSepolia.s.sol:DeployBaseSepolia \
   --rpc-url "$BASE_RPC_URL" --broadcast --verify
 ```
 
-Mainnet is blocked until an external contract/circuit audit, production
-Groth16 ceremony, legal and Stripe-risk review, protected keys, monitoring,
-and recovery drills are complete.
+The sponsor funds the Base Sepolia USDC bond for each pilot credential;
+participants never deposit funds. Mainnet is blocked until an external
+contract/circuit audit, a production Groth16 ceremony, legal and payment-risk
+review, protected keys, monitoring, and recovery drills are complete.
 
 ## Privacy and product boundaries
 
-- The dashboard shows bundle allowance, expiry, bond/refund state, and chain
-  links; it does not show remaining-call counts or usage history.
-- The gateway does not log prompts, responses, secrets, proofs, or linkable
-  spend metadata. Encrypted response replays are bounded to 24 hours and 10 MiB.
-- Chargebacks block future purchases but do not revoke an already-active
-  private credential. A successful cryptographic slash prevents the Stripe bond
-  refund.
-- Stripe webhooks, sponsorship, maturity release, contract events, refunds,
-  disputes, and reconciliation require durable idempotent workers in production.
+- Pilot telemetry does not collect prompts, responses, secrets, proofs,
+  nullifiers, request signals, or payer/spend-plane joins.
+- The gateway and the upstream inference provider can still observe request
+  content and traffic metadata. The pilot does not hide them.
+- The credential secret and the recovery password are created and used only in
+  the participant's browser and sidecar; the service never receives either.
+- The dashboard shows the funded tier, expiry, and chain links; it does not
+  show remaining-call counts or usage history.
+- Encrypted response replays are bounded to 24 hours and 10 MiB.
+- Two settled transcripts that share a nullifier and differ in request signal
+  recover the secret and settle the sponsor-funded bond. The pilot uses test
+  assets on Base Sepolia.
 
 The former Stellar/Soroban implementation is retained under `archive/stellar/`
 and historical documentation only. It is not part of the active runtime.

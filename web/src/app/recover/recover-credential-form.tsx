@@ -45,6 +45,11 @@ export function RecoverCredentialForm() {
         verified against the secret it wraps. Nothing is uploaded and no
         commitment is displayed.
       </p>
+      <p className="mt-3 text-xs leading-5 text-zinc-500">
+        Invite-only, unpaid, experimental Base Sepolia pilot. The circuit is
+        not independently audited, there is no payment step, and recovery
+        never uploads your export, password, or credential.
+      </p>
       <label htmlFor="credential-file" className="mt-8 block text-sm font-medium text-zinc-200">Encrypted export</label>
       <input id="credential-file" type="file" accept="application/json,.json" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="mt-2 block min-h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" />
       <label htmlFor="recovery-password" className="mt-5 block text-sm font-medium text-zinc-200">Backup password</label>
