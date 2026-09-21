@@ -115,6 +115,7 @@ paid cohort and market-validation thresholds.
 - [Choose the pilot prover topology and operational SLOs](tickets/06-prover-topology-and-slos.md): sidecar-only Groth16 prove+self-verify, hash-pinned local keys, and no remote, browser, or helper path.
 - [Review the reconciled pilot design and implementation plan](tickets/05-reconcile-pilot-docs.md): the approved lifecycle set and negative-fixture rule remain the implementation baseline.
 - [Separate the invite control plane from detached funding provisioning](decisions/003-detached-funding-provisioning.md): single-use hashed invites bound to a GitHub account in `control_plane`, detached 30-minute funding capabilities bound to one commitment in `pilot_provisioning`, no foreign key and no durable join, and a two-stage version-2 export where the recovery capsule is re-imported before funding and only then wrapped with the gateway's authoritative activation metadata.
+- [Freeze the active pilot copy to the truthful unpaid contract](https://github.com/mangekyou-labs/haze-api/issues/24): invite-only, unpaid, experimental, Base Sepolia; the project sidecar or an x402-native agent registering the custom `zk-prepaid` adapter only; founder-provisioned test credits; the pilot telemetry and provider-observation boundary; and no commerce terms on any active surface.
 
 ## Active execution frontier
 
@@ -124,7 +125,7 @@ The active GitHub child issues are:
 - [B8 — Sidecar proving and OpenAI-compatible request path](https://github.com/mangekyou-labs/haze-api/issues/11) — adds the adapter-enabled x402-agent exchange.
 - [B9 — Invite-only unpaid onboarding](https://github.com/mangekyou-labs/haze-api/issues/12) — implemented 2026-09-20: invite/capability planes, founder CLI, detached funding endpoints, five-step web onboarding, two-stage export, and the removal of checkout, orders, Stripe webhooks, and wallet linking from the pilot runtime.
 - [B11 — Pilot correctness and release verification](https://github.com/mangekyou-labs/haze-api/issues/14) — resolved 2026-09-21 at `b5ad4c0`: the verifier (`0xC66CC4866f945Ce39c207729CF136fd03d58207E`) and the adapter (`0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD`) are deployed and BaseScan-verified on Base Sepolia, and the fixture transcript verifies onchain — see [Base Sepolia B11 evidence](../../ai/testing/2026-09-18-feature-base-zk-credits.md#base-sepolia-b11-evidence-2026-09-21). The independent review and paid traffic remain B12.
-- [B21 — Invite-only unpaid pilot copy freeze](https://github.com/mangekyou-labs/haze-api/issues/24) — the truthful pilot contract.
+- [B21 — Invite-only unpaid pilot copy freeze](https://github.com/mangekyou-labs/haze-api/issues/24) — resolved 2026-09-21: root README, installation guides, landing metadata and page, footer, sign-in, onboarding, dashboard, and recovery are frozen to the invite-only unpaid pilot contract, with a copy-contract test and landing Playwright spec enforcing it — see [B21 copy-freeze evidence](../../ai/testing/2026-09-18-feature-base-zk-credits.md#local-b21-evidence-2026-09-21). B22's copy dependency is clear.
 - [B22 — Invite-only unpaid x402-agent pilot launch](https://github.com/mangekyou-labs/haze-api/issues/26) — blocked only by B11 and B21.
 - [B13 — Two-week x402-agent market-validation readout](https://github.com/mangekyou-labs/haze-api/issues/16) — blocked only by B22.
 

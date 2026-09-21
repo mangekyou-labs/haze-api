@@ -237,6 +237,69 @@ negative-test review packet, paid traffic, and any production ceremony. The
 deployed pair runs the development proving material, so S23 stays open on the
 paid-traffic gate (B12).
 
+## Local B21 evidence (2026-09-21)
+
+Run from the `feature-base-zk-credits` worktree with the pre-existing dirty
+tree preserved. The B21 targets were snapshotted to
+`/tmp/b21-copy-freeze-snapshot/` before any edit and re-compared after, so the
+scoped diff review below contains only copy-freeze changes and none of the
+foundational work. No API, schema, storage, protocol, or runtime change: the
+deployed `/supported` capability and the disabled real-payment configuration
+remain the source of truth the active copy now matches.
+
+The explicitly active copy set: root `README.md`, `web/README.md`,
+`contracts/README.md`, `packages/zk-credits-sidecar/README.md`,
+`packages/x402-zk-prepaid/README.md`, `web/src/app/layout.tsx`,
+`web/src/app/page.tsx`, `web/src/components/site-footer.tsx`,
+`web/src/app/sign-in/page.tsx`, `web/src/app/onboarding/page.tsx`,
+`web/src/app/dashboard/page.tsx`,
+`web/src/app/dashboard/pilot-onboarding-flow.tsx`, `web/src/app/recover/page.tsx`,
+and `web/src/app/recover/recover-credential-form.tsx`. Archives, historical
+design documents, backend payment routes, and dormant components are excluded
+by construction; the dormant payment components, routes, environment
+configuration, and provisioning behavior were left intact.
+
+Fresh validation, all from `web/` unless noted:
+
+| Command | Result |
+| --- | --- |
+| `npm run lint` | 0 errors, 8 pre-existing warnings under `src/archive/**` |
+| `npm run typecheck` | exit 0 |
+| `npm test -- --run` | 5 files, 47 passed — including 35 new copy-contract assertions in `src/lib/pilot-copy-contract.test.ts` |
+| `npm run build` | compiled; 11/11 static pages generated |
+| `npm run test:e2e` | 7 passed, including `e2e/landing.spec.ts` |
+| `git diff --check` (worktree root) | clean |
+| scoped stale-string and unsupported-claim search | no commerce terms on the active set; every unsupported-claim hit is a negation or a code identifier |
+
+The copy-contract test requires the pilot status (invite-only, unpaid,
+experimental, Base Sepolia), founder-provisioned test credits, the supported
+client distinction (project sidecar `POST /v1/chat/completions` or an
+x402-native agent registering the `zk-prepaid` adapter), the deployed
+`/supported` advertisement (x402 v2, `zk-prepaid`, `eip155:84532`,
+`prepaid-claim`, `escrow`), the named unsupported surfaces, the audit warning,
+the telemetry privacy boundary, and the gateway/provider observation
+disclosure. It rejects Stripe, checkout, buy/purchase, price/pricing, renewal,
+SKU, legacy plan names, fixed 30-day validity, subscription, dollar pricing,
+and broad anonymity claims on every active surface.
+
+Scoped diff review (`diff -u` of each snapshot against the final file, 693
+lines total), additions/removals per file: `README.md` 57/37; `web/README.md`
+37/22; `contracts/README.md` 12/9; `packages/zk-credits-sidecar/README.md`
+16/8; `packages/x402-zk-prepaid/README.md` 13/6; `web/src/app/page.tsx` 41/40;
+`web/src/app/layout.tsx` 2/1; `web/src/components/site-footer.tsx` 18/5;
+`web/src/app/sign-in/page.tsx` 2/1; `web/src/app/onboarding/page.tsx` 13/8;
+`web/src/app/dashboard/page.tsx` 19/3;
+`web/src/app/dashboard/pilot-onboarding-flow.tsx` 10/7;
+`web/src/app/recover/recover-credential-form.tsx` 5/0; `web/e2e/landing.spec.ts`
+21/3; new `web/src/lib/pilot-copy-contract.test.ts` 102/0. Each hunk was
+reviewed line by line: the changes are copy, test, and evidence only —
+semantic elements, focus styles, responsive classes, and the visual system
+are unchanged.
+
+Not covered: no invite enforcement, credit provisioning, deployment, or
+checkout-disablement change; no claim of production readiness or independent
+audit.
+
 ## Scenario catalog
 
 | ID | Scenario | Planning tasks |
