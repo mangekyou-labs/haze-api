@@ -1,8 +1,8 @@
 # B22 — Invite-only unpaid x402-agent pilot launch
 
 Type: task
-Status: active
-Blocked by: Pilot correctness and release verification; Invite-only unpaid pilot copy freeze
+Status: active — locally implemented, hosted activation outstanding
+Blocked by: Pilot correctness and release verification (resolved); Invite-only unpaid pilot copy freeze (resolved)
 
 ## What to launch
 
@@ -10,6 +10,25 @@ Ship the invite-only, unpaid Base Sepolia pilot to three real coding-agent or
 multi-agent operators while preserving the custom `zk-prepaid` protocol,
 sidecar-local proving, self-hosted settlement, and the spend-plane privacy
 boundary.
+
+## Local status (2026-09-21)
+
+Implemented and covered by the release matrix recorded in
+[B22 launch-control evidence](../../../ai/testing/2026-09-18-feature-base-zk-credits.md#local-b22-launch-control-evidence-2026-09-21):
+
+- the single service class is enforced server-side before any credit is
+  reserved, with the approved model, limits, ceilings, and timeout;
+- the kill switch and the $40/$200 micro-USD provider-spend caps are durable
+  Postgres state, and cap exhaustion persists a paused launch;
+- readiness covers Postgres, Base root freshness and lag, verifier assets,
+  provider configuration, and launch state; and
+- authenticated aggregate status reports bounded counters, spend headroom,
+  claim counts, and Base lag with no joinable identifier.
+
+Still outstanding, and requiring authority this worktree does not hold:
+hosted Render/Vercel deploy, the once-on-production pause/resume, staging cap
+exhaustion, the three pinned npm publishes, and three operator-owned
+activations. The issue stays open until the third qualifying activation.
 
 ## Acceptance criteria
 

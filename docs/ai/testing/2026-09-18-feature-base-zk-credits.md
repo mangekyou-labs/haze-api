@@ -300,6 +300,77 @@ Not covered: no invite enforcement, credit provisioning, deployment, or
 checkout-disablement change; no claim of production readiness or independent
 audit.
 
+## Local B22 launch-control evidence (2026-09-21)
+
+Run from the `feature-base-zk-credits` worktree. The B22 hardening adds the
+service-class boundary, the durable launch controls, the readiness surface,
+and the aggregate status endpoint described in
+[the implementation notes](../implementation/2026-09-18-feature-base-zk-credits.md#service-class-enforcement-b22).
+
+New focused suites, all from `ts/`:
+
+| Suite | Tests | Covers |
+| --- | --- | --- |
+| `service-class.test.ts` | 34 | forced model, price ceilings, every rejected field and route class, media parts, `n`, output ceiling, byte-conservative input counting |
+| `launch-control.test.ts` | 15 | pause/resume, reason bounds, debit/retain/release, daily and rolling caps, UTC-midnight boundary, concurrent admission, restart persistence |
+| `launch-routes.test.ts` | 14 | kill switch across inference and funding, health/readiness/recovery reachability, authenticated admin commands, cap exhaustion cancelling the reservation, pre-dispatch release, post-dispatch retention, aggregate status privacy |
+| `readiness.test.ts` | 10 | every readiness check, lag limit, liveness independence, fixed privacy-safe details |
+| `privacy-scan.test.ts` | 3 | canary prompt/response, nullifier, signal, and response key absent from logs and from the durable claim row; whole-row control-table scan |
+| `launch-control.integration.test.ts` | 9 | real Postgres: serialized cap enforcement across two pools, restart persistence, database-clock UTC and rolling windows, released-debit exclusion, column-level privacy assertion |
+
+Full gateway suite with `RUN_DB_TESTS=1` against `postgres://localhost:5432/zk_credits_test`:
+22 files, **180 passed, 0 failed**, of which 17 are Postgres integration tests.
+`npm run typecheck` exits 0.
+
+Live verification against a booted gateway (`NODE_ENV=production`, managed
+Postgres, stub verifying key) on 2026-09-21:
+
+| Probe | Observed |
+| --- | --- |
+| `GET /health` | `200` with `status: "ok"` |
+| `GET /ready` (no root synced) | `503`, `baseRoot: not_synchronized`, `baseRpc: not_configured`, database/verifier/provider `ok` |
+| `POST /v1/admin/pause` without a reason | `400` |
+| `POST /v1/admin/pause` with a reason | `200`, `state: "paused"` |
+| paused `POST /v1/chat/completions` | `503 pilot_paused`, no provider dispatch |
+| paused `POST /v1/pilot/funding` and `POST /v1/pilot/invites/redeem` | `503 pilot_paused` |
+| paused `GET /health`, `GET /v1/contract-status`, `GET /v1/admin/status` | `200` |
+| paused `GET /ready` | `503`, `launchControl: paused` |
+| `POST /v1/admin/resume` | `200`, inference returns to a `402` challenge |
+| retired Stellar/evaluation/billing/wallet routes (14 probes) | `404` |
+| generic x402, `exact`, Bazaar, MCP probes (7) | `404` |
+| `POST /x402/facilitator/settle` unauthenticated | `401` |
+| `POST /v1/responses` | `400`, no `PAYMENT-REQUIRED` header |
+| `POST /v1/models`, `/v1/messages`, `/v1/embeddings` | `404` |
+| service-class rejections (streaming, fallback list, routing, plugins, unknown field, `n=2`, output ceiling, image part, empty messages) | `400` with the named code |
+| 300,048-byte body | `400 request_too_large` |
+| 20,000-character message | `400 input_too_large` |
+
+Full release matrix, all from the worktree root unless noted:
+
+| Command | Result |
+| --- | --- |
+| `packages/x402-zk-prepaid`: `npm run build && npm test -- --run` | build clean; 11 passed |
+| `packages/zk-credits-shared`: `npm run build && npm test -- --run` | build clean; 29 passed, 8 skipped |
+| `ts`: `npm run typecheck` | exit 0 |
+| `ts`: `RUN_DB_TESTS=1 npm test -- --run` | 22 files, 180 passed |
+| `packages/zk-credits-sidecar`: `npm run build && npm test -- --run && npm pack --dry-run` | 19 files, 66 passed; pack lists 43 files |
+| `web`: `npm run lint` | 0 errors, 8 pre-existing warnings under `src/archive/**` |
+| `web`: `npm run typecheck && npm test -- --run` | exit 0; 47 passed |
+| `web`: `npm run test:e2e` | 7 passed |
+| `circuits`: `npm test -- --run` | witness checks passed |
+| `contracts`: `FOUNDRY_OFFLINE=true forge build && forge test` | build exit 0; 42 passed |
+
+The privacy scan asserts the boundary rather than trusting it: a canary prompt
+and response never appear in captured console output or in the durable claim
+row, and a whole-row scan of `control_plane.launch_control` and
+`spend_plane.dispatch_debits` finds no prompt, response, nullifier, signal, or
+identity join. The integration suite additionally pins the exact column set of
+both tables, so a future migration cannot add a joinable column unnoticed.
+
+Not covered: no hosted deploy, no npm publication, no operator activation, and
+no claim of production readiness, generic x402 compatibility, or independent
+audit. The three-operator activation evidence in issue #26 remains outstanding.
+
 ## Scenario catalog
 
 | ID | Scenario | Planning tasks |

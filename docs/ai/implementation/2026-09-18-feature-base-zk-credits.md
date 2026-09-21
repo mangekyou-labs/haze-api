@@ -230,21 +230,92 @@ failure and never enters the claim machine.
 ## Configuration
 
 Base chain ID `84532`, RPC URL, contract, USDC, sponsor, refund vault,
-treasury, verifying-key ids, Stripe, OpenRouter, and encryption settings
-are server or local-proxy configuration. No private key, RPC credential,
-proving secret, or credential secret belongs in the repository or a
-browser server response.
+treasury, verifying-key ids, OpenRouter, and encryption settings are server
+or local-proxy configuration. No private key, RPC credential, proving secret,
+or credential secret belongs in the repository or a browser server response.
 
 Development WASM and zkey are installed out of band and hash-pinned in the
 sidecar manifest. Hash mismatch is a proof failure.
 
+The single service class, the price ceilings, the request limits, the
+per-dispatch spend ceiling, and the pilot spend caps are **not** environment
+configuration. They are fixed in source (`ts/service-class.ts` and
+`ts/launch-control.ts`) so no deployment can widen an approved economic
+boundary without a reviewed code change.
+
+## Service-class enforcement (B22)
+
+`ts/service-class.ts` is the only path a request takes to the provider. Every
+accepted body is rebuilt into the exact upstream envelope, and everything
+outside the class is rejected before a credit is reserved:
+
+- the model is forced server-side; a client `model` field is ignored and
+  never forwarded, so an OpenAI-compatible client cannot select another model;
+- streaming, model fallback lists, client routing, transforms, plugins, web
+  search, media, audio, non-function tools, legacy `functions`, reasoning
+  controls, service tiers, and any unknown field are refused by name;
+- the parser caps the body at 256 KiB, the counter caps input at 16,000
+  conservative token units, and output is capped at 4,000 tokens;
+- every dispatch carries `provider.max_price` of $0.90 per million input and
+  $1.80 per million output tokens with `allow_fallbacks: false` and
+  `require_parameters: true`, and the upstream timeout is 120 seconds.
+
+The input ceiling counts UTF-8 bytes rather than model tokens: the gateway
+cannot run the provider tokenizer before reserving a credit, and a byte-level
+BPE never emits more than one token per byte, so an accepted body always holds
+at most 16,000 real tokens. The counter is deliberately stricter than the
+provider's own count and can never under-count.
+
+## Launch controls (B22)
+
+`ts/launch-control.ts` holds two durable controls in Postgres, both decided
+inside one serialized transaction so concurrent dispatches cannot race them:
+
+- a single `enabled` / `paused` kill switch in `control_plane.launch_control`,
+  and
+- an unlinked integer micro-USD debit ledger in
+  `spend_plane.dispatch_debits`.
+
+A dispatch debits the conservative $0.025 class ceiling before the request can
+leave the process. The debit is **retained** once a dispatch promise exists,
+including provider errors and timeouts, and **released** only when the failure
+happened before the network call. If either the $40 per UTC day or the $200
+rolling 30-day cap would be exceeded, the debit is refused, the reservation is
+cancelled without consuming a credit, a retryable `503` is returned, and the
+exhausted cap **persists a paused launch state** for operator review.
+
+The ledger is unlinked by construction: its only identifier is its own
+sequence value. No credential, nullifier, request signal, provider generation
+id, or participant identity appears in a control or monitoring table, so those
+reads can never be joined back to a spend-plane claim.
+
+The kill switch blocks invite redemption, detached funding, and new inference.
+It preserves `/health`, `/ready`, `/v1/contract-status`, the public bundle
+lookup, the committed-claim replay, and the authenticated admin commands, so
+recovery stays reachable during an incident.
+
+## Monitoring surface (B22)
+
+- `GET /health` is liveness only and never depends on a downstream dependency.
+- `GET /ready` covers Postgres, Base root freshness and lag, verifier assets,
+  provider configuration, and the launch-control state. It reports `503` when
+  any check fails, and each check reports one fixed, privacy-safe detail string
+  that never echoes a connection string, RPC error body, or root value.
+- `GET /v1/admin/status` is authenticated with `BILLING_INTERNAL_TOKEN` and
+  returns bounded aggregate counters, conservative spend and headroom for both
+  windows, durable claim-state counts, Base lag, and the launch state.
+  Proving happens only inside an operator's sidecar, so the gateway reports
+  `provingLatency: { source: 'participant-reported', value: null }` rather than
+  deriving a latency it never observes.
+
 ## Implementation order
 
 Follow planning B2→B3→B4 for the cryptographic spine, then B5→B6→B8 for
-spend, then B9 for invite-only onboarding. B2, B3, B4, and the B9 onboarding
-rewrite are done locally; B5/B6/B8 remain **present-unsafe** where the notes
-above say so. Do not represent the restored circuit as privacy-preserving
-while the rejected root fixtures are still present and the independent
-cryptographic review is outstanding; the generated verifier and the adapter do
-now carry Base Sepolia receipts (2026-09-21). Do not onboard paid partners
-until planning B12 and founder B16 pass.
+spend, then B9 for invite-only onboarding, then B22 for the launch controls
+above. B2, B3, B4, the B9 onboarding rewrite, and the B22 controls are done
+locally; B5/B6/B8 remain **present-unsafe** where the notes above say so. Do
+not represent the restored circuit as privacy-preserving while the rejected
+root fixtures are still present and the independent cryptographic review is
+outstanding; the generated verifier and the adapter do now carry Base Sepolia
+receipts (2026-09-21). Do not onboard paid partners until planning B12 and
+founder B16 pass.

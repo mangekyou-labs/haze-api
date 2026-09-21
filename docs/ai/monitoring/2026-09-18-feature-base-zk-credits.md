@@ -42,6 +42,27 @@ credit, or per-credential history.
 
 Streaming interruption is not a metric: streaming is not a product path.
 
+### Implemented surface
+
+Three endpoints carry this section, all described in the
+[implementation notes](../implementation/2026-09-18-feature-base-zk-credits.md#monitoring-surface-b22):
+
+| Endpoint | Auth | Reports |
+| --- | --- | --- |
+| `GET /health` | none | Liveness only. Never depends on a downstream dependency, so a dependency outage cannot cause a restart loop |
+| `GET /ready` | none | Postgres, Base root freshness and lag, verifier assets, provider configuration, and launch state. `503` when any check fails; each detail is a fixed, privacy-safe string |
+| `GET /v1/admin/status` | `BILLING_INTERNAL_TOKEN` | Bounded aggregate counters, conservative spend and headroom for both cap windows, durable claim-state counts, Base lag, and launch state |
+
+Proving happens only inside an operator's sidecar, so the gateway reports
+`provingLatency: { source: 'participant-reported', value: null }`. Aggregate
+hot-prove time arrives through the weekly sidecar export and is never derived
+or inferred by the gateway.
+
+The kill switch and the provider-spend caps are durable state, so a restart
+cannot clear a pause or reset spend. An operator pages themselves by watching
+`/ready`; the cap-exhaustion pause is discoverable from `/v1/admin/status`,
+which reports the exhausted window in the launch reason.
+
 ## Alerts
 
 Page on:

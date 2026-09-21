@@ -62,6 +62,48 @@ They are not an automatic promotion from Sepolia.
    outstanding.
 7. Enable durable workers and alerts only after reconciliation passes.
 
+## B22 launch controls before invitations
+
+The hosted deploy must satisfy these before any participant is invited. Each
+is verifiable from the workflow and the live service; none requires a
+participant.
+
+1. The Render blueprint is non-sleeping: web `plan: starter`, Postgres
+   `plan: basic-256mb`. A sleeping instance turns an invitee's first call into
+   a cold-start failure. The blueprint carries no Stripe variable, and every
+   secret is `sync: false` and set in the dashboard.
+2. `GET /health` answers `200` and `GET /ready` answers `200` with every check
+   `ok`. A `baseRpc: not_configured` or `baseRoot: not_synchronized` detail is
+   a deployment defect, not a warning: without a synchronized root no proof can
+   be accepted.
+3. `GET /v1/admin/status` reports state `enabled`, the fixed caps
+   `40000000` / `200000000` micro-USD, and zero spend.
+4. The service class is enforced in the deployed build. `POST
+   /v1/chat/completions` with `{"stream":true}`, a `models` fallback list, a
+   `provider` routing object, an unknown field, `n: 2`, an output ceiling above
+   4,000, an image content part, or a body over 256 KiB each returns `400` with
+   the named code, and an OpenAI-compatible body whose `model` names another
+   model still returns a `402` challenge.
+5. Retired routes stay retired. The `Deploy Smoke` workflow probes 14 retired
+   Stellar, evaluation, billing, and wallet-link paths, seven generic x402,
+   `exact`, Bazaar, and MCP paths, the unauthenticated facilitator `settle`
+   route, and the unsupported OpenAI and Anthropic paths, and asserts
+   `/v1/responses` returns `400` with no `PAYMENT-REQUIRED` header.
+6. Pause, verify, resume: `POST /v1/admin/pause` with a reason returns `200`
+   and inference and funding return `503 pilot_paused` while `/health`,
+   `/ready`, `/v1/contract-status`, and `/v1/admin/status` stay reachable; then
+   `POST /v1/admin/resume` restores the `402` challenge. Do this once on
+   production before invitations.
+7. Cap exhaustion is exercised on a **staging** deployment with deliberately
+   low limits, never by spending production budget. Production must report the
+   fixed $40 and $200 limits from step 3.
+8. Publish `@zk-credits/shared@0.1.0`, `@zk-credits/x402-zk-prepaid@0.1.0`,
+   and the breaking Base sidecar `zk-credits@0.2.0`, then pin those exact
+   versions in the onboarding guide. Deliver
+   `private-credit-spend-bn254-dev-sepolia-v1` artifacts directly through the
+   invite channel and require operators to verify the shipped manifest hashes
+   before proving.
+
 ## B11 verifier and adapter broadcast (executed 2026-09-21)
 
 B11 has to show a generated proof verified by the real Solidity verifier and

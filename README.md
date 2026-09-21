@@ -49,6 +49,33 @@ The gateway needs `OPENROUTER_API_KEY` and a configured Base contract/verifying
 key in a real environment. Its local fallback claim store is for development;
 pilot runs use the isolated `spend_plane.claims` Postgres table.
 
+## Operating the pilot
+
+Three endpoints carry the operational surface:
+
+| Endpoint | Auth | Purpose |
+| --- | --- | --- |
+| `GET /health` | none | Liveness. Never depends on a downstream dependency |
+| `GET /ready` | none | Postgres, Base root freshness and lag, verifier assets, provider configuration, and launch state |
+| `GET /v1/admin/status` | `BILLING_INTERNAL_TOKEN` | Aggregate counters, spend and headroom, claim counts, Base lag |
+
+A kill switch and provider-spend caps are durable Postgres state, so a restart
+cannot clear a pause or reset spend:
+
+```sh
+cd ts
+npm run launch:status
+npm run launch:pause -- --reason "provider incident"
+npm run launch:resume
+```
+
+While paused, inference and invite funding return `503 pilot_paused` and
+consume no credit; health, readiness, and the recovery paths stay reachable.
+Provider spend is bounded by a per-UTC-day cap and a longer rolling-window
+cap, and exhausting either cap pauses the pilot for operator review. The exact
+limits, the release matrix, and the `Deploy Smoke` probes are recorded in
+`docs/ai/deployment/2026-09-18-feature-base-zk-credits.md`.
+
 ## Local credential proxy
 
 The sidecar reads an encrypted browser export and generates the BN254 Groth16
@@ -109,7 +136,8 @@ review, protected keys, monitoring, and recovery drills are complete.
   the participant's browser and sidecar; the service never receives either.
 - The dashboard shows the funded tier, expiry, and chain links; it does not
   show remaining-call counts or usage history.
-- Encrypted response replays are bounded to 24 hours and 10 MiB.
+- Encrypted response replays are retained for 24 hours. A buffered provider
+  response above 1 MiB is refused before the claim is committed.
 - Two settled transcripts that share a nullifier and differ in request signal
   recover the secret and settle the sponsor-funded bond. The pilot uses test
   assets on Base Sepolia.
