@@ -1,17 +1,24 @@
 # Render blueprint for the Base Sepolia zk-prepaid gateway.
 #
-# Production must use a managed Postgres instance, protected Base sponsor and
-# Stripe keys, and a durable worker/reconciliation process. The free plan is
-# suitable only for integration testing because instances and databases sleep.
+# The pilot must not sleep: a free web instance suspends after inactivity and a
+# free Postgres instance is time-limited, either of which turns an invitee's
+# first call into a cold-start failure. Both tiers below are the smallest
+# always-on options.
+#
+# Secrets are never stored here. Every `sync: false` entry is set in the Render
+# dashboard. Real payment is out of scope for this pilot, so no Stripe variable
+# appears in this blueprint.
 
 services:
   - type: web
     name: zk-credits-gateway
     runtime: docker
-    plan: free
+    plan: starter
     region: singapore
     dockerfilePath: ./ts/Dockerfile
     dockerContext: .
+    # Liveness only. Readiness lives at /ready and is deliberately allowed to
+    # report 503 while the launch is paused.
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
@@ -22,6 +29,9 @@ services:
         value: "3001"
       - key: NODE_ENV
         value: production
+      - key: PUBLIC_GATEWAY_URL
+        sync: false
+      # ─── Base Sepolia ───────────────────────────────────────────────
       - key: BASE_RPC_URL
         sync: false
       - key: BASE_PRIVATE_CREDIT_BOND_ADDRESS
@@ -32,6 +42,9 @@ services:
         sync: false
       - key: BASE_TREASURY_ADDRESS
         sync: false
+      - key: BASE_CONFIRMATIONS
+        value: "3"
+      # ─── Pinned proving material ────────────────────────────────────
       - key: ZK_PREPAID_VERIFYING_KEY_PATH
         value: /app/circuits/private_credit_spend/verification_key.json
       - key: ZK_PREPAID_CIRCUIT_ID
@@ -40,14 +53,21 @@ services:
         value: private-credit-spend-vk-dev
       - key: ZK_PREPAID_REQUIREMENTS_VERSION
         value: zk-prepaid-v1
+      # ─── Service tokens ─────────────────────────────────────────────
+      # BILLING_INTERNAL_TOKEN guards the pilot control plane, the launch admin
+      # commands, and aggregate status. FACILITATOR_SERVICE_TOKEN guards the
+      # mutating facilitator endpoints. CLAIM_STORE_OPERATOR_TOKEN guards the
+      # operator-only dispatch-budget reset.
       - key: BILLING_INTERNAL_TOKEN
         sync: false
-      - key: STRIPE_SECRET_KEY
+      - key: FACILITATOR_SERVICE_TOKEN
         sync: false
+      - key: CLAIM_STORE_OPERATOR_TOKEN
+        sync: false
+      # ─── Upstream provider ──────────────────────────────────────────
       - key: OPENROUTER_API_KEY
         sync: false
-      - key: PUBLIC_GATEWAY_URL
-        sync: false
+      # ─── Optional error monitoring ──────────────────────────────────
       - key: SENTRY_DSN
         sync: false
       - key: SENTRY_ENVIRONMENT
@@ -55,7 +75,7 @@ services:
 
 databases:
   - name: zk-credits-db
-    plan: free
+    plan: basic-256mb
     region: singapore
     databaseName: zk_credits
     user: zk_credits
