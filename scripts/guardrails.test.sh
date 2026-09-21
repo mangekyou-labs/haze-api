@@ -88,6 +88,12 @@ expect_fail "refuses a non-postgres url" gw_require_direct_postgres 'mysql://u:p
 
 echo "variable planes"
 
+if grep -Eq '^[[:space:]]+PILOT_RELEASE_REVIEWED([[:space:]]|$)' "$SCRIPT_DIR/launch-wizard.sh"; then
+  pass "launch wizard owns the release review gate"
+else
+  fail "launch wizard owns the release review gate"
+fi
+
 # Run these in a scrubbed environment so an ambient variable in the developer's
 # shell cannot decide the outcome.
 CLEAN_ENV=(env -i PATH="$PATH" HOME="$HOME" bash -c)
