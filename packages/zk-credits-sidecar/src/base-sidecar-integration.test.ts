@@ -20,6 +20,7 @@ import {
   buildPaymentRequired,
   buildPaymentRequirements,
   createZkPrepaidFacilitator,
+  createZkPrepaidLifecycleMetrics,
   decodeHeader,
   encodeHeader,
   InMemoryClaimStore,
@@ -212,6 +213,7 @@ describe('coding-agent sidecar fixture', () => {
     const resource = await startResourceServer({ providerResponse: '{"id":"chatcmpl-fixture","choices":[]}' });
     const { directory, manifest } = await fixtureArtifactDirectory();
     const metrics = createBaseProofMetrics();
+    const exchangeMetrics = createZkPrepaidLifecycleMetrics();
     const credential = await createCredential(generateSecret(), 0, Math.floor(Date.now() / 1000) + 3600, '84532');
     const leaf = await computeCreditLeaf(credential.commitment, credential.tierId, credential.expiry);
     const tree = await deriveSparseCreditWitness(new Map([[5, leaf]]), 5);
@@ -227,12 +229,13 @@ describe('coding-agent sidecar fixture', () => {
       slotLedger: await BaseSlotLedger.open({}),
       witnessProvider: createFileWitnessProvider({ root: tree.root, leaves: [{ index: 5, leaf, expiry: credential.expiry }] }),
       prove,
+      lifecycle: exchangeMetrics.observe,
     });
     const sidecar = createSidecarServer({
       localToken: 'fixture-local-token',
       gatewayBaseUrl: resource.baseUrl,
       prepaidClient: prepaid.client,
-      metrics: () => metrics.snapshot(),
+      metrics: () => ({ ...metrics.snapshot(), exchange: exchangeMetrics.snapshot() }),
     });
     const loopback = await sidecar.listen(0);
     try {
@@ -259,6 +262,19 @@ describe('coding-agent sidecar fixture', () => {
       const snapshot = metrics.snapshot();
       expect(snapshot).toMatchObject({ attempts: 1, successes: 1, failures: 0 });
       expect(prepaid.committedSlots()).toEqual([0]);
+
+      // The loopback aggregate carries the exchange lifecycle without any
+      // request, proof, or credential value.
+      expect(exchangeMetrics.snapshot()).toMatchObject({
+        challengesReceived: 1,
+        paymentsPrepared: 1,
+        settlementsConfirmed: 1,
+        exchangeSuccesses: 1,
+        failures: 0,
+      });
+      expect(JSON.stringify(exchangeMetrics.snapshot())).not.toContain(credential.secret);
+      expect(JSON.stringify(exchangeMetrics.snapshot())).not.toContain(payment.payload.nonce);
+      expect(JSON.stringify(exchangeMetrics.snapshot())).not.toContain(payment.payload.publicSignals[4]!);
 
       const unauthorized = await fetch(`${loopback}/v1/chat/completions`, {
         method: 'POST',

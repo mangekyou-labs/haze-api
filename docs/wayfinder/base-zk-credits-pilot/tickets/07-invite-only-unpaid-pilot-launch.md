@@ -30,6 +30,35 @@ hosted Render/Vercel deploy, the once-on-production pause/resume, staging cap
 exhaustion, the three pinned npm publishes, and three operator-owned
 activations. The issue stays open until the third qualifying activation.
 
+## Launch automation (2026-09-21)
+
+The launch is now driven rather than described, and the release-readiness gaps
+that would have prevented a third activation were closed — see
+[B22 launch-automation evidence](../../../ai/testing/2026-09-18-feature-base-zk-credits.md#local-b22-launch-automation-evidence-2026-09-21):
+
+- `scripts/launch-pilot.sh` is the single entrypoint over a 26-step checkpointed
+  plan, with `--check` and `--status` as read-only modes, no unattended
+  confirmation flag, and no flag that deletes a resource. A non-idempotent call
+  that times out is recorded as `unknown` and blocks a retry until it is
+  reconciled against the provider.
+- Activation evidence moved to schema version 2: three counter snapshots give a
+  delta for every exchange counter, proving counter, and failure category, and
+  qualification requires exactly one clean cold warm-up and exactly one clean
+  counted exchange. Warm-up contamination, stale traffic, and concurrent
+  activation traffic are each rejected with a named reason.
+- The publish sequence covers all three packages in dependency order, including
+  the sidecar's `file:` to exact-version rewrite between the two publish groups.
+- Staging can narrow the spend caps to prove exhaustion
+  (`PILOT_ENVIRONMENT=staging` plus the two override variables) and any
+  deployment that is not staging refuses to start with them set.
+- `npm run activation:rehearse` proves the founder orchestration without
+  consuming an operator slot, and refuses while a window is open.
+
+A valid activation bundle could not previously have been produced at all: both
+the guardrail scan and the operator wizard rejected the evidence schema's own
+`credentialStayedLocal` attestation as a secret-bearing field. Both now exempt
+that one key, and the tests pin both directions.
+
 ## Acceptance criteria
 
 - Deploy the resource server, sidecar, facilitator, isolated claim store, and

@@ -58,11 +58,11 @@ continuation gate therefore requires at least four paid bundles or renewals.
   Completions, with one generated choice.
 - Do not accept streaming, images, files, audio, web plugins, model fallback,
   client-selected routing, or unknown cost-affecting fields.
-- Fix the model server-side and cap input at 16,000 tokens, output at 4,000
-  tokens, the request body at 256 KiB, the encrypted replay at 1 MiB, and the
-  upstream timeout at 120 seconds.
-- Reject an input whose token count cannot be established conservatively
-  within the class limit before reserving a credit.
+- Fix the model server-side and cap input at 16,000 UTF-8 bytes of text and
+  tool payload, output at 4,000 tokens, the request body at 256 KiB, the
+  encrypted replay at 1 MiB, and the upstream timeout at 120 seconds.
+- Reject an input whose conservative unit count exceeds the class limit before
+  reserving a credit.
 - Set OpenRouter `provider.max_price` to $0.90 per million input tokens and
   $1.80 per million output tokens. Also enforce an effective provider-cost
   ceiling of $0.025 for each dispatch, including the OpenRouter platform fee.

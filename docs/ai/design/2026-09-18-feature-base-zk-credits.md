@@ -66,9 +66,10 @@ Class boundary:
   choice.
 - Reject streaming, images, files, audio, web plugins, model fallback,
   client-selected routing, and unknown cost-affecting fields.
-- Cap input at 16,000 tokens, output at 4,000 tokens, request body at
-  256 KiB, encrypted replay at 1 MiB, and upstream timeout at 120 seconds.
-- Reject an input whose token count cannot be established conservatively
+- Cap input at 16,000 UTF-8 bytes of text and tool payload, output at 4,000
+  tokens, request body at 256 KiB, encrypted replay at 1 MiB, and upstream
+  timeout at 120 seconds.
+- Reject an input whose conservative byte unit count exceeds the class limit
   before reserve.
 - Set OpenRouter `provider.max_price` to $0.90 / M input and $1.80 / M
   output, and an effective provider-cost ceiling of $0.025 per dispatch

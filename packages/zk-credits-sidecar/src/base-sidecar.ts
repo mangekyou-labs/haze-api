@@ -32,6 +32,7 @@ import {
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
   type ZkPrepaidClient,
+  type ZkPrepaidLifecycleObserver,
 } from '@zk-credits/x402-zk-prepaid';
 import type { BaseSlotLedger } from './slot-ledger.js';
 
@@ -94,6 +95,12 @@ export interface BasePrepaidClientOptions {
    * can leave the process.
    */
   slotLedger?: BaseSlotLedger;
+  /**
+   * Optional fixed-shape exchange observer. It sees closed lifecycle enums
+   * only, so the loopback aggregate counters never carry a request, a proof,
+   * a public signal, or a credential identifier.
+   */
+  lifecycle?: ZkPrepaidLifecycleObserver;
 }
 
 export interface BasePrepaidClient {
@@ -330,6 +337,7 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
 
   const client = createZkPrepaidClient({
     fetch: fetchWithReplay,
+    ...(options.lifecycle ? { lifecycle: options.lifecycle } : {}),
     createPayload: async ({ method, url, body, requirements }): Promise<PaymentPayload> => {
       if (requirements.extra.deploymentDomain !== options.credential.deploymentDomain) {
         throw new Error('Credential deployment domain does not match the gateway challenge');

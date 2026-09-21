@@ -24,6 +24,24 @@ export const ROLLING_CAP_MICRO_USD = 200n * MICRO_USD_PER_USD;
 export const ROLLING_WINDOW_DAYS = 30;
 export const MAX_PAUSE_REASON_LENGTH = 200;
 
+/**
+ * The ceilings a control store enforces. The fixed production pair is the
+ * default; a staging deployment may narrow it (`launch-environment.ts`) so the
+ * exhaustion path can be exercised without spending real budget.
+ */
+export interface SpendCaps {
+  dailyMicroUsd: bigint;
+  rollingMicroUsd: bigint;
+  /** `staging` marks a deliberately narrowed ceiling for exhaustion tests. */
+  source: 'fixed' | 'staging';
+}
+
+export const FIXED_SPEND_CAPS: SpendCaps = Object.freeze({
+  dailyMicroUsd: DAILY_CAP_MICRO_USD,
+  rollingMicroUsd: ROLLING_CAP_MICRO_USD,
+  source: 'fixed',
+});
+
 export type LaunchState = 'enabled' | 'paused';
 export type SpendWindow = 'utc_day' | 'rolling_30d';
 export type DebitState = 'held' | 'retained' | 'released';
@@ -94,7 +112,11 @@ function assertReason(reason: string): string {
 
 /** Durable control-plane and spend-plane implementation used by the gateway. */
 export class PostgresLaunchControlStore implements LaunchControlStore {
-  constructor(private readonly pool: Pool) {}
+  private readonly caps: SpendCaps;
+
+  constructor(private readonly pool: Pool, caps: SpendCaps = FIXED_SPEND_CAPS) {
+    this.caps = caps;
+  }
 
   async status(): Promise<LaunchStatus> {
     const result = await this.pool.query(
@@ -158,9 +180,9 @@ export class PostgresLaunchControlStore implements LaunchControlStore {
       const row = sums.rows[0] as Record<string, unknown>;
       const utcDay = BigInt(String(row.utc_day));
       const rolling = BigInt(String(row.rolling));
-      const window: SpendWindow | undefined = utcDay + amountMicroUsd > DAILY_CAP_MICRO_USD
+      const window: SpendWindow | undefined = utcDay + amountMicroUsd > this.caps.dailyMicroUsd
         ? 'utc_day'
-        : rolling + amountMicroUsd > ROLLING_CAP_MICRO_USD
+        : rolling + amountMicroUsd > this.caps.rollingMicroUsd
           ? 'rolling_30d'
           : undefined;
       if (window) {
@@ -232,10 +254,10 @@ export class PostgresLaunchControlStore implements LaunchControlStore {
     return {
       utcDayMicroUsd,
       rolling30dMicroUsd,
-      dailyCapMicroUsd: DAILY_CAP_MICRO_USD,
-      rollingCapMicroUsd: ROLLING_CAP_MICRO_USD,
-      dailyHeadroomMicroUsd: DAILY_CAP_MICRO_USD > utcDayMicroUsd ? DAILY_CAP_MICRO_USD - utcDayMicroUsd : 0n,
-      rollingHeadroomMicroUsd: ROLLING_CAP_MICRO_USD > rolling30dMicroUsd ? ROLLING_CAP_MICRO_USD - rolling30dMicroUsd : 0n,
+      dailyCapMicroUsd: this.caps.dailyMicroUsd,
+      rollingCapMicroUsd: this.caps.rollingMicroUsd,
+      dailyHeadroomMicroUsd: this.caps.dailyMicroUsd > utcDayMicroUsd ? this.caps.dailyMicroUsd - utcDayMicroUsd : 0n,
+      rollingHeadroomMicroUsd: this.caps.rollingMicroUsd > rolling30dMicroUsd ? this.caps.rollingMicroUsd - rolling30dMicroUsd : 0n,
       debits: {
         held: Number(row.held),
         retained: Number(row.retained),
@@ -254,11 +276,16 @@ interface MemoryDebit {
 
 /** Deterministic fallback for local runs and focused tests. */
 export class MemoryLaunchControlStore implements LaunchControlStore {
+  private readonly caps: SpendCaps;
   private state: LaunchState = 'enabled';
   private reason: string | null = null;
   private updatedAt = 0;
   private readonly debits: MemoryDebit[] = [];
   private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(options: { caps?: SpendCaps } = {}) {
+    this.caps = options.caps ?? FIXED_SPEND_CAPS;
+  }
 
   /** Serializes every mutation the way the Postgres row lock does. */
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
@@ -295,9 +322,9 @@ export class MemoryLaunchControlStore implements LaunchControlStore {
     return this.serialize(async () => {
       if (this.state === 'paused') return { kind: 'paused' as const };
       const snapshot = this.snapshotAt(at);
-      const window: SpendWindow | undefined = snapshot.utcDayMicroUsd + amountMicroUsd > DAILY_CAP_MICRO_USD
+      const window: SpendWindow | undefined = snapshot.utcDayMicroUsd + amountMicroUsd > this.caps.dailyMicroUsd
         ? 'utc_day'
-        : snapshot.rolling30dMicroUsd + amountMicroUsd > ROLLING_CAP_MICRO_USD
+        : snapshot.rolling30dMicroUsd + amountMicroUsd > this.caps.rollingMicroUsd
           ? 'rolling_30d'
           : undefined;
       if (window) {
@@ -349,10 +376,10 @@ export class MemoryLaunchControlStore implements LaunchControlStore {
     return {
       utcDayMicroUsd,
       rolling30dMicroUsd,
-      dailyCapMicroUsd: DAILY_CAP_MICRO_USD,
-      rollingCapMicroUsd: ROLLING_CAP_MICRO_USD,
-      dailyHeadroomMicroUsd: DAILY_CAP_MICRO_USD > utcDayMicroUsd ? DAILY_CAP_MICRO_USD - utcDayMicroUsd : 0n,
-      rollingHeadroomMicroUsd: ROLLING_CAP_MICRO_USD > rolling30dMicroUsd ? ROLLING_CAP_MICRO_USD - rolling30dMicroUsd : 0n,
+      dailyCapMicroUsd: this.caps.dailyMicroUsd,
+      rollingCapMicroUsd: this.caps.rollingMicroUsd,
+      dailyHeadroomMicroUsd: this.caps.dailyMicroUsd > utcDayMicroUsd ? this.caps.dailyMicroUsd - utcDayMicroUsd : 0n,
+      rollingHeadroomMicroUsd: this.caps.rollingMicroUsd > rolling30dMicroUsd ? this.caps.rollingMicroUsd - rolling30dMicroUsd : 0n,
       debits: { held: count('held'), retained: count('retained'), released: count('released') },
     };
   }

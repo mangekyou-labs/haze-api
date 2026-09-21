@@ -91,6 +91,24 @@ jobs:
       - run: npm test -- --run
       - run: npm pack --dry-run
 
+  launch:
+    name: Pilot launch tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+      # The operator-side measurement and the secret-boundary guardrails are
+      # what stand between an operator and a wasted activation, and the operator
+      # machine has no TypeScript toolchain, so they run on their own.
+      - name: Operator evidence and handoff guardrails
+        run: |
+          node --test scripts/operator-evidence.test.mjs
+          bash scripts/guardrails.test.sh
+      - name: Wizard syntax
+        run: for script in scripts/*.sh; do bash -n "$script"; done
+
   web:
     name: Web (Base/Stripe)
     runs-on: ubuntu-latest

@@ -5,6 +5,7 @@ import type { BaseProofMetricsSnapshot } from './proof-metrics.js';
 import {
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
+  type ZkPrepaidLifecycleSnapshot,
 } from '@zk-credits/x402-zk-prepaid';
 
 const MAX_REQUEST_BYTES = 2_000_000;
@@ -14,12 +15,21 @@ export interface PrepaidTransport {
   fetch(input: string, init?: RequestInit): Promise<Response>;
 }
 
+/**
+ * The authenticated loopback metrics body. Proof counters are unchanged; the
+ * exchange section adds fixed x402 lifecycle counters, so an operator can see
+ * whether the exchange reached settlement without any request content.
+ */
+export interface SidecarMetricsSnapshot extends BaseProofMetricsSnapshot {
+  exchange: ZkPrepaidLifecycleSnapshot;
+}
+
 export interface SidecarOptions {
   localToken: string;
   gatewayBaseUrl: string;
   prepaidClient: PrepaidTransport;
-  /** Aggregate-only proof metrics served to the authenticated local operator. */
-  metrics?: () => BaseProofMetricsSnapshot;
+  /** Aggregate-only proof and exchange metrics served to the authenticated local operator. */
+  metrics?: () => SidecarMetricsSnapshot;
 }
 
 export interface RunningSidecar {

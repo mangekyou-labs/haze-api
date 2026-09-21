@@ -29,6 +29,9 @@ import type {
 import type { x402Client } from '@x402/core/client';
 import type { x402Facilitator } from '@x402/core/facilitator';
 import type { FacilitatorClient, x402ResourceServer } from '@x402/core/server';
+import { lifecycleFailure, lifecycleStage, type ZkPrepaidLifecycleEvent, type ZkPrepaidLifecycleObserver } from './lifecycle.js';
+
+export * from './lifecycle.js';
 
 export const X402_VERSION = 2 as const;
 export const ZK_PREPAID_SCHEME = 'zk-prepaid' as const;
@@ -285,7 +288,17 @@ export async function validateZkPrepaidPayload(payment: unknown, requirements: P
 }
 
 export interface ZkPrepaidClientContext { url: string; method: string; body: unknown; requirements: PaymentRequirements; }
-export interface ZkPrepaidClientOptions { fetch?: typeof fetch; createPayload: (context: ZkPrepaidClientContext) => Promise<PaymentPayload>; now?: () => number; }
+export interface ZkPrepaidClientOptions {
+  fetch?: typeof fetch;
+  createPayload: (context: ZkPrepaidClientContext) => Promise<PaymentPayload>;
+  now?: () => number;
+  /**
+   * Optional fixed-shape exchange observer. It receives closed enums only, so
+   * an operator can count lifecycle transitions without learning anything
+   * about the request.
+   */
+  lifecycle?: ZkPrepaidLifecycleObserver;
+}
 export interface ZkPrepaidClient { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>; clearRequirements(url?: string): void; }
 
 function requestUrl(input: RequestInfo | URL): string { return typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url; }
@@ -317,24 +330,55 @@ export function createZkPrepaidClient(options: ZkPrepaidClientOptions): ZkPrepai
     }
     return undefined;
   };
+  /**
+   * An observer must never change an exchange, so a failing observer is
+   * dropped rather than propagated into the request path.
+   */
+  const emit = (event: ZkPrepaidLifecycleEvent): void => {
+    try { options.lifecycle?.(event); } catch { /* an observer is never an exchange error */ }
+  };
+  const send = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    try { return await fetcher(input, init); }
+    catch (error) { emit(lifecycleFailure('transport_failed')); throw error; }
+  };
+  const prepare = async (requirements: PaymentRequirements, context: ZkPrepaidClientContext): Promise<PaymentPayload> => {
+    try {
+      const payment = ensureClientPayload(await options.createPayload(context), requirements);
+      emit(lifecycleStage('payment_prepared'));
+      return payment;
+    } catch (error) { emit(lifecycleFailure('payment_preparation_failed')); throw error; }
+  };
+  /** A paid exchange settles only when the response carries PAYMENT-RESPONSE. */
+  const settle = (response: Response): Response => {
+    if (response.status === 402) { emit(lifecycleFailure('payment_rejected')); return response; }
+    if (response.headers.get(PAYMENT_RESPONSE_HEADER)) emit(lifecycleStage('settlement_confirmed'));
+    else emit(lifecycleFailure('settlement_failed'));
+    if (response.ok) emit(lifecycleStage('exchange_succeeded'));
+    return response;
+  };
   return {
     async fetch(input, init) {
       const url = requestUrl(input);
       const method = (init?.method ?? 'GET').toUpperCase();
       const body = init?.body ?? null;
       const cached = findCached(method, url);
-      let response = cached ? await fetcher(input, setPaymentHeader(init, ensureClientPayload(await options.createPayload({ url, method, body, requirements: cached }), cached))) : await fetcher(input, cloneInit(init));
-      if (response.status !== 402) return response;
+      const response = cached ? await send(input, setPaymentHeader(init, await prepare(cached, { url, method, body, requirements: cached }))) : await send(input, cloneInit(init));
+      if (response.status !== 402) return cached ? settle(response) : response;
+      if (cached) emit(lifecycleFailure('payment_rejected'));
       const encoded = response.headers.get(PAYMENT_REQUIRED_HEADER);
-      if (!encoded) return response;
-      const required = decodeHeader<PaymentRequired>(encoded);
+      if (!encoded) { emit(lifecycleFailure('challenge_unsupported')); return response; }
+      let required: PaymentRequired;
+      try { required = decodeHeader<PaymentRequired>(encoded); }
+      catch (error) { emit(lifecycleFailure('challenge_unreadable')); throw error; }
       const accepted = required.accepts?.find((item) => item.scheme === ZK_PREPAID_SCHEME);
-      if (required.x402Version !== X402_VERSION || !accepted || !issuedAtFresh(accepted, now())) return response;
+      if (required.x402Version !== X402_VERSION || !accepted) { emit(lifecycleFailure('challenge_unsupported')); return response; }
+      if (!issuedAtFresh(accepted, now())) { emit(lifecycleFailure('challenge_stale')); return response; }
+      emit(lifecycleStage('challenge_received'));
       const keyPrefix = prefix(method, url);
       for (const key of cache.keys()) if (key.startsWith(keyPrefix)) cache.delete(key);
       cache.set(cacheKey(method, url, accepted), { ...required, accepts: [structuredClone(accepted)] });
-      const payment = ensureClientPayload(await options.createPayload({ url, method, body, requirements: accepted }), accepted);
-      return fetcher(input, setPaymentHeader(init, payment));
+      const payment = await prepare(accepted, { url, method, body, requirements: accepted });
+      return settle(await send(input, setPaymentHeader(init, payment)));
     },
     clearRequirements(url) { if (!url) cache.clear(); else for (const key of cache.keys()) if (key.split('\u0000')[1] === url) cache.delete(key); },
   };

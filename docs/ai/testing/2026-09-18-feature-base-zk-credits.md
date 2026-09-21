@@ -374,6 +374,135 @@ Not covered: no hosted deploy, no npm publication, no operator activation, and
 no claim of production readiness, generic x402 compatibility, or independent
 audit. The three-operator activation evidence in issue #26 remains outstanding.
 
+## Local B22 launch-automation evidence (2026-09-21)
+
+Run from the `feature-base-zk-credits` worktree. This pass builds the resumable
+launch system and closes the release-readiness gaps that would have prevented
+three operators from completing an activation. It is described in
+[the implementation notes](../implementation/2026-09-18-feature-base-zk-credits.md#resumable-launch-system-b22)
+and gated by
+[the pre-invite checklist](../deployment/2026-09-18-feature-base-zk-credits.md#b22-launch-controls-before-invitations).
+
+### The activation measurement was replaced, because it could not work
+
+The previous evidence schema reported one cumulative exchange total and one
+cumulative proving total, and the operator wizard hardcoded every failure
+category to zero. Two consequences followed:
+
+- a warm-up could not be told apart from the activation, because subtracting a
+  baseline from a cumulative total cannot show *which* exchange was counted; and
+- the recorded failure categories were always zero, so the one artifact meant to
+  show what went wrong was structurally incapable of showing it.
+
+Schema version 2 reports three snapshots of the sidecar's authenticated loopback
+counters — before the warm-up, after the warm-up, and after the counted
+exchange — and derives every exchange counter, every proving counter, and every
+failure category as a delta between two of them. Qualification now requires a
+fresh sidecar, exactly one successful cold warm-up before the baseline, and
+exactly one successful counted exchange after it. The hot-prove sample count is
+what separates the two windows: the first prove in a process is the cold sample,
+so a clean warm-up leaves it at zero and the counted exchange raises it to one.
+
+| Contamination | Recorded reason |
+| --- | --- |
+| the sidecar had already served traffic | `stale_traffic_before_warmup` |
+| the warm-up window absorbed a second exchange | `cold_warmup_contaminated_by_extra_traffic`, `cold_warmup_not_the_cold_sample` |
+| no warm-up happened, so the counted exchange was the cold prove | `cold_warmup_incomplete_exchange`, `hot_exchange_not_a_hot_proof` |
+| the counted window absorbed another activation's traffic | `hot_exchange_contaminated_by_extra_traffic` |
+| the warm-up or the exchange recorded a failure or a retry | `cold_warmup_recorded_retries`, `hot_exchange_recorded_failures`, `hot_exchange_recorded_failure_categories` |
+
+Serialization is enforced rather than documented: `activation-start` refuses a
+slot that already has an open window, and `activation-rehearse` refuses to run
+while any window is open, because extra traffic during a window contaminates
+that slot's counters and the committed-claim comparison is between two aggregate
+integers.
+
+### A valid activation bundle could not have been produced
+
+`scripts/launch-guardrails.sh` and the operator wizard both scanned a bundle for
+any field name *containing* `credential`. The evidence schema's own
+`credentialStayedLocal` attestation asserts where a credential stayed and
+carries no credential, so the scan rejected every legitimate bundle. The
+guardrail test only ever fed the scan a hand-written fixture without
+attestations, which is why it passed.
+
+Both scans now match key names and exempt exactly that one key, and the tests
+pin both directions: the full real bundle including its attestations is
+accepted, and `credentialSecret` and a bare `credential` are still refused.
+
+### New suites
+
+| Suite | Tests | Covers |
+| --- | --- | --- |
+| `ts/activation.test.ts` | 31 | the pinned-bundle vocabulary, unknown keys at every depth, the denylist, the counter shapes, and every contamination case above |
+| `ts/launch-environment.test.ts` | 12 | environment resolution, the staging-only cap pair, production refusal, and cap exhaustion at a narrowed ceiling |
+| `ts/launch/state.test.ts` | 7 | checkpoint round-trip, mode 0600, refusal of a secret-shaped value, refusal of a tracked path, `unknown` versus `failed` |
+| `ts/launch/environment.test.ts` | 18 | value shapes, staged requirements, deferred OAuth pair, the three distinct operator ids, custody-key refusal, file permissions |
+| `ts/launch/providers.test.ts` | 28 | Neon/Render/Vercel payloads and live adapters, create/adopt/ambiguous/refuse resolution, owner selection, the JSON-RPC reader, transport timeouts |
+| `ts/launch/release.test.ts` | 19 | packed-content digests, already-published-version refusal, the dependency rewrite, the dependency-only commit, the release gate |
+| `ts/launch/deploy.test.ts` | 16 | predicted CREATE addresses, receipt/bytecode reconciliation, immutable read-back, the bounded USDC approval |
+| `ts/launch/cli.test.ts` | 43 | preflight, status, the redaction of a persisted failure note, and resumption after an interruption at *every* step of the plan |
+| `ts/launch/redact.test.ts` | 8 | one sample per secret pattern, redaction, and the secret-free state boundary |
+| `scripts/operator-evidence.test.mjs` | 12 | the operator-side warm-up and counted-window checks, and the version-2 bundle it writes |
+| `scripts/guardrails.test.sh` | 60 | the secret boundary, including the full real bundle and the exemption's exact edge |
+
+The resumption suite is parameterised over the real plan rather than a
+convenient step: the plan is 26 steps across the six stages, six of them
+irreversible, and the suite interrupts at each of the 26, asserts the earlier
+steps are durably recorded and the interrupted one is `unknown`, asserts a
+second resume *refuses to advance* until the unknown is reconciled, and asserts
+the run then continues from that step rather than from the beginning. That is
+the property that keeps an interrupted broadcast or publish from being repeated.
+
+### Release matrix
+
+| Command | Result |
+| --- | --- |
+| `ts`: `npm run typecheck` | exit 0 |
+| `ts`: `RUN_DB_TESTS=1 npm test -- --run` | 32 files, **369 passed, 0 failed** |
+| `packages/x402-zk-prepaid`: `npm run build && npm test -- --run` | build clean; 22 passed |
+| `packages/zk-credits-shared`: `npm run build && npm test -- --run` | build clean; 29 passed, 8 skipped |
+| `packages/zk-credits-sidecar`: `npm run build && npm test -- --run` | build clean; 19 files, 66 passed |
+| `web`: `npm run lint` | 0 errors, 8 pre-existing warnings under `src/archive/**` |
+| `web`: `npm run typecheck && npm test -- --run` | exit 0; 47 passed |
+| `circuits`: `npm test -- --run` | witness checks passed |
+| `contracts`: `FOUNDRY_OFFLINE=true forge build && forge test` | build exit 0; 42 passed, 0 failed |
+| `node --test scripts/operator-evidence.test.mjs` | 12 passed, 0 failed |
+| `bash scripts/guardrails.test.sh` | 60 passed, 0 failed |
+| `for f in scripts/*.sh; do bash -n "$f"; done` | all five parse |
+
+The Postgres-backed suites ran against `postgres://localhost:5432/zk_credits_test`
+with `RUN_DB_TESTS=1`; the durable evidence assertion now also pins that the
+stored JSONB bundle carries the three counter snapshots, so a migration cannot
+quietly drop the warm-up record.
+
+Not covered: no npm publication, no Base Sepolia bond deployment, no hosted
+deploy, and no operator activation. Every step that changes something outside a
+machine is a checkpoint that stops and asks; the launch system is built and
+tested here, and running it is the founder's action with the founder's
+credentials.
+
+### Secret scan
+
+`gw_scan_for_secrets` over every new non-test artifact — the two activation
+modules, `ts/launch-environment.ts`, the eight `ts/launch/*.ts` modules,
+`scripts/launch-pilot.sh`, and `scripts/operator-evidence.mjs` — reports clean:
+no private key, provider token, credentialed connection string, PEM block, or
+email address.
+
+`ts/launch/cli.test.ts` does trip the scan, and deliberately. It carries
+fabricated `npm_…` and `sk-or-v1-…` values and one synthetic
+`postgresql://u:p@…` URL, because the redaction test has to prove that a real
+secret-shaped value does not survive the output path — the same reason
+`scripts/guardrails.test.sh` carries `postgresql://u:hunter2@host/db`. The
+difference is what is being asserted: the guardrail suite asserts the scan
+refuses those shapes, while here they are inputs to the code under test and the
+assertion is that they are redacted before reaching the state file.
+
+`.env.launch.local` and `.launch-state.local.json` are both gitignored
+(`.gitignore:4` and `.gitignore:8`) and neither is tracked. The launch refuses
+to write into either when git tracks it.
+
 ## Scenario catalog
 
 | ID | Scenario | Planning tasks |

@@ -68,41 +68,109 @@ The hosted deploy must satisfy these before any participant is invited. Each
 is verifiable from the workflow and the live service; none requires a
 participant.
 
-1. The Render blueprint is non-sleeping: web `plan: starter`, Postgres
-   `plan: basic-256mb`. A sleeping instance turns an invitee's first call into
-   a cold-start failure. The blueprint carries no Stripe variable, and every
-   secret is `sync: false` and set in the dashboard.
-2. `GET /health` answers `200` and `GET /ready` answers `200` with every check
+1. The Render blueprint runs the free web plan in Singapore and declares no
+   Render database: the durable Postgres is an external free Neon database
+   reached over its **direct** TLS connection (never the `-pooler` host), so
+   `DATABASE_URL` is set in the dashboard and no `fromDatabase` interpolation
+   appears. A free instance suspends, so cold starts are accepted explicitly
+   rather than paid away: `npm run activation:start` prewarms `/health` with
+   bounded retries and then requires a fully ready `/ready` **before** it
+   issues an invite, so an operator never meets a suspended instance, and the
+   `Deploy Smoke` workflow retries every positive probe. The blueprint carries
+   no Stripe variable, and every secret is `sync: false` and set in the
+   dashboard.
+2. The Base RPC is a dedicated provider endpoint, not the shared public
+   `sepolia.base.org`, and `BASE_DEPLOYMENT_BLOCK` is set to the block the bond
+   was deployed at. Deploy Smoke asserts `/v1/admin/status` reports a
+   `base.lastScannedBlock` at or after that value; scanning less means no
+   `BundleFunded` event can be observed yet, and an unset value either rescans
+   the whole chain history or misses every event.
+3. `GET /health` answers `200` and `GET /ready` answers `200` with every check
    `ok`. A `baseRpc: not_configured` or `baseRoot: not_synchronized` detail is
    a deployment defect, not a warning: without a synchronized root no proof can
-   be accepted.
-3. `GET /v1/admin/status` reports state `enabled`, the fixed caps
+   be accepted. Setting the `SMOKE_STRICT_READY` repository variable to `1`
+   makes Deploy Smoke require exactly that instead of tolerating a paused
+   `503`.
+4. `GET /v1/admin/status` reports state `enabled`, the fixed caps
    `40000000` / `200000000` micro-USD, and zero spend.
-4. The service class is enforced in the deployed build. `POST
+5. The service class is enforced in the deployed build. `POST
    /v1/chat/completions` with `{"stream":true}`, a `models` fallback list, a
    `provider` routing object, an unknown field, `n: 2`, an output ceiling above
    4,000, an image content part, or a body over 256 KiB each returns `400` with
    the named code, and an OpenAI-compatible body whose `model` names another
    model still returns a `402` challenge.
-5. Retired routes stay retired. The `Deploy Smoke` workflow probes 14 retired
+6. Retired routes stay retired. The `Deploy Smoke` workflow probes 14 retired
    Stellar, evaluation, billing, and wallet-link paths, seven generic x402,
    `exact`, Bazaar, and MCP paths, the unauthenticated facilitator `settle`
    route, and the unsupported OpenAI and Anthropic paths, and asserts
    `/v1/responses` returns `400` with no `PAYMENT-REQUIRED` header.
-6. Pause, verify, resume: `POST /v1/admin/pause` with a reason returns `200`
+7. Pause, verify, resume: `POST /v1/admin/pause` with a reason returns `200`
    and inference and funding return `503 pilot_paused` while `/health`,
    `/ready`, `/v1/contract-status`, and `/v1/admin/status` stay reachable; then
    `POST /v1/admin/resume` restores the `402` challenge. Do this once on
    production before invitations.
-7. Cap exhaustion is exercised on a **staging** deployment with deliberately
+8. Cap exhaustion is exercised on a **staging** deployment with deliberately
    low limits, never by spending production budget. Production must report the
-   fixed $40 and $200 limits from step 3.
-8. Publish `@zk-credits/shared@0.1.0`, `@zk-credits/x402-zk-prepaid@0.1.0`,
+   fixed $40 and $200 limits from step 4. The narrowing seam is
+   `PILOT_ENVIRONMENT=staging` plus
+   `PILOT_STAGING_DAILY_CAP_MICRO_USD` / `PILOT_STAGING_ROLLING_CAP_MICRO_USD`.
+   It is narrow by construction: the overrides are read only when the
+   environment is exactly `staging`, they may only narrow the fixed ceiling, and
+   a service that is not staging **refuses to start** when either one is set
+   rather than ignoring it. Staging is a separate service
+   (`zk-credits-gateway-staging`) and a separate database, so an exhausted
+   staging launch cannot pause production.
+9. Publish `@zk-credits/shared@0.1.0`, `@zk-credits/x402-zk-prepaid@0.1.0`,
    and the breaking Base sidecar `zk-credits@0.2.0`, then pin those exact
    versions in the onboarding guide. Deliver
    `private-credit-spend-bn254-dev-sepolia-v1` artifacts directly through the
    invite channel and require operators to verify the shipped manifest hashes
    before proving.
+
+   The order is not optional. The sidecar's runtime dependencies are
+   checkout-local `file:` paths, so it cannot install from the registry until
+   the two leaves are public. Publish the leaves, then run
+   `npm run launch:rewrite-sidecar-deps` to replace those paths with the exact
+   published versions and regenerate the lockfile, then reinstall, build, test,
+   and install the packed tarball into a throwaway directory, commit the
+   dependency-only change, push it, and only then publish the sidecar. A new
+   package also publishes directly rather than staged, because npm staged
+   publishing only covers packages that already exist. If an existing registry
+   version's packed contents differ from this checkout's, stop and bump the
+   version: a consumed version can never be replaced.
+10. The activation path is rehearsed before the first real operator.
+    `scripts/launch-pilot.sh` is the single entrypoint: `--check` is a read-only
+    preflight over credentials, git, packages, the chain, and the providers;
+    `--status` reconciles local checkpoints against the providers; and no
+    argument starts or resumes from the last completed checkpoint. There is no
+    unattended confirmation flag and no flag that deletes a resource.
+
+    `npm run activation:rehearse` runs the founder half of the sequence with no
+    slot and no invite, so the orchestration is proved without consuming one of
+    the three operator slots; it refuses while any window is open, because extra
+    traffic during a window contaminates that slot's counters. Each real slot is
+    then opened with `npm run activation:start`, which prewarms, requires
+    `/ready`, records the baseline aggregate committed-claim count, and issues
+    exactly one invite; the operator's bundle is admitted only through
+    `npm run activation:evidence`, which validates it against the versioned
+    schema and privacy denylist and confirms the committed count increased
+    across the window. The commands refuse an operator secret or env path.
+
+    Slots are serialized: A qualifies before B opens, and B before C, because
+    the committed-claim comparison is between two aggregate integers and cannot
+    on its own distinguish one operator's traffic from another's.
+11. Each activation reports three snapshots of the operator sidecar's counters —
+    before the discarded warm-up, after it, and after the single counted
+    exchange — and qualification requires the warm-up and the counted exchange
+    to be exactly one clean lifecycle each. A cumulative total cannot tell a
+    warm-up from an activation, so a bundle whose warm-up was retried, whose
+    counted window absorbed a second exchange, or whose sidecar had already
+    served traffic is refused with a named reason rather than averaged in.
+12. The redacted evidence bundles carry aggregate counters only. The committed
+    artifacts are the three bundles, the aggregate summary, the deployed
+    addresses, the published versions, and the privacy-scan results: no
+    operator identity, invite or funding token, credential identifier,
+    remaining balance, request metadata, or spend-plane identifier.
 
 ## B11 verifier and adapter broadcast (executed 2026-09-21)
 

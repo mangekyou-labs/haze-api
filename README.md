@@ -76,6 +76,63 @@ cap, and exhausting either cap pauses the pilot for operator review. The exact
 limits, the release matrix, and the `Deploy Smoke` probes are recorded in
 `docs/ai/deployment/2026-09-18-feature-base-zk-credits.md`.
 
+## Provisioning and activating
+
+Two wizards cover the two planes, and neither crosses into the other:
+
+| Wizard | Runs on | Captures |
+| --- | --- | --- |
+| `scripts/launch-wizard.sh` | the founder's machine | infrastructure values into `.env.launch.local` |
+| `scripts/operator-wizard.sh` | each operator's machine | local values into `.env.operator.local` |
+
+Both source `scripts/launch-guardrails.sh`, which refuses operator variables in
+the launch env and deployer, sponsor, database, admin-token, and provider
+variables in the operator env, and refuses to write into a tracked, unignored,
+or world-readable file. `bash scripts/guardrails.test.sh` exercises those
+boundaries.
+
+The launch env is the only place infrastructure secrets live. The refund and
+treasury vault is configured **by address**; its private key is never supplied
+to a script. Each operator creates and keeps their own credential, password,
+and proving artifacts; the project team never handles them.
+
+## Activating an operator
+
+One slot per operator, assigned once:
+
+| Slot | Participant | Integration |
+| --- | --- | --- |
+| A | coding-agent operator | OpenAI-compatible sidecar |
+| B | existing x402-native agent | `@zk-credits/x402-zk-prepaid` adapter |
+| C | coding-agent operator | OpenAI-compatible sidecar |
+
+First, the launch env and published versions must already exist, then each
+operator runs their own wizard. The founder drives the four commands below: the
+first prewarms the free instance, requires a fully ready `/ready`, records the
+baseline aggregate committed-claim count, and issues exactly one invite. The
+last validates the operator's redacted bundle, re-reads the aggregate status,
+and confirms the committed count increased across the window — comparing two
+global integers, so no read creates an identifier join.
+
+```sh
+cd ts
+npm run activation:start    -- --slot A --github-id <github account id>
+npm run activation:assist   -- --slot A
+npm run activation:evidence -- --slot A --file <redacted bundle>
+npm run activation:status
+```
+
+The evidence bundle is a fixed vocabulary: an enum, a pinned version, an ISO
+timestamp, or a bounded integer. It has no field wide enough to hold a prompt,
+a response, a proof, a public signal, a nullifier, an invite or funding token,
+a credential identifier, an identity, a remaining balance, or a spend-plane
+identifier. `ts/activation-evidence.ts` holds the schema and the privacy
+denylist; only a bundle that validates may be committed.
+
+The two-week readout clock starts at the first qualifying activation. A failed
+or non-qualifying attempt is recorded as an aggregate failure and does not
+count toward the three.
+
 ## Local credential proxy
 
 The sidecar reads an encrypted browser export and generates the BN254 Groth16

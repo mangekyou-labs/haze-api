@@ -3,6 +3,20 @@ name: Deploy Smoke
 # Hosted health smoke for the Base Sepolia gateway and web app. It is safe to
 # schedule before deployment secrets exist: each probe is skipped when its URL
 # is not configured.
+#
+# The gateway runs on a free instance, so a suspended dyno answers the first
+# request with a transport error or a platform 5xx. Every positive probe goes
+# through `retry_curl`, which retries that cold start instead of reporting a
+# deployment defect.
+#
+# Two optional inputs tighten the run:
+#   vars.SMOKE_STRICT_READY      '1' requires /ready to answer 200 with every
+#                                check ok. Unset, a 503 is tolerated because
+#                                the launch may legitimately be paused.
+#   vars.BASE_DEPLOYMENT_BLOCK   requires the indexed block to be at or after
+#                                the recorded deployment block. Needs
+#                                secrets.BILLING_INTERNAL_TOKEN to read the
+#                                authenticated aggregate status.
 
 on:
   workflow_dispatch:
@@ -28,31 +42,109 @@ jobs:
     env:
       GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
       WEB_URL: ${{ secrets.WEB_URL }}
+      BILLING_INTERNAL_TOKEN: ${{ secrets.BILLING_INTERNAL_TOKEN }}
+      SMOKE_STRICT_READY: ${{ vars.SMOKE_STRICT_READY }}
+      BASE_DEPLOYMENT_BLOCK: ${{ vars.BASE_DEPLOYMENT_BLOCK }}
+      SMOKE_ATTEMPTS: ${{ vars.SMOKE_ATTEMPTS || '12' }}
+      SMOKE_RETRY_DELAY: ${{ vars.SMOKE_RETRY_DELAY || '5' }}
     steps:
+      - name: Prepare the cold-start probe helper
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/smoke.sh" <<'HELPER'
+          # Cold-start aware probe helper for a free-tier instance.
+          SMOKE_ATTEMPTS="${SMOKE_ATTEMPTS:-12}"
+          SMOKE_RETRY_DELAY="${SMOKE_RETRY_DELAY:-5}"
+
+          # retry_curl <curl args...> retries a transport error or an HTTP error
+          # status, which is how a suspended instance presents itself.
+          retry_curl() {
+            local attempt
+            for attempt in $(seq 1 "$SMOKE_ATTEMPTS"); do
+              if curl -sS --max-time 30 "$@"; then return 0; fi
+              echo "  attempt $attempt/$SMOKE_ATTEMPTS failed; retrying in ${SMOKE_RETRY_DELAY}s" >&2
+              sleep "$SMOKE_RETRY_DELAY"
+            done
+            echo "  probe failed after $SMOKE_ATTEMPTS attempts" >&2
+            return 1
+          }
+
+          # status_of <method> <url> prints only the HTTP status. Negative
+          # probes assert on the status, so this one does not retry.
+          status_of() {
+            local method="$1" url="$2"
+            shift 2
+            curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X "$method" "$@" "$url"
+          }
+          HELPER
+
       - name: Gateway health and readiness
         if: env.GATEWAY_URL != ''
         run: |
           set -euo pipefail
-          curl -fsS "$GATEWAY_URL/health" | grep -q '"status":"ok"'
-          # Readiness may legitimately report 503 while the launch is paused, so
-          # this probe asserts the route is mounted and answers with a report.
-          ready=$(curl -sS -w '\n%{http_code}' "$GATEWAY_URL/ready")
+          source "$RUNNER_TEMP/smoke.sh"
+          # This probe doubles as the prewarm for every later probe.
+          retry_curl -fsS "$GATEWAY_URL/health" | grep -q '"status":"ok"'
+
+          ready=$(retry_curl -sS -w '\n%{http_code}' "$GATEWAY_URL/ready")
           status=$(printf '%s' "$ready" | tail -n1)
           body=$(printf '%s' "$ready" | sed '$d')
           echo "GET /ready -> $status"
           test "$status" != "404"
           printf '%s' "$body" | grep -q '"launchControl"'
           printf '%s' "$body" | grep -q '"checks"'
+
+          if [ "${SMOKE_STRICT_READY:-0}" = "1" ]; then
+            echo "strict readiness is on: /ready must be 200 with every check ok"
+            test "$status" = "200"
+            printf '%s' "$body" | grep -q '"ready":true'
+            # Every reported check must be ok: a single false is a defect.
+            if printf '%s' "$body" | jq -e '[.checks[] | select(.ok != true)] | length == 0' >/dev/null; then
+              echo "all readiness checks ok"
+            else
+              echo "readiness reported failing checks:" >&2
+              printf '%s' "$body" | jq -r '.checks[] | select(.ok != true) | "  \(.name): \(.detail)"' >&2
+              exit 1
+            fi
+          else
+            echo "strict readiness is off; a 503 paused report is tolerated"
+          fi
+      - name: Gateway indexing starts at the recorded deployment block
+        if: env.GATEWAY_URL != '' && env.BILLING_INTERNAL_TOKEN != '' && env.BASE_DEPLOYMENT_BLOCK != ''
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
+          status=$(retry_curl -fsS -w '\n%{http_code}' \
+            -H "Authorization: Bearer $BILLING_INTERNAL_TOKEN" \
+            -H 'Accept: application/json' \
+            "$GATEWAY_URL/v1/admin/status")
+          code=$(printf '%s' "$status" | tail -n1)
+          body=$(printf '%s' "$status" | sed '$d')
+          echo "GET /v1/admin/status -> $code"
+          test "$code" = "200"
+          last=$(printf '%s' "$body" | jq -r '.base.lastScannedBlock // ""')
+          echo "deployment block: $BASE_DEPLOYMENT_BLOCK, last scanned block: ${last:-none}"
+          test -n "$last"
+          # The indexer must have reached the deployment block; scanning less
+          # means no BundleFunded event can be observed yet.
+          test "$last" -ge "$BASE_DEPLOYMENT_BLOCK"
       - name: Gateway supported schemes
         if: env.GATEWAY_URL != ''
-        run: curl -fsS "$GATEWAY_URL/x402/facilitator/supported" | grep -q 'zk-prepaid'
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
+          retry_curl -fsS "$GATEWAY_URL/x402/facilitator/supported" | grep -q 'zk-prepaid'
       - name: Web landing renders
         if: env.WEB_URL != ''
-        run: curl -fsS "$WEB_URL" | grep -q 'ZK API Credits'
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
+          retry_curl -fsS "$WEB_URL" | grep -q 'ZK API Credits'
       - name: Removed web payment routes return 404
         if: env.WEB_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           for probe in \
             "POST /api/checkout" \
             "POST /api/webhooks/stripe" \
@@ -60,7 +152,7 @@ jobs:
             "GET /api/wallet/link?address=0x0000000000000000000000000000000000000001"; do
             method="${probe%% *}"
             path="${probe#* }"
-            status=$(curl -sS -o /dev/null -w '%{http_code}' -X "$method" "$WEB_URL$path")
+            status=$(status_of "$method" "$WEB_URL$path")
             echo "$method $path -> $status"
             test "$status" = "404"
           done
@@ -68,6 +160,7 @@ jobs:
         if: env.GATEWAY_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           for probe in \
             "POST /v1/billing/orders" \
             "GET /v1/billing/orders/ord_000000000000" \
@@ -75,7 +168,7 @@ jobs:
             "POST /v1/accounts/wallet-link"; do
             method="${probe%% *}"
             path="${probe#* }"
-            status=$(curl -sS -o /dev/null -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL$path")
+            status=$(status_of "$method" "$GATEWAY_URL$path" -H 'Content-Type: application/json' -d '{}')
             echo "$method $path -> $status"
             test "$status" = "404"
           done
@@ -83,12 +176,13 @@ jobs:
         if: env.WEB_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           # Anonymous dashboard access must be gated by GitHub sign-in.
-          gated=$(curl -sS -o /dev/null -w '%{http_code}' "$WEB_URL/dashboard")
+          gated=$(status_of GET "$WEB_URL/dashboard")
           echo "anonymous GET /dashboard -> $gated"
           test "$gated" != "200"
           for path in /sign-in /onboarding /recover; do
-            body=$(curl -fsSL "$WEB_URL$path")
+            body=$(retry_curl -fsSL "$WEB_URL$path")
             echo "$path rendered"
             if printf '%s' "$body" | grep -qiE 'stripe|/api/checkout|buy credits|checkout\.sessions'; then
               echo "$path still advertises a checkout or payment path" >&2
@@ -99,6 +193,7 @@ jobs:
         if: env.GATEWAY_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           for probe in \
             "POST /v1/evaluation/enroll" \
             "GET /v1/evaluation/status" \
@@ -112,7 +207,7 @@ jobs:
             "GET /v1/api-keys"; do
             method="${probe%% *}"
             path="${probe#* }"
-            status=$(curl -sS -o /dev/null -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL$path")
+            status=$(status_of "$method" "$GATEWAY_URL$path" -H 'Content-Type: application/json' -d '{}')
             echo "$method $path -> $status"
             test "$status" = "404"
           done
@@ -120,6 +215,7 @@ jobs:
         if: env.GATEWAY_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           for path in \
             "/x402/exact/verify" \
             "/x402/exact/settle" \
@@ -128,28 +224,32 @@ jobs:
             "/x402/bazaar" \
             "/mcp" \
             "/v1/mcp"; do
-            status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL$path")
+            status=$(status_of POST "$GATEWAY_URL$path" -H 'Content-Type: application/json' -d '{}')
             echo "POST $path -> $status"
             test "$status" = "404"
           done
           # The only mutating facilitator operation is service-authenticated.
-          settle=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL/x402/facilitator/settle")
+          settle=$(status_of POST "$GATEWAY_URL/x402/facilitator/settle" -H 'Content-Type: application/json' -d '{}')
           echo "POST /x402/facilitator/settle -> $settle"
           test "$settle" = "401"
       - name: Unsupported OpenAI and Anthropic routes stay unavailable
         if: env.GATEWAY_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           # /v1/responses is recognised but never serves a paid path.
-          responses=$(curl -sS -D /tmp/responses.headers -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"model":"x","messages":[{"role":"user","content":"hi"}]}' "$GATEWAY_URL/v1/responses")
+          responses=$(curl -sS -D "$RUNNER_TEMP/responses.headers" -o /dev/null -w '%{http_code}' --max-time 30 \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"model":"x","messages":[{"role":"user","content":"hi"}]}' \
+            "$GATEWAY_URL/v1/responses")
           echo "POST /v1/responses -> $responses"
           test "$responses" = "400"
-          if grep -qi '^payment-required:' /tmp/responses.headers; then
+          if grep -qi '^payment-required:' "$RUNNER_TEMP/responses.headers"; then
             echo '/v1/responses advertised a payment challenge' >&2
             exit 1
           fi
           for path in "/v1/models" "/v1/messages" "/v1/embeddings"; do
-            status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL$path")
+            status=$(status_of POST "$GATEWAY_URL$path" -H 'Content-Type: application/json' -d '{}')
             echo "POST $path -> $status"
             test "$status" = "404"
           done
@@ -157,14 +257,15 @@ jobs:
         if: env.GATEWAY_URL != ''
         run: |
           set -euo pipefail
+          source "$RUNNER_TEMP/smoke.sh"
           # The routes exist when the gateway answers anything but 404. Invalid
           # input yields 400 and an unconfigured store yields 503; both prove
           # the route is mounted.
-          funding=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$GATEWAY_URL/v1/pilot/funding")
+          funding=$(status_of POST "$GATEWAY_URL/v1/pilot/funding" -H 'Content-Type: application/json' -d '{}')
           echo "POST /v1/pilot/funding -> $funding"
           test "$funding" != "404"
           # An unfunded but well-formed commitment legitimately answers 404, so
           # probe with a value the route can only reject when it is mounted.
-          bundle=$(curl -sS -o /dev/null -w '%{http_code}' "$GATEWAY_URL/v1/pilot/bundles/not-a-field")
+          bundle=$(status_of GET "$GATEWAY_URL/v1/pilot/bundles/not-a-field")
           echo "GET /v1/pilot/bundles/not-a-field -> $bundle"
           test "$bundle" = "400"

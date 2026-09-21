@@ -65,6 +65,19 @@ the rejected share equation.
   (invite, capsule, re-import, funding, activated), local-only recovery, sanitized
   Base Sepolia status. No checkout, order, webhook, wallet-link, or Stripe code.
 - `archive/stellar` plus historical evaluation migrations: reference only.
+- `scripts/launch-pilot.sh` plus `ts/launch-pilot.ts` and `ts/launch/`: the
+  resumable launch system. `ts/launch/cli.ts` holds the ordered plan and the
+  runner, `state.ts` the checkpoint file and its secret-free boundary, and
+  `environment.ts`, `providers.ts`, `release.ts`, `deploy.ts`, and `redact.ts`
+  the validation, provider reconciliation, publish sequencing, broadcast
+  reconciliation, and output redaction. `ts/launch/rewrite-sidecar-deps.ts` is
+  the one point where the sidecar stops being buildable from the checkout alone.
+- `scripts/launch-guardrails.sh`, `scripts/launch-wizard.sh`,
+  `scripts/operator-wizard.sh`, and `scripts/operator-evidence.mjs`: the shared
+  secret boundary, the two human wizards, and the operator-side counter
+  measurement and local checks. `scripts/guardrails.test.sh` and
+  `scripts/operator-evidence.test.mjs` cover them without a TypeScript
+  toolchain, because the operator machine has none.
 
 ## Invite-only unpaid onboarding (B9)
 
@@ -254,17 +267,17 @@ outside the class is rejected before a credit is reserved:
 - streaming, model fallback lists, client routing, transforms, plugins, web
   search, media, audio, non-function tools, legacy `functions`, reasoning
   controls, service tiers, and any unknown field are refused by name;
-- the parser caps the body at 256 KiB, the counter caps input at 16,000
-  conservative token units, and output is capped at 4,000 tokens;
+- the parser caps the body at 256 KiB, the counter caps input at 16,000 UTF-8
+  bytes of text and tool payload, and output is capped at 4,000 tokens;
 - every dispatch carries `provider.max_price` of $0.90 per million input and
   $1.80 per million output tokens with `allow_fallbacks: false` and
   `require_parameters: true`, and the upstream timeout is 120 seconds.
 
 The input ceiling counts UTF-8 bytes rather than model tokens: the gateway
 cannot run the provider tokenizer before reserving a credit, and a byte-level
-BPE never emits more than one token per byte, so an accepted body always holds
-at most 16,000 real tokens. The counter is deliberately stricter than the
-provider's own count and can never under-count.
+BPE never emits more than one token per byte, so an accepted body of at most
+16,000 UTF-8 bytes always holds at most 16,000 real tokens. The counter is
+deliberately stricter than the provider's own count and can never under-count.
 
 ## Launch controls (B22)
 
@@ -293,6 +306,103 @@ The kill switch blocks invite redemption, detached funding, and new inference.
 It preserves `/health`, `/ready`, `/v1/contract-status`, the public bundle
 lookup, the committed-claim replay, and the authenticated admin commands, so
 recovery stays reachable during an incident.
+
+## Resumable launch system (B22)
+
+The launch crosses three irreversible boundaries — three npm publishes, a
+contract broadcast, and three operator activations — so its tooling is built so
+that an interruption anywhere is recoverable and nothing is ever repeated
+blindly.
+
+`scripts/launch-pilot.sh` is the single entrypoint and `ts/launch/cli.ts` is the
+state machine behind it. The shell layer resolves the protected founder env file
+and refuses a shell that already carries an operator variable; ordering,
+checkpoints, and reconciliation live in TypeScript where they are covered by
+tests. The modes are `--check` (read-only preflight over credentials, git,
+packages, the chain, and the providers), `--status` (read-only reconciliation of
+local checkpoints against the providers), and no argument (start or resume).
+There is no unattended confirmation flag and no flag that deletes a resource.
+
+The plan is 26 ordered steps across the plan's stages. Six are irreversible and
+every one of those stops and asks.
+
+`.launch-state.local.json` is the launch's memory and nothing else: for each step
+a status, a timestamp, and secret-free detail. Two properties make it
+trustworthy. It refuses to persist anything secret-shaped, so it can be read,
+diffed, and pasted safely, and it has an `unknown` status distinct from
+`failed`. `unknown` is what a non-idempotent call that timed out becomes, and an
+unresolved `unknown` stops the run until reconciliation resolves it — the whole
+point being that a timed-out broadcast or publish may already have happened.
+
+`ts/launch/environment.ts` holds the protected founder environment. Requirements
+are staged, so a preflight before the npm release does not demand a Vercel token
+that cannot exist yet, and the GitHub OAuth pair is deferred until the deployed
+web host has produced the real callback URL. Custody keys and operator secrets
+are refused outright rather than ignored: the launch holds addresses and a
+bounded hot sponsor key, never custody. The three operator GitHub ids must be
+numeric and pairwise distinct, so a slot cannot be double-counted.
+
+`ts/launch/providers.ts` makes a retry safe. Every external resource is created
+under a deterministic name, and an exact-name lookup decides the outcome: none
+means create, exactly one means adopt after verifying the configuration matches
+the intent, and several means stop and list them, because choosing between two
+real resources is not a decision a script may make. A transport timeout is
+reported as a timeout rather than a failure, which is what lets the runner
+record `unknown` instead of retrying blind.
+
+`ts/launch/release.ts` encodes the publish order as checks. The sidecar's runtime
+dependencies are checkout-local `file:` paths, so it cannot install from the
+registry until the two leaves are public; the rewrite to exact versions, the
+lockfile regeneration, the tarball install, and the dependency-only commit are
+steps *between* the two publish groups rather than part of either. An existing
+registry version whose packed contents differ from this checkout stops the
+release rather than being overwritten.
+
+`ts/launch/deploy.ts` writes the broadcast intent down before sending it — the
+signer, the nonce, and the CREATE address that pair implies — so a resumed run
+compares against a prediction instead of a log line. Bytecode at the predicted
+address confirms a deployment whose hash was never recorded, a receipt at a
+different address or a reverted receipt is a hard stop, and neither means a
+retry is safe. The runtime sponsor's USDC approval is bounded to 80 test USDC.
+
+### Activation measurement
+
+`ts/activation-evidence.ts` schema version 2 replaces the single cumulative
+exchange and proving totals with three snapshots of the operator sidecar's
+authenticated loopback counters: before the discarded warm-up, after it, and
+after the counted exchange. Every exchange counter, proving counter, and failure
+category is derived as a delta between two of them.
+
+A cumulative total cannot distinguish a warm-up from an activation, which is why
+qualification now requires a fresh sidecar, exactly one successful cold warm-up
+before the baseline, and exactly one successful counted exchange after it. The
+hot-prove sample count separates the two windows: the first prove in a process
+is the cold sample, so a clean warm-up leaves it at zero and the counted
+exchange raises it to one. Contaminated evidence still records as a failure, but
+it cannot qualify, and the reason names the contamination.
+
+`activation-rehearse` runs the founder half of the sequence with no slot and no
+invite, so the orchestration is proved against a real deployment without
+consuming one of the three operator slots. It refuses while any window is open,
+because extra traffic during a window contaminates that slot's counters, and the
+committed-claim comparison is between two aggregate integers that cannot on
+their own tell one operator's traffic from another's.
+
+## Staging-only caps
+
+The spend caps are the pilot's economic promise, so they are frozen constants
+and nothing in the environment can widen them. The one exception exists so the
+cap-exhaustion path can be exercised without spending real budget:
+`PILOT_ENVIRONMENT=staging` plus `PILOT_STAGING_DAILY_CAP_MICRO_USD` and
+`PILOT_STAGING_ROLLING_CAP_MICRO_USD` in `ts/launch-environment.ts`.
+
+The seam is narrow by construction. The overrides are read only when the
+environment is exactly `staging`; they may only narrow the fixed ceiling; and a
+deployment that is not staging **refuses to start** when either one is present
+rather than ignoring it, so a production service cannot run on a staging cap.
+The effective pair is reported by `/v1/admin/status`, which is how production is
+confirmed to hold `40000000` / `200000000` micro-USD and staging is confirmed to
+hold the narrowed pair.
 
 ## Monitoring surface (B22)
 

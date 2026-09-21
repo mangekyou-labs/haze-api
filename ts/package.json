@@ -13,7 +13,13 @@
     "invite:revoke": "tsx pilot-admin.ts revoke-invite",
     "launch:status": "tsx pilot-admin.ts launch-status",
     "launch:pause": "tsx pilot-admin.ts launch-pause",
-    "launch:resume": "tsx pilot-admin.ts launch-resume"
+    "launch:resume": "tsx pilot-admin.ts launch-resume",
+    "activation:start": "tsx pilot-admin.ts activation-start",
+    "activation:rehearse": "tsx pilot-admin.ts activation-rehearse",
+    "activation:assist": "tsx pilot-admin.ts activation-assist",
+    "activation:evidence": "tsx pilot-admin.ts activation-evidence",
+    "activation:status": "tsx pilot-admin.ts activation-status",
+    "launch:rewrite-sidecar-deps": "tsx launch/rewrite-sidecar-deps.ts"
   },
   "keywords": [],
   "author": "",

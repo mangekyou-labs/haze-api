@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { encodeHeader, PAYMENT_RESPONSE_HEADER } from '@zk-credits/x402-zk-prepaid';
+import { createZkPrepaidLifecycleMetrics, encodeHeader, PAYMENT_RESPONSE_HEADER } from '@zk-credits/x402-zk-prepaid';
 import { createBaseProofMetrics } from './proof-metrics.js';
-import { createSidecarServer } from './sidecar.js';
+import { createSidecarServer, type SidecarMetricsSnapshot } from './sidecar.js';
 
 const localToken = 'zk-local-test-token';
 
 async function startTestSidecar(
   fetcher: (input: string, init?: RequestInit) => Promise<Response>,
-  metrics?: () => ReturnType<ReturnType<typeof createBaseProofMetrics>['snapshot']>,
+  metrics?: () => SidecarMetricsSnapshot,
 ) {
   const sidecar = createSidecarServer({
     localToken,
@@ -133,20 +133,30 @@ describe('loopback x402 sidecar', () => {
   });
 
   it('requires the local token for the aggregate metrics snapshot', async () => {
-    const metrics = createBaseProofMetrics({ now: () => 0 });
-    metrics.recordAttempt({ outcome: 'success', durationMs: 1200 });
-    metrics.recordAttempt({ outcome: 'failure', durationMs: 9000, category: 'timeout' });
-    metrics.recordRetry();
+    const proofMetrics = createBaseProofMetrics({ now: () => 0 });
+    proofMetrics.recordAttempt({ outcome: 'success', durationMs: 1200 });
+    proofMetrics.recordAttempt({ outcome: 'failure', durationMs: 9000, category: 'timeout' });
+    proofMetrics.recordRetry();
+    const exchangeMetrics = createZkPrepaidLifecycleMetrics({ now: () => 0 });
+    exchangeMetrics.observe({ type: 'stage', stage: 'challenge_received' });
+    exchangeMetrics.observe({ type: 'stage', stage: 'payment_prepared' });
+    exchangeMetrics.observe({ type: 'stage', stage: 'settlement_confirmed' });
+    exchangeMetrics.observe({ type: 'stage', stage: 'exchange_succeeded' });
+    exchangeMetrics.observe({ type: 'failure', failure: 'challenge_stale' });
     const fetcher = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>();
-    const { address, sidecar } = await startTestSidecar(fetcher, () => metrics.snapshot());
+    const { address, sidecar } = await startTestSidecar(fetcher, () => ({
+      ...proofMetrics.snapshot(),
+      exchange: exchangeMetrics.snapshot(),
+    }));
     try {
       expect((await fetch(`${address}/metrics`)).status).toBe(401);
       const response = await fetch(`${address}/metrics`, { headers: { Authorization: `Bearer ${localToken}` } });
       expect(response.status).toBe(200);
       const body = await response.json() as Record<string, unknown>;
-      expect(body).toEqual(metrics.snapshot());
+      expect(body).toEqual({ ...proofMetrics.snapshot(), exchange: exchangeMetrics.snapshot() });
       expect(Object.keys(body).sort()).toEqual([
         'attempts',
+        'exchange',
         'failures',
         'failuresByCategory',
         'hotProve',
@@ -160,6 +170,14 @@ describe('loopback x402 sidecar', () => {
         failures: 1,
         retries: 1,
         hotProve: { samples: 1, p50Ms: 9000, p95Ms: 9000 },
+        exchange: {
+          challengesReceived: 1,
+          paymentsPrepared: 1,
+          settlementsConfirmed: 1,
+          exchangeSuccesses: 1,
+          failures: 1,
+          failuresByCategory: { challenge_stale: 1 },
+        },
       });
       expect(JSON.stringify(body)).not.toMatch(/nullifier|nonce|responseKey|commitment|secret|wallet|account/i);
       expect(JSON.stringify(body)).not.toMatch(/\d{20,}/u);

@@ -45,9 +45,9 @@ the credit:
 - text messages, tool definitions, and tool calls, with one generated choice;
 - no streaming, images, files, audio, web plugins, model fallback,
   client-selected routing, or unknown cost-affecting fields;
-- input capped at 16,000 conservative token units, output at 4,000 tokens,
-  request body at 256 KiB, encrypted replay at 1 MiB, and upstream timeout at
-  120 seconds.
+- input capped at 16,000 UTF-8 bytes (counted conservatively, never below the
+  provider's token count), output at 4,000 tokens, request body at 256 KiB,
+  encrypted replay at 1 MiB, and upstream timeout at 120 seconds.
 
 The requested `model` field is ignored: the gateway always dispatches the
 class model, so an OpenAI-compatible client configured with any model name

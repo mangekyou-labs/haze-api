@@ -7,9 +7,17 @@
  *   npm run launch:status
  *   npm run launch:pause -- --reason <text>
  *   npm run launch:resume
+ *   npm run activation:start -- --slot A --github-id <id>
+ *   npm run activation:rehearse
+ *   npm run activation:assist -- --slot A
+ *   npm run activation:evidence -- --slot A --file <bundle.json>
+ *   npm run activation:status
  *
  * The issue command prints the plaintext code exactly once. Only its SHA-256
  * digest is durable, so a lost code is replaced, never recovered.
+ *
+ * The activation commands never accept an operator secret or an operator env
+ * path: the ownership boundary is enforced in `activation.ts`.
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -21,10 +29,18 @@ import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
 import { PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
 import { LaunchControl, PostgresLaunchControlStore } from './launch-control.js';
 import { createBaseBondSponsor } from './base-chain.js';
+import {
+  PostgresActivationLedger,
+  createActivationProbe,
+  runActivationCommand,
+  type ActivationDependencies,
+} from './activation.js';
 
 export interface PilotAdminDependencies {
   invites: PilotInviteService;
   launchControl: LaunchControl;
+  /** Required only for the `activation-*` commands. */
+  activation?: ActivationDependencies;
 }
 
 const USAGE = `usage:
@@ -33,7 +49,12 @@ const USAGE = `usage:
   invite:revoke -- <inviteId>
   launch:status
   launch:pause -- --reason <text>
-  launch:resume`;
+  launch:resume
+  activation:start -- --slot <A|B|C> --github-id <github account id>
+  activation:rehearse
+  activation:assist -- --slot <A|B|C>
+  activation:evidence -- --slot <A|B|C> --file <redacted bundle path>
+  activation:status`;
 
 function readFlag(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(`--${name}`);
@@ -52,6 +73,12 @@ function requirePositional(args: readonly string[], label: string): string {
 /** Runs one founder command and returns the text to print. */
 export async function runPilotAdmin(args: readonly string[], dependencies: PilotAdminDependencies): Promise<string> {
   const [command, ...rest] = args;
+
+  if (command?.startsWith('activation-')) {
+    if (!dependencies.activation) throw new Error('activation commands require a configured activation ledger and gateway');
+    return runActivationCommand([command, ...rest], dependencies.activation);
+  }
+
   if (command === 'issue-invite') {
     const githubAccountId = readFlag(rest, 'github-id');
     if (!githubAccountId) throw new Error('--github-id is required');
@@ -148,7 +175,19 @@ async function main(): Promise<void> {
       capabilities: capabilityIssuerFor(pool),
     });
     const launchControl = new LaunchControl({ store: new PostgresLaunchControlStore(pool) });
-    console.log(await runPilotAdmin(process.argv.slice(2), { invites, launchControl }));
+    console.log(await runPilotAdmin(process.argv.slice(2), {
+      invites,
+      launchControl,
+      activation: {
+        ledger: new PostgresActivationLedger(pool),
+        probe: createActivationProbe({
+          gatewayUrl: process.env.PUBLIC_GATEWAY_URL ?? 'http://127.0.0.1:3001',
+          adminToken: process.env.BILLING_INTERNAL_TOKEN ?? '',
+        }),
+        issueInvite: (githubAccountId) => invites.issue({ githubAccountId }),
+        revokeInvite: (inviteId) => invites.revoke(inviteId),
+      },
+    }));
   } finally {
     await pool.end();
   }

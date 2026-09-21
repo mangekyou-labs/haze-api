@@ -14,6 +14,7 @@ import { createBasePrepaidClient, createFileWitnessProvider } from './base-sidec
 import { createBaseEventWitnessProvider } from './base-event-sync.js';
 import { createPinnedBaseProofGenerator } from './proof-coordinator.js';
 import { createBaseProofMetrics } from './proof-metrics.js';
+import { createZkPrepaidLifecycleMetrics } from '@zk-credits/x402-zk-prepaid';
 import { BaseSlotLedger } from './slot-ledger.js';
 import { decryptAnyCredentialExport, type CreditCredential } from '@zk-credits/shared/base';
 import { runCliCommand } from './cli-runtime.js';
@@ -139,21 +140,23 @@ async function serve(args: readonly string[]): Promise<void> {
           cachePath: join(stateDirectory(), 'base-event-sync.json'),
         })
       : (() => { throw new Error('Set ZK_CREDITS_WITNESS_PATH or configure BASE_RPC_URL and BASE_PRIVATE_CREDIT_BOND_ADDRESS'); })();
-  const metrics = createBaseProofMetrics();
+  const proofMetrics = createBaseProofMetrics();
+  const exchangeMetrics = createZkPrepaidLifecycleMetrics();
   const slotLedger = await BaseSlotLedger.open({ path: join(stateDirectory(), 'base-slots.json') });
-  const prove = await createPinnedBaseProofGenerator({ artifactDirectory, metrics });
+  const prove = await createPinnedBaseProofGenerator({ artifactDirectory, metrics: proofMetrics });
   const prepaid = createBasePrepaidClient({
     credential,
     witnessProvider: witness,
     prove,
     slotLedger,
+    lifecycle: exchangeMetrics.observe,
   });
   const gatewayBaseUrl = process.env.ZK_CREDITS_GATEWAY_URL || 'http://127.0.0.1:3001';
   const sidecar = createSidecarServer({
     localToken,
     gatewayBaseUrl,
     prepaidClient: prepaid.client,
-    metrics: () => metrics.snapshot(),
+    metrics: () => ({ ...proofMetrics.snapshot(), exchange: exchangeMetrics.snapshot() }),
   });
   let address: string;
   try {

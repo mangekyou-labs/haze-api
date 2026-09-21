@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# Launch state. Secret-free, but it names provider resources and records which
+# irreversible steps already ran, so it stays local like the env file.
+.launch-state.local.json
+
 # Node
 node_modules/
 

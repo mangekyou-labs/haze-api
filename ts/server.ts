@@ -18,6 +18,7 @@ import { createBasePublicClient } from './base-chain.js';
 import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
 import { PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
 import { LaunchControl, PostgresLaunchControlStore, MemoryLaunchControlStore } from './launch-control.js';
+import { resolveSpendCaps } from './launch-environment.js';
 import { LaunchMetrics } from './metrics.js';
 import type { Pool } from 'pg';
 
@@ -89,8 +90,13 @@ const pilotInvites = pool && pilotFunding
 
 // The launch controls are durable whenever Postgres is configured: the manual
 // kill switch and the micro-USD provider-spend caps must survive a restart.
+//
+// Caps resolve once, at startup. A deployment that is not explicitly staging
+// refuses a staging override here rather than booting with a ceiling nobody
+// intended, so a production service can never run on a staging cap.
+const spendCaps = resolveSpendCaps();
 const launchControl = new LaunchControl({
-  store: pool ? new PostgresLaunchControlStore(pool) : new MemoryLaunchControlStore(),
+  store: pool ? new PostgresLaunchControlStore(pool, spendCaps) : new MemoryLaunchControlStore({ caps: spendCaps }),
 });
 const metrics = new LaunchMetrics();
 const basePublicClient = process.env.BASE_RPC_URL ? createBasePublicClient() : undefined;

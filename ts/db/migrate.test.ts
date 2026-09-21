@@ -168,6 +168,27 @@ describe('migrations (offline, static)', () => {
     // 30-minute detached capability, seven-day invite default are enforced in code.
     expect(invites).toMatch(/expires_at\s+TIMESTAMPTZ NOT NULL/i);
   });
+
+  it('activation window migration holds no operator identity or spend-plane join', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0017_activation_windows.sql'), 'utf8');
+    const ddl = sql.replace(/--[^\n]*/gu, '');
+    expect(ddl).toMatch(/CREATE TABLE IF NOT EXISTS control_plane\.activation_windows/i);
+    expect(ddl).toMatch(/slot\s+TEXT PRIMARY KEY CHECK \(slot IN \('A', 'B', 'C'\)\)/i);
+    expect(ddl).toMatch(/evidence_digest\s+TEXT CHECK \(evidence_digest IS NULL OR evidence_digest ~ '\^\[0-9a-f\]\{64\}\$'\)/i);
+
+    // The deterministic cohort assignment is a database constraint.
+    expect(ddl).toMatch(/activation_windows_slot_assignment_check/i);
+    expect(ddl).toMatch(/slot IN \('A', 'C'\) AND participant_type = 'coding_agent' AND integration_mode = 'openai_compatible_sidecar'/i);
+    expect(ddl).toMatch(/slot = 'B' AND participant_type = 'x402_native_agent' AND integration_mode = 'x402_zk_prepaid_adapter'/i);
+
+    // No identity, invite code, credential, or spend-plane column may exist.
+    expect(ddl).not.toMatch(/github|account_id|email|login/i);
+    expect(ddl).not.toMatch(/commitment|nullifier|request_signal|proof|credential_secret/i);
+    expect(ddl).not.toMatch(/code_hash|token_hash|plaintext/i);
+    // The only invite column is the opaque handle, never the redeemable code.
+    expect(ddl).toMatch(/invite_id\s+TEXT NOT NULL/i);
+    expect(ddl).not.toMatch(/invite_code/i);
+  });
 });
 
 describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', () => {
