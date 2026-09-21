@@ -319,8 +319,11 @@ New focused suites, all from `ts/`:
 | `launch-control.integration.test.ts` | 9 | real Postgres: serialized cap enforcement across two pools, restart persistence, database-clock UTC and rolling windows, released-debit exclusion, column-level privacy assertion |
 
 Full gateway suite with `RUN_DB_TESTS=1` against `postgres://localhost:5432/zk_credits_test`:
-22 files, **180 passed, 0 failed**, of which 17 are Postgres integration tests.
-`npm run typecheck` exits 0.
+22 files, **180 passed, 0 failed**. Of those, 21 tests across four files
+require Postgres and are skipped without the flag; `db/migrate.test.ts` carries
+one unrelated unconditional skip. Without the flag the suite reports 158 passed
+and 22 skipped, so a green local run that omits `RUN_DB_TESTS=1` has not
+exercised the durable launch controls at all. `npm run typecheck` exits 0.
 
 Live verification against a booted gateway (`NODE_ENV=production`, managed
 Postgres, stub verifying key) on 2026-09-21:
