@@ -34,7 +34,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@zk-credits/shared": "file:../zk-credits-shared",
+    "@zk-credits/shared": "0.1.0",
     "@zk-credits/x402-zk-prepaid": "0.1.0",
     "snarkjs": "^0.7.6",
     "viem": "^2.54.0"
