@@ -218,13 +218,20 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/gu, `'\\''`)}'`;
 }
 
+function dotenvCommand(envPath: string, command: string): string {
+  return [
+    `dotenv -f ${shellQuote(envPath)} run -- sh -c`,
+    shellQuote(command),
+  ].join(' ');
+}
+
 function broadcastCommand(context: LaunchContext, resume = false): string {
   const envPath = context.envPath ?? LAUNCH_ENV_PATH;
   const suffix = resume ? ' --resume' : '';
-  return [
-    `dotenv -e ${shellQuote(envPath)} -- sh -c`,
-    shellQuote(`cd contracts && forge script ${DEPLOY_SCRIPT} --account "$BASE_DEPLOYER_KEYSTORE_ACCOUNT" --password-file "$BASE_DEPLOYER_PASSWORD_FILE" --rpc-url "$BASE_RPC_URL" --broadcast${suffix}`),
-  ].join(' ');
+  return dotenvCommand(
+    envPath,
+    `cd contracts && forge script ${DEPLOY_SCRIPT} --account "$BASE_DEPLOYER_KEYSTORE_ACCOUNT" --password-file "$BASE_DEPLOYER_PASSWORD_FILE" --rpc-url "$BASE_RPC_URL" --broadcast${suffix}`,
+  );
 }
 
 async function commandQuantity(context: LaunchContext, command: string, args: string[], label: string): Promise<bigint> {
@@ -704,8 +711,10 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         const addresses = [detail.poseidonT2, detail.poseidonT3, detail.poseidonT4, detail.bond]
           .filter((value): value is string => typeof value === 'string');
         if (addresses.length !== 4) return { status: 'failed', note: 'deployment outputs are missing; cannot prepare explorer verification' };
-        context.print('    dotenv -e ' + shellQuote(context.envPath ?? LAUNCH_ENV_PATH) + ' -- sh -c ' +
-          "'forge verify-contract --verifier-url \"https://api-sepolia.basescan.org/api\" --etherscan-api-key \"$BASESCAN_API_KEY\" <address> <contract>'");
+        context.print('    ' + dotenvCommand(
+          context.envPath ?? LAUNCH_ENV_PATH,
+          'forge verify-contract --verifier-url "https://api-sepolia.basescan.org/api" --etherscan-api-key "$BASESCAN_API_KEY" <address> <contract>',
+        ));
         if (!await context.confirm('Has explorer verification been completed for all four contracts?')) {
           return { status: 'skipped', note: 'explorer verification deferred; deployment remains preserved' };
         }

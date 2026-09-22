@@ -388,6 +388,9 @@ describe('the plan', () => {
     });
     const output = printed.join('\n');
     expect(output).toContain('no-broadcast simulation succeeded; no transaction was sent');
+    expect(output).toContain('dotenv -f ');
+    expect(output).toContain(' run -- sh -c ');
+    expect(output).not.toContain('dotenv -e ');
     expect(output).toContain('--broadcast');
     expect(output).toContain('resolved sponsor address');
     expect(output).not.toContain(COMPLETE_ENV.BASE_SPONSOR_PRIVATE_KEY);
