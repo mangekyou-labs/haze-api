@@ -234,9 +234,17 @@ export interface RenderServicePayload {
   repo: string;
   branch: string;
   autoDeploy: 'no';
-  region: string;
-  plan: 'free';
-  healthCheckPath: string;
+  serviceDetails: {
+    runtime: 'docker';
+    region: string;
+    plan: 'free';
+    healthCheckPath: string;
+    envSpecificDetails: {
+      dockerCommand: string;
+      dockerContext: string;
+      dockerfilePath: string;
+    };
+  };
   envVars: { key: string; sync: boolean; value?: string }[];
 }
 
@@ -261,9 +269,17 @@ export function renderCreateServicePayload(options: {
     repo: options.repo,
     branch: options.branch,
     autoDeploy: 'no',
-    region: PILOT_RENDER_REGION,
-    plan: 'free',
-    healthCheckPath: options.healthCheckPath ?? '/health',
+    serviceDetails: {
+      runtime: 'docker',
+      region: PILOT_RENDER_REGION,
+      plan: 'free',
+      healthCheckPath: options.healthCheckPath ?? '/health',
+      envSpecificDetails: {
+        dockerCommand: '',
+        dockerContext: '.',
+        dockerfilePath: './ts/Dockerfile',
+      },
+    },
     envVars: [
       ...Object.entries(options.plainEnv ?? {}).map(([key, value]) => ({ key, value, sync: false })),
       ...(options.secretKeys ?? []).map((key) => ({ key, sync: false })),
@@ -417,8 +433,10 @@ export interface RenderAdapterOptions {
   plainEnv?: Record<string, string>;
 }
 
-interface RenderServiceEnvelope {
-  service: RenderServiceRecord;
+type RenderServiceResponse = RenderServiceRecord | { service: RenderServiceRecord };
+
+function renderServiceFromResponse(body: RenderServiceResponse): RenderServiceRecord {
+  return 'service' in body ? body.service : body;
 }
 
 export function renderServiceAdapter(options: RenderAdapterOptions): ResourceAdapter<RenderServiceRecord> {
@@ -427,12 +445,12 @@ export function renderServiceAdapter(options: RenderAdapterOptions): ResourceAda
   const healthCheckPath = options.healthCheckPath ?? '/health';
 
   const list = async (): Promise<RenderServiceRecord[]> => {
-    const body = await call<RenderServiceEnvelope[]>({
+    const body = await call<RenderServiceResponse[]>({
       method: 'GET',
       url: `${RENDER_API_BASE}/services?name=${encodeURIComponent(name)}&limit=100`,
     });
     return (Array.isArray(body) ? body : [])
-      .map((entry) => entry?.service)
+      .map((entry) => (entry && typeof entry === 'object' && 'service' in entry ? entry.service : entry))
       .filter((service): service is RenderServiceRecord => Boolean(service) && service.name === name);
   };
 
@@ -442,7 +460,7 @@ export function renderServiceAdapter(options: RenderAdapterOptions): ResourceAda
     idOf: (service) => service.id,
     identify: (service) => `${service.name} (${service.id})`,
     async create() {
-      const body = await call<RenderServiceEnvelope>({
+      const body = await call<RenderServiceResponse>({
         method: 'POST',
         url: `${RENDER_API_BASE}/services`,
         body: renderCreateServicePayload({
@@ -455,7 +473,7 @@ export function renderServiceAdapter(options: RenderAdapterOptions): ResourceAda
           ...(options.plainEnv === undefined ? {} : { plainEnv: options.plainEnv }),
         }),
       });
-      return body.service;
+      return renderServiceFromResponse(body);
     },
     verify: (service) => {
       const details = service.serviceDetails ?? {};

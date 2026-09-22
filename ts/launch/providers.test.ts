@@ -184,10 +184,14 @@ describe('provider payloads', () => {
       plainEnv: { NODE_ENV: 'production' },
     });
 
-    expect(payload.plan).toBe('free');
-    expect(payload.region).toBe(PILOT_RENDER_REGION);
+    expect(payload.serviceDetails.plan).toBe('free');
+    expect(payload.serviceDetails.region).toBe(PILOT_RENDER_REGION);
     expect(payload.autoDeploy).toBe('no');
-    expect(payload.healthCheckPath).toBe('/health');
+    expect(payload.serviceDetails.healthCheckPath).toBe('/health');
+    expect(payload.serviceDetails).toMatchObject({
+      runtime: 'docker',
+      envSpecificDetails: { dockerContext: '.', dockerfilePath: './ts/Dockerfile' },
+    });
     // A secret is declared, never valued.
     expect(payload.envVars.filter((variable) => variable.sync === false)).toHaveLength(4);
     expect(payload.envVars.find((variable) => variable.key === 'DATABASE_URL')?.value).toBeUndefined();
@@ -290,8 +294,13 @@ describe('live provider adapters', () => {
     }));
     expect(resolution).toMatchObject({ kind: 'created', detail: { serviceId: 'srv_1', plan: 'free', region: PILOT_RENDER_REGION } });
 
-    const body = stub.requests.find((request) => request.method === 'POST')!.body as { envVars: { key: string; value?: string }[]; plan: string };
-    expect(body.plan).toBe('free');
+    const body = stub.requests.find((request) => request.method === 'POST')!.body as {
+      envVars: { key: string; value?: string }[];
+      serviceDetails: { plan: string; runtime: string; envSpecificDetails: { dockerfilePath: string } };
+    };
+    expect(body.serviceDetails.plan).toBe('free');
+    expect(body.serviceDetails.runtime).toBe('docker');
+    expect(body.serviceDetails.envSpecificDetails.dockerfilePath).toBe('./ts/Dockerfile');
     expect(body.envVars.find((variable) => variable.key === 'DATABASE_URL')?.value).toBeUndefined();
   });
 
