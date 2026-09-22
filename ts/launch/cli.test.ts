@@ -184,7 +184,7 @@ async function harness(options: {
   /** Overrides the fake chain for artifact and immutable reconciliation cases. */
   chain?: (rpcUrl: string) => ChainReader;
 } = {}): Promise<Harness> {
-  const { statePath, envPath, passwordFile } = await sandbox();
+  const { directory, statePath, envPath, passwordFile } = await sandbox();
   const printed: string[] = [];
   const commands: string[] = [];
   const confirmed: string[] = [];
@@ -201,6 +201,7 @@ async function harness(options: {
   const context: LaunchContext = {
     env,
     state,
+    repoRoot: directory,
     envPath,
     print: (line) => printed.push(line),
     async confirm(question) {
@@ -409,6 +410,20 @@ describe('the plan', () => {
     expect(result.status).toBe('unknown');
     expect(result.note).toMatch(/present but unreadable/u);
     expect(printed.join('\n')).not.toContain(' --broadcast');
+  });
+
+  it('resolves a relative deployment artifact from the repository root', async () => {
+    const { context } = await harness({ confirm: false });
+    const artifactPath = 'relative-run-latest.json';
+    await writeFile(join(dirname(context.envPath!), artifactPath), '{ not valid json', { mode: 0o600 });
+    context.env.BASE_DEPLOYMENT_ARTIFACT = artifactPath;
+
+    const deployment = buildLaunchPlan(COMPLETE_ENV).find((step) => step.name === 'deploy:contracts');
+    expect(deployment).toBeDefined();
+    const result = await deployment!.execute(context);
+
+    expect(result.status).toBe('unknown');
+    expect(result.note).toMatch(/present but unreadable/u);
   });
 
   it('retries explorer verification without changing reconciled deployment outputs', async () => {

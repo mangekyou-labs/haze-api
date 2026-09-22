@@ -101,6 +101,8 @@ export interface CommandResult {
 export interface LaunchContext {
   env: Record<string, string>;
   state: LaunchStateStore;
+  /** Absolute repository root used to resolve repository-relative artifacts. */
+  repoRoot: string;
   /** The protected env file a step may add generated values to. */
   envPath?: string;
   /**
@@ -177,7 +179,8 @@ const DEPLOY_SCRIPT = 'script/DeployBaseSepolia.s.sol:DeployBaseSepolia';
 const DEPLOY_ARTIFACT_PATH = 'contracts/broadcast/DeployBaseSepolia.s.sol/84532/run-latest.json';
 
 function deploymentArtifactPath(context: LaunchContext): string {
-  return context.env.BASE_DEPLOYMENT_ARTIFACT ?? DEPLOY_ARTIFACT_PATH;
+  const configured = context.env.BASE_DEPLOYMENT_ARTIFACT ?? DEPLOY_ARTIFACT_PATH;
+  return isAbsolute(configured) ? configured : resolve(context.repoRoot, configured);
 }
 
 function deployedCode(code: string): boolean {
@@ -1108,6 +1111,7 @@ export function createLaunchContext(dependencies: LaunchCliDependencies = {}): L
   return {
     env: dependencies.env ?? {},
     state,
+    repoRoot,
     envPath: dependencies.envPath ?? process.env.ZK_CREDITS_LAUNCH_ENV ?? LAUNCH_ENV_PATH,
     chain: dependencies.chain ?? ((rpcUrl: string) => rpcChainReader({ rpcUrl })),
     transport: dependencies.transport ?? (() => httpTransport()),
