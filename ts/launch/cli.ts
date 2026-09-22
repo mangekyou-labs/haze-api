@@ -716,7 +716,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         if (addresses.length !== 4) return { status: 'failed', note: 'deployment outputs are missing; cannot prepare explorer verification' };
         context.print('    ' + dotenvCommand(
           context.envPath ?? LAUNCH_ENV_PATH,
-          'forge verify-contract --etherscan-api-key "$BASESCAN_API_KEY" --chain-id 84532 <address> <contract>',
+          'forge verify-contract --verifier etherscan --chain 84532 --etherscan-api-key "$BASESCAN_API_KEY" <address> <contract>',
         ));
         if (!await context.confirm('Has explorer verification been completed for all four contracts?')) {
           return { status: 'skipped', note: 'explorer verification deferred; deployment remains preserved' };
