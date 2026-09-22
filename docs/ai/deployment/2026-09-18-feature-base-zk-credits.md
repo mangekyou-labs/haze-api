@@ -233,6 +233,17 @@ boundary. The staging service remains non-runnable until the separate runtime
 credentials are explicitly authorized for injection. Slots A–C and the final
 verification/evidence checkpoint remain open.
 
+The fresh non-credentialed final checks on the same date also passed for the
+hosted gateway: strict `/ready` returned `ready: true`, launch control was
+enabled, and all six checks were healthy. The adopted Vercel deployment's
+public landing page and onboarding entry rendered, and anonymous `/dashboard`
+redirected to `/sign-in`. Its `/api/auth/session` endpoint still returned
+`500` because the Vercel project has no production runtime variables; the
+attempt to inject the OAuth, NextAuth, gateway, and billing values was stopped
+at the explicit SaaS credential-authorization boundary. No Vercel secret was
+exported, and the pilot remains open until that authorization (and the real
+operator slots) is supplied.
+
 ## B11 verifier and adapter broadcast (executed 2026-09-21)
 
 B11 has to show a generated proof verified by the real Solidity verifier and

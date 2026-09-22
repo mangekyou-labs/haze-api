@@ -624,6 +624,17 @@ defect. The fix forwards only the three runtime values required by the founder
 CLI, and `launch/cli.test.ts` now has 37 passing tests including that boundary;
 `npm run typecheck` also passes.
 
+The fresh final checks then recorded strict hosted readiness as green: the
+gateway returned `ready: true`, launch control was enabled, and the six
+readiness checks were healthy. Playwright against the adopted Vercel
+deployment rendered the landing and onboarding routes and confirmed anonymous
+dashboard gating. The deployment's `/api/auth/session` returned `500`, however,
+because its production environment is empty; adding the OAuth, NextAuth,
+gateway, and billing values was blocked pending explicit authorization to send
+those secrets to Vercel. Guardrail tests passed `68/68`, operator-evidence
+schema tests passed `12/12`, and no activation bundle was fabricated while the
+launcher remained paused before slot A.
+
 ## Required suites
 
 - Shared crypto (S1).
