@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createZkPrepaidGateway } from './zk-prepaid-gateway.js';
-import { createBaseBondSponsor } from './base-chain.js';
+import { createBaseBondSponsor, readInitialBaseRoot } from './base-chain.js';
 import { createPool, runMigrations } from './db/index.js';
 import { PostgresClaimStore, createClaimStore } from './claim-store.js';
 import {
@@ -44,9 +44,19 @@ if (hasDatabaseConfig) {
 
 const baseContractAddress = process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS;
 const initialBaseRoots = process.env.BASE_KNOWN_ROOTS?.split(',').map((root) => root.trim()).filter(Boolean) ?? [];
+let initialBaseRoot = process.env.BASE_CURRENT_ROOT?.trim() || undefined;
+if (!initialBaseRoot && baseContractAddress && process.env.BASE_RPC_URL && /^0x[0-9a-fA-F]{40}$/u.test(baseContractAddress)) {
+  try {
+    initialBaseRoot = await readInitialBaseRoot();
+  } catch {
+    // The event synchronizer remains fail-closed until the constructor root
+    // can be read or a root event is observed.
+    console.error('Base initial root bootstrap failed');
+  }
+}
 const initialBaseState = {
   contractAddress: baseContractAddress ?? '',
-  currentRoot: process.env.BASE_CURRENT_ROOT,
+  currentRoot: initialBaseRoot,
   knownRoots: initialBaseRoots,
   deploymentBlock: process.env.BASE_DEPLOYMENT_BLOCK && /^\d+$/u.test(process.env.BASE_DEPLOYMENT_BLOCK)
     ? BigInt(process.env.BASE_DEPLOYMENT_BLOCK)
@@ -64,14 +74,15 @@ if (baseContractAddress && process.env.BASE_RPC_URL && /^0x[0-9a-fA-F]{40}$/u.te
     deploymentBlock: initialBaseState.deploymentBlock,
     confirmations: BigInt(process.env.BASE_CONFIRMATIONS ?? '3'),
     maxBlockRange: resolveBaseSyncMaxBlockRange(),
+    initialRoot: initialBaseState.currentRoot,
   });
   try {
     await baseEventSync.syncOnce();
-  } catch (error) {
+  } catch {
     // A temporary RPC outage must not take down the API. The last durable
     // snapshot (or explicit environment roots) remains the fail-closed source
     // until the next sync attempt.
-    console.error('Base event synchronization failed:', error instanceof Error ? error.message : 'unknown');
+    console.error('Base event synchronization failed');
   }
 }
 
@@ -146,11 +157,11 @@ const baseSyncTimer = baseEventSync
       void (async () => {
         try {
           await baseEventSync?.syncOnce();
-        } catch (error: unknown) {
-          console.error('Base event synchronization failed:', error instanceof Error ? error.message : 'unknown');
+        } catch {
+          console.error('Base event synchronization failed');
         }
-      })().catch((error: unknown) => {
-        console.error('Base event synchronization failed:', error instanceof Error ? error.message : 'unknown');
+      })().catch(() => {
+        console.error('Base event synchronization failed');
       });
     }, Number(process.env.BASE_SYNC_INTERVAL_MS ?? 30_000))
   : undefined;

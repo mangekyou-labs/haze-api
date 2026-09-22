@@ -48,4 +48,62 @@ describe('Base contract event synchronization', () => {
     expect(state.knownRoots).toEqual(['0', '2']);
     expect((await store.listEvents(CONTRACT))).toHaveLength(1);
   });
+
+  it('splits scans at the provider-compatible maximum block range', async () => {
+    const ranges: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+    const client = {
+      async getBlockNumber() { return 25n; },
+      async getBlock({ blockNumber }: { blockNumber: bigint }) {
+        return { hash: (`0x${blockNumber.toString(16).padStart(64, '0')}`) as Hex };
+      },
+      async getLogs(args: { fromBlock: bigint; toBlock: bigint }) {
+        ranges.push({ fromBlock: args.fromBlock, toBlock: args.toBlock });
+        if (args.toBlock - args.fromBlock + 1n > 10n) throw new Error('provider_range_limit');
+        return [];
+      },
+    };
+    const store = new MemoryBaseEventStore({ contractAddress: CONTRACT, deploymentBlock: 1n });
+    const sync = new BaseContractEventSynchronizer({
+      contractAddress: CONTRACT,
+      client,
+      store,
+      confirmations: 0n,
+      maxBlockRange: 10n,
+    });
+
+    const state = await sync.syncOnce();
+
+    expect(ranges).toEqual([
+      { fromBlock: 1n, toBlock: 10n },
+      { fromBlock: 11n, toBlock: 20n },
+      { fromBlock: 21n, toBlock: 25n },
+    ]);
+    expect(state.lastScannedBlock).toBe(25n);
+  });
+
+  it('seeds the constructor root when no root event was emitted', async () => {
+    const blockHash = '0x3333333333333333333333333333333333333333333333333333333333333333' as Hex;
+    const client = {
+      async getBlockNumber() { return 10n; },
+      async getBlock() { return { hash: blockHash }; },
+      async getLogs() { return []; },
+    };
+    const store = new MemoryBaseEventStore({
+      contractAddress: CONTRACT,
+      lastScannedBlock: 10n,
+      lastScannedBlockHash: blockHash,
+    });
+    const sync = new BaseContractEventSynchronizer({
+      contractAddress: CONTRACT,
+      client,
+      store,
+      confirmations: 0n,
+      initialRoot: '0x0000000000000000000000000000000000000000000000000000000000000002',
+    });
+
+    const state = await sync.syncOnce();
+
+    expect(state.currentRoot).toBe('2');
+    expect(state.knownRoots).toEqual(['2']);
+  });
 });

@@ -801,7 +801,13 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
             'BASE_POSEIDON_T4_ADDRESS', 'BASE_BOND_ADDRESS', 'BASE_BOND_DEPLOYMENT_BLOCK',
             'BASE_PRIVATE_CREDIT_BOND_ADDRESS', 'BASE_DEPLOYMENT_BLOCK', 'ZK_PREPAID_VERIFYING_KEY_PATH',
           ],
-          plainEnv: { NODE_ENV: 'production', PORT: '3001', BASE_CONFIRMATIONS: '3', PILOT_ENVIRONMENT: 'production' },
+          plainEnv: {
+            NODE_ENV: 'production',
+            PORT: '3001',
+            BASE_CONFIRMATIONS: '3',
+            BASE_SYNC_MAX_BLOCK_RANGE: '10',
+            PILOT_ENVIRONMENT: 'production',
+          },
         });
         const resolution = await resolveResource(adapter);
         if (resolution.kind === 'ambiguous') {

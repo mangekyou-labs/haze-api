@@ -15,6 +15,7 @@ export const PRIVATE_CREDIT_BOND_ABI = [
   { type: 'function', name: 'fundBundle', stateMutability: 'nonpayable', inputs: [{ name: 'commitment', type: 'bytes32' }, { name: 'tierId', type: 'uint8' }], outputs: [] },
   { type: 'function', name: 'releaseBond', stateMutability: 'nonpayable', inputs: [{ name: 'commitment', type: 'bytes32' }], outputs: [] },
   { type: 'function', name: 'currentRoot', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'rootAt', stateMutability: 'view', inputs: [{ name: 'index', type: 'uint256' }], outputs: [{ type: 'bytes32' }] },
   { type: 'event', name: 'BundleFunded', anonymous: false, inputs: [
     { indexed: true, name: 'commitment', type: 'bytes32' },
     { indexed: true, name: 'tierId', type: 'uint8' },
@@ -77,4 +78,10 @@ export function createBasePublicClient() {
 export async function readCurrentBaseRoot(): Promise<string> {
   const client = createBasePublicClient();
   return String(await client.readContract({ address: contractAddress(), abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'currentRoot' }));
+}
+
+/** Reads the constructor root, which is not emitted as an event. */
+export async function readInitialBaseRoot(): Promise<string> {
+  const client = createBasePublicClient();
+  return String(await client.readContract({ address: contractAddress(), abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'rootAt', args: [0n] }));
 }

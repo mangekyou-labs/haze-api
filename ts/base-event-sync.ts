@@ -75,6 +75,8 @@ export interface BaseEventSyncOptions {
   deploymentBlock?: bigint;
   confirmations?: bigint;
   maxBlockRange?: bigint;
+  /** Root written by the bond constructor before any root event exists. */
+  initialRoot?: string;
 }
 
 function cloneState(state: BaseRootSnapshot): BaseRootSnapshot {
@@ -97,6 +99,13 @@ function normalizeRoot(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function seedInitialRoot(state: BaseRootSnapshot, initialRoot?: string): BaseRootSnapshot {
+  if (state.currentRoot || state.knownRoots.length > 0 || !initialRoot) return state;
+  const root = normalizeRoot(initialRoot);
+  if (!root) return state;
+  return { ...state, currentRoot: root, knownRoots: [root] };
 }
 
 function stringValue(value: unknown): string {
@@ -307,6 +316,11 @@ export class BaseContractEventSynchronizer {
 
   async syncOnce(now = Date.now()): Promise<BaseRootSnapshot> {
     let state = await this.input.store.getState(this.input.contractAddress);
+    const seededState = seedInitialRoot(state, this.input.initialRoot);
+    if (seededState !== state) {
+      state = seededState;
+      await this.input.store.saveState(state);
+    }
     const latest = await this.input.client.getBlockNumber();
     const target = latest > this.options.confirmations ? latest - this.options.confirmations : 0n;
 
@@ -315,6 +329,11 @@ export class BaseContractEventSynchronizer {
       if (scanned.hash && scanned.hash !== state.lastScannedBlockHash) {
         await this.input.store.rewind(this.input.contractAddress, this.input.deploymentBlock ?? 0n);
         state = await this.input.store.getState(this.input.contractAddress);
+        const reorgSeededState = seedInitialRoot(state, this.input.initialRoot);
+        if (reorgSeededState !== state) {
+          state = reorgSeededState;
+          await this.input.store.saveState(state);
+        }
       }
     }
 
