@@ -1095,6 +1095,7 @@ export function createLaunchContext(dependencies: LaunchCliDependencies = {}): L
   const print = dependencies.print ?? ((line: string) => console.log(redact(line)));
   const state = new LaunchStateStore({ path: dependencies.statePath ?? LAUNCH_STATE_PATH, now: dependencies.now });
   const repoRoot = dependencies.repoRoot ?? process.cwd();
+  const commandCwd = dependencies.cwd ?? repoRoot;
   return {
     env: dependencies.env ?? {},
     state,
@@ -1110,7 +1111,7 @@ export function createLaunchContext(dependencies: LaunchCliDependencies = {}): L
       try {
         const result = await execFileAsync(command, args, {
           cwd: options?.cwd === undefined
-            ? dependencies.cwd
+            ? commandCwd
             : isAbsolute(options.cwd)
               ? options.cwd
               : resolve(repoRoot, options.cwd),

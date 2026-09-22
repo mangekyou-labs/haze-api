@@ -12,7 +12,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -157,6 +157,21 @@ interface Harness {
   /** Requests the provider adapters made, so a test can assert read-back. */
   requests: { method: string; url: string }[];
 }
+
+describe('command execution', () => {
+  it('runs repository-level commands from the configured repository root', async () => {
+    const { directory } = await sandbox();
+    const context = createLaunchContext({
+      repoRoot: directory,
+      statePath: join(directory, LAUNCH_STATE_PATH),
+    });
+
+    const result = await context.run('pwd', []);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(await realpath(directory));
+  });
+});
 
 async function harness(options: {
   env?: Record<string, string>;
