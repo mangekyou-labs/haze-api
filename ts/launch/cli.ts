@@ -144,11 +144,27 @@ async function commandOutcome(
   context: LaunchContext,
   command: string,
   args: string[],
-  options: { cwd?: string; detail?: StepDetail; note?: string } = {},
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; detail?: StepDetail; note?: string } = {},
 ): Promise<StepOutcome> {
   const result = await context.run(command, args, options);
   if (result.code === 0) return { status: 'succeeded', detail: options.detail };
   return { status: 'failed', note: options.note ?? `${command} exited ${result.code}`, detail: options.detail };
+}
+
+/**
+ * The activation rehearsal is the one automated launch step that invokes the
+ * founder CLI against the hosted runtime. Pass only the runtime values that
+ * CLI needs; the deployment and custody credentials stay in the launcher's
+ * context and never enter the child process.
+ */
+function activationRuntimeEnv(context: LaunchContext): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of ['DATABASE_URL', 'PUBLIC_GATEWAY_URL', 'BILLING_INTERNAL_TOKEN'] as const) {
+    delete env[name];
+    const value = context.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
 }
 
 /**
@@ -897,7 +913,11 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
       stage: 'activation',
       description: 'rehearse the founder activation sequence without consuming an operator slot',
       async execute(context) {
-        return commandOutcome(context, 'npm', ['run', 'activation:rehearse'], { cwd: 'ts', note: 'the rehearsal failed' });
+        return commandOutcome(context, 'npm', ['run', 'activation:rehearse'], {
+          cwd: 'ts',
+          env: activationRuntimeEnv(context),
+          note: 'the rehearsal failed',
+        });
       },
     },
     manualStep({

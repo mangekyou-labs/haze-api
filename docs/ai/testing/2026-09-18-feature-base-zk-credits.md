@@ -598,6 +598,32 @@ manifest/lockfile files remain unstaged. Public registry checks for
 No package was published or republished; deployment, hosting, controls, and
 operator activation remain blocked at that release credential gate.
 
+## B22 hosted launch checkpoint evidence (2026-09-23)
+
+The resumable launch was continued through the hosted control gates. Production
+answered strict `/ready` successfully with the fixed `40000000` / `200000000`
+micro-USD caps, the production pause/resume probe returned `503` while paused
+and recovered after resume, and the activation rehearsal completed without
+issuing an invite or opening a window.
+
+An isolated staging Neon database and `zk-credits-gateway-staging` Render
+service were provisioned. The real Postgres launch-control path was exercised
+against the separate database with staging caps of `25000` daily and `25000`
+rolling micro-USD: the first dispatch debit was retained, the second was
+refused with the UTC-day cap outcome, and staging durably entered the paused
+state. No production spend or launch state was changed by that exercise.
+
+The staging service has non-secret configuration only; its separate runtime
+credentials have not been exported pending explicit authorization. The
+launcher is paused before slot A, where GitHub account ownership, invite
+handling, sidecar traffic, and redacted operator evidence must be supplied by
+the real operator. No activation evidence was fabricated.
+
+The activation rehearsal initially exposed a launcher environment-forwarding
+defect. The fix forwards only the three runtime values required by the founder
+CLI, and `launch/cli.test.ts` now has 37 passing tests including that boundary;
+`npm run typecheck` also passes.
+
 ## Required suites
 
 - Shared crypto (S1).

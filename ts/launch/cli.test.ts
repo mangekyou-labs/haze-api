@@ -153,6 +153,7 @@ interface Harness {
   statePath: string;
   printed: string[];
   commands: string[];
+  runOptions: { command: string; env?: NodeJS.ProcessEnv }[];
   confirmed: string[];
   /** Requests the provider adapters made, so a test can assert read-back. */
   requests: { method: string; url: string }[];
@@ -187,6 +188,7 @@ async function harness(options: {
   const { directory, statePath, envPath, passwordFile } = await sandbox();
   const printed: string[] = [];
   const commands: string[] = [];
+  const runOptions: { command: string; env?: NodeJS.ProcessEnv }[] = [];
   const confirmed: string[] = [];
   const requests: { method: string; url: string }[] = [];
   // One stub per harness, so its create-then-read-back state persists.
@@ -225,8 +227,9 @@ async function harness(options: {
         return { status: 200, body: provider(request) };
       },
     }),
-    async run(command, args): Promise<CommandResult> {
+    async run(command, args, runConfig): Promise<CommandResult> {
       commands.push([command, ...args].join(' '));
+      runOptions.push({ command, env: runConfig?.env });
       if (command === 'git') {
         const custom = options.git?.(args);
         if (custom) return custom;
@@ -245,7 +248,7 @@ async function harness(options: {
       return { code: 0, stdout: '', stderr: '' };
     },
   };
-  return { context, statePath, printed, commands, confirmed, requests };
+  return { context, statePath, printed, commands, runOptions, confirmed, requests };
 }
 
 describe('preflight', () => {
@@ -351,6 +354,28 @@ describe('status', () => {
 });
 
 describe('the plan', () => {
+  it('passes only hosted runtime values to the activation rehearsal', async () => {
+    const { context, runOptions } = await harness({
+      env: {
+        DATABASE_URL: 'postgresql://staging.example/zk_credits',
+        PUBLIC_GATEWAY_URL: 'https://gateway.example',
+        BILLING_INTERNAL_TOKEN: 'billing-token-for-test',
+      },
+    });
+    const rehearsal = buildLaunchPlan(context.env).find((step) => step.name === 'activation:rehearsal');
+
+    await expect(rehearsal?.execute(context)).resolves.toMatchObject({ status: 'succeeded' });
+
+    const child = runOptions.find(({ command }) => command === 'npm');
+    expect(child?.env).toMatchObject({
+      DATABASE_URL: 'postgresql://staging.example/zk_credits',
+      PUBLIC_GATEWAY_URL: 'https://gateway.example',
+      BILLING_INTERNAL_TOKEN: 'billing-token-for-test',
+    });
+    expect(child?.env).not.toHaveProperty('BASE_SPONSOR_PRIVATE_KEY');
+    expect(child?.env).not.toHaveProperty('OPENROUTER_API_KEY');
+  });
+
   it('orders the stages so a release precedes a deployment and a rehearsal precedes an operator', async () => {
     const plan = buildLaunchPlan(COMPLETE_ENV);
     const index = (name: string) => plan.findIndex((step) => step.name === name);

@@ -214,6 +214,25 @@ participant.
     operator identity, invite or funding token, credential identifier,
     remaining balance, request metadata, or spend-plane identifier.
 
+## B22 hosted checkpoint evidence (2026-09-23)
+
+The production Render deployment passed strict readiness with every check
+healthy, reported the fixed `40000000` / `200000000` micro-USD ceilings, and
+completed one pause/resume control cycle; the paused inference probe returned
+`503` and readiness returned after resume. A separate staging Neon database and
+Render service were provisioned with the narrowed-cap configuration. Against
+that isolated database, the real Postgres admission path retained one
+`25000` micro-USD debit, rejected the next admission at the UTC-day cap, and
+durably paused staging while production remained untouched.
+
+The launcher also completed the founder-side activation rehearsal without
+issuing an invite or opening a slot. Its child-process environment forwarding
+was tightened to pass only the database URL, hosted gateway URL, and billing
+token needed for that rehearsal; the focused launcher suite covers this
+boundary. The staging service remains non-runnable until the separate runtime
+credentials are explicitly authorized for injection. Slots A–C and the final
+verification/evidence checkpoint remain open.
+
 ## B11 verifier and adapter broadcast (executed 2026-09-21)
 
 B11 has to show a generated proof verified by the real Solidity verifier and
