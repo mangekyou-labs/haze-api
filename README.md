@@ -167,16 +167,24 @@ boundary and security model.
 
 The immutable `PrivateCreditBond` contract is under `contracts/src/` and the
 BN254 circuit is `circuits/private_credit_spend.circom`. No deployment is
-performed by tests. Use the Base Sepolia deployment script only after setting
-the reviewed USDC, sponsor, refund vault, treasury, Poseidon, verifier, and
-deployment-domain addresses:
+performed by tests. Use the configuration-only wizard and checkpointed
+launcher for Base Sepolia; they collect the reviewed USDC, sponsor, refund
+vault, treasury, keystore, and deployment-domain inputs before any operator
+command is shown:
 
 ```sh
-cd contracts
-FOUNDRY_OFFLINE=true forge test
-forge script script/DeployBaseSepolia.s.sol:DeployBaseSepolia \
-  --rpc-url "$BASE_RPC_URL" --broadcast --verify
+(cd contracts && FOUNDRY_OFFLINE=true forge test)
+scripts/launch-wizard.sh
+scripts/launch-pilot.sh --check
 ```
+
+The launcher runs a no-broadcast simulation, predicts Poseidon T2/T3/T4 and
+`PrivateCreditBond`, and requires fresh human authorization before displaying
+the dotenv-wrapped, keystore-backed broadcast command. It never handles or
+prints the password, runs the broadcast, or treats bond address/block values as
+wizard inputs. Resume reconciliation and post-deploy immutable/root checks
+must complete before the launcher writes deployment outputs; explorer
+verification is independent and retryable.
 
 The sponsor funds the Base Sepolia USDC bond for each pilot credential;
 participants never deposit funds. Mainnet is blocked until an external

@@ -195,13 +195,18 @@ source "$WIZARD_DIR/launch-guardrails.sh"
 # scripts/launch-pilot.sh reads the same file, so the keys it owns have to be
 # acceptable here or the two entrypoints would disagree about one file.
 LAUNCH_KEYS=(
-  BASE_RPC_URL BASE_PRIVATE_CREDIT_BOND_ADDRESS BASE_DEPLOYMENT_DOMAIN
-  BASE_DEPLOYMENT_BLOCK BASE_SPONSOR_PRIVATE_KEY BASE_TREASURY_ADDRESS
-  BASE_REFUND_VAULT BASE_CONFIRMATIONS DATABASE_URL PUBLIC_GATEWAY_URL
+  BASE_RPC_URL BASE_USDC_ADDRESS BASE_DEPLOYMENT_DOMAIN
+  BASE_DEPLOYER_KEYSTORE_ACCOUNT BASE_DEPLOYER_PASSWORD_FILE
+  BASE_SPONSOR_PRIVATE_KEY BASE_SPONSOR_ADDRESS BASE_TREASURY_ADDRESS
+  BASE_REFUND_VAULT BASE_SPEND_VERIFIER_ADDRESS BASE_POSEIDON_T2_ADDRESS
+  BASE_POSEIDON_T3_ADDRESS BASE_POSEIDON_T4_ADDRESS BASE_BOND_ADDRESS
+  BASE_BOND_DEPLOYMENT_BLOCK BASE_CONFIRMATIONS
+  BASE_PRIVATE_CREDIT_BOND_ADDRESS BASE_DEPLOYMENT_BLOCK
+  DATABASE_URL PUBLIC_GATEWAY_URL
   BILLING_INTERNAL_TOKEN FACILITATOR_SERVICE_TOKEN CLAIM_STORE_OPERATOR_TOKEN
   OPENROUTER_API_KEY GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET NEXTAUTH_SECRET
   NEXTAUTH_URL GATEWAY_URL
-  NPM_TOKEN BASE_USDC_ADDRESS BASE_DEPLOYER_KEYSTORE_ACCOUNT BASESCAN_API_KEY
+  NPM_TOKEN BASESCAN_API_KEY
   NEON_API_KEY RENDER_API_KEY RENDER_OWNER_ID VERCEL_TOKEN
   PILOT_ENVIRONMENT PILOT_REPO PILOT_BRANCH
   PILOT_OPERATOR_A_GITHUB_ID PILOT_OPERATOR_B_GITHUB_ID PILOT_OPERATOR_C_GITHUB_ID
@@ -231,6 +236,9 @@ ask_validated_secret() {
 }
 
 TOTAL_STAGES=9
+
+BASE_SEPOLIA_USDC_ADDRESS='0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+BASE_REVIEWED_SPEND_VERIFIER_ADDRESS='0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD'
 
 banner "Founder launch: Base Sepolia pilot infrastructure"
 
@@ -273,19 +281,28 @@ if ! gw_require_match "$BASE_DEPLOYMENT_DOMAIN" '^84532$' "BASE_DEPLOYMENT_DOMAI
 fi
 write_env BASE_DEPLOYMENT_DOMAIN "$BASE_DEPLOYMENT_DOMAIN"
 
-say "Now the deployed PrivateCreditBond and the block it was deployed at."
-note "BASE_DEPLOYMENT_BLOCK is where the indexer starts: too high misses"
-note "BundleFunded events, too low rescans the whole history."
-ask BASE_PRIVATE_CREDIT_BOND_ADDRESS "Paste the PrivateCreditBond address (0x…):"
-if ! gw_require_address "$BASE_PRIVATE_CREDIT_BOND_ADDRESS" "BASE_PRIVATE_CREDIT_BOND_ADDRESS"; then exit 1; fi
-write_env BASE_PRIVATE_CREDIT_BOND_ADDRESS "$BASE_PRIVATE_CREDIT_BOND_ADDRESS"
+ask BASE_USDC_ADDRESS "Base Sepolia USDC address [Enter uses Circle's official address]:"
+if [[ -z "$BASE_USDC_ADDRESS" ]]; then BASE_USDC_ADDRESS="$BASE_SEPOLIA_USDC_ADDRESS"; fi
+if ! gw_require_address "$BASE_USDC_ADDRESS" "BASE_USDC_ADDRESS"; then exit 1; fi
+write_env BASE_USDC_ADDRESS "$BASE_USDC_ADDRESS"
 
-open_url "https://sepolia.basescan.org/address/$BASE_PRIVATE_CREDIT_BOND_ADDRESS"
-step "Read the contract creation block number."
-ask_validated BASE_DEPLOYMENT_BLOCK "Paste the deployment block number:" gw_require_block "BASE_DEPLOYMENT_BLOCK"
-if [[ "$BASE_DEPLOYMENT_BLOCK" == "0" ]]; then warn "0 is not a deployment block"; exit 1; fi
-write_env BASE_DEPLOYMENT_BLOCK "$BASE_DEPLOYMENT_BLOCK"
-write_env BASE_CONFIRMATIONS "3"
+ask BASE_DEPLOYER_KEYSTORE_ACCOUNT "Foundry deployer account name (not a private key):"
+if ! gw_require_match "$BASE_DEPLOYER_KEYSTORE_ACCOUNT" '^[A-Za-z_][A-Za-z0-9_-]*$' "BASE_DEPLOYER_KEYSTORE_ACCOUNT"; then exit 1; fi
+write_env BASE_DEPLOYER_KEYSTORE_ACCOUNT "$BASE_DEPLOYER_KEYSTORE_ACCOUNT"
+
+ask BASE_DEPLOYER_PASSWORD_FILE "Absolute path to the Foundry keystore password file (mode 600):"
+if ! gw_require_password_file "$BASE_DEPLOYER_PASSWORD_FILE" "BASE_DEPLOYER_PASSWORD_FILE"; then exit 1; fi
+write_env BASE_DEPLOYER_PASSWORD_FILE "$BASE_DEPLOYER_PASSWORD_FILE"
+
+write_env BASE_SPEND_VERIFIER_ADDRESS "$BASE_REVIEWED_SPEND_VERIFIER_ADDRESS"
+note "The reviewed SpendVerifier adapter is fixed at $BASE_REVIEWED_SPEND_VERIFIER_ADDRESS."
+note "The launcher verifies that it wraps the reviewed verifier before deployment."
+
+ask_secret BASESCAN_API_KEY "Optional BaseScan API key (Enter to defer verification):"
+if [[ -n "$BASESCAN_API_KEY" ]]; then
+  if ! gw_require_secret "$BASESCAN_API_KEY" "BASESCAN_API_KEY"; then exit 1; fi
+  write_env BASESCAN_API_KEY "$BASESCAN_API_KEY"
+fi
 
 # ── Stage 3: sponsor key and payout addresses ─────────────────────────────
 stage "Base Sepolia: sponsor hot key and payout addresses"
@@ -385,59 +402,19 @@ write_env GATEWAY_URL "$PUBLIC_GATEWAY_URL"
 note "Do not enable ENABLE_DEV_LOGIN, Stripe, or any legacy Stellar route there."
 
 # ── Stage 8: CI wiring ────────────────────────────────────────────────────
-stage "CI: wire the smoke workflow inputs"
-say "Deploy Smoke reads the two hosted URLs and the recorded deployment block."
-note "The workflow is safe before these exist: each probe is skipped when its"
-note "value is missing. Set them once the services are live."
-if confirm "Set the GitHub Actions secrets and variables for Deploy Smoke now?"; then
-  set_secret GATEWAY_URL "$PUBLIC_GATEWAY_URL"
-  set_secret WEB_URL "$NEXTAUTH_URL"
-  set_secret BILLING_INTERNAL_TOKEN "$BILLING_INTERNAL_TOKEN"
-  set_var BASE_DEPLOYMENT_BLOCK "$BASE_DEPLOYMENT_BLOCK"
-  if confirm "Require /ready to answer 200 with every check ok on each smoke run?"; then
-    set_var SMOKE_STRICT_READY "1"
-  else
-    set_var SMOKE_STRICT_READY "0"
-  fi
-else
-  SKIPPED+=("Deploy Smoke secrets and variables")
-fi
+stage "CI: defer provider wiring until deployment outputs exist"
+say "This wizard is configuration-only. It does not create provider resources"
+say "or write GitHub variables, and it never broadcasts a contract."
+note "After launch-pilot reconciles all four contracts, it atomically writes"
+note "the bond address, deployment block, sponsor address, and confirmations."
+note "Only then may hosting, GitHub-variable, and pilot-activation stages proceed."
 
-# ── Stage 9: irreversible actions ─────────────────────────────────────────
-stage "External and irreversible actions"
-say "Everything above only wrote local values. The steps below are the ones"
-say "that cannot be undone, so each one is confirmed separately."
-printf '\n'
-note "1. forge script --broadcast deploys Poseidon T2/T3/T4 and PrivateCreditBond."
-note "   An immutable contract cannot be edited afterwards; a redeploy is a new address."
-note "2. npm publish is permanent for a version. A published version cannot be reused."
-note "3. Issuing an invite creates a real credential obligation for a real person."
-note "4. The USDC approval must stay bounded to the 80 test-USDC pilot amount."
-printf '\n'
-if confirm "Do the Base Sepolia and npm credentials look correct enough to proceed?"; then
-  note "Proceed when you are ready. Review the diff of $ENV_FILE first:"
-  note "  git status --short && git diff --stat"
-  note "Deploy:   cd contracts && forge script script/DeployBaseSepolia.s.sol:DeployBaseSepolia \\"
-  note "            --account \"\$BASE_DEPLOYER_KEYSTORE_ACCOUNT\" --rpc-url \"\$BASE_RPC_URL\" --broadcast --verify"
-  printf '\n'
-  note "The three publishes are ordered, because the sidecar depends on the other two."
-  note "Publish the leaves first:"
-  note "          cd packages/zk-credits-shared      && npm publish --access public"
-  note "          cd packages/x402-zk-prepaid        && npm publish --access public"
-  note "Then replace the sidecar's file: dependencies with the exact versions:"
-  note "          cd ts && npm run launch:rewrite-sidecar-deps"
-  note "Reinstall, build, test, and test-install the tarball before publishing it:"
-  note "          cd packages/zk-credits-sidecar && npm ci && npm run build && npm test"
-  note "Then publish the sidecar:"
-  note "          cd packages/zk-credits-sidecar && npm publish --access public"
-  note "Activate: cd ts && npm run activation:start -- --slot A --github-id <id>"
-  printf '\n'
-  note "Everything above is also driven, with checkpoints, by the single entrypoint:"
-  note "  scripts/launch-pilot.sh --check     credential, git, package, and chain preflight"
-  note "  scripts/launch-pilot.sh --status    local and remote reconciliation"
-  note "  scripts/launch-pilot.sh             start or resume from the last checkpoint"
-else
-  warn "Stopping before the irreversible actions. Everything captured is safe to keep."
-fi
-
+# ── Stage 9: checkpointed launcher handoff ─────────────────────────────────
+stage "Checkpointed launcher handoff"
+say "The pre-deployment values are captured safely in $ENV_FILE."
+note "Run the read-only checks first:"
+note "  scripts/launch-pilot.sh --check"
+note "Then run the launcher. It simulates, summarizes nonsecret inputs, and"
+note "requires a fresh explicit confirmation before showing the keystore command."
+note "No deployment command is executed by this wizard."
 finish

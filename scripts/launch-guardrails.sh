@@ -50,11 +50,20 @@ GW_OPERATOR_VARS=(
 # the database, the admin tokens, and the upstream provider credential. None
 # of it may appear on an operator machine.
 GW_DEPLOYER_VARS=(
+  BASE_DEPLOYER_PASSWORD_FILE
   BASE_SPONSOR_PRIVATE_KEY
+  BASE_SPONSOR_ADDRESS
+  BASE_POSEIDON_T2_ADDRESS
+  BASE_POSEIDON_T3_ADDRESS
+  BASE_POSEIDON_T4_ADDRESS
   BASE_TREASURY_ADDRESS
   BASE_REFUND_VAULT
+  BASE_SPEND_VERIFIER_ADDRESS
+  BASE_BOND_ADDRESS
+  BASE_BOND_DEPLOYMENT_BLOCK
   BASE_PRIVATE_CREDIT_BOND_ADDRESS
   BASE_DEPLOYMENT_BLOCK
+  BASE_CONFIRMATIONS
   DATABASE_URL
   BILLING_INTERNAL_TOKEN
   FACILITATOR_SERVICE_TOKEN
@@ -169,6 +178,24 @@ gw_require_match() {
 
 gw_require_address()     { gw_require_match "$1" '^0x[0-9a-fA-F]{40}$' "$2"; }
 gw_require_private_key() { gw_require_match "$1" '^0x[0-9a-fA-F]{64}$' "$2"; }
+gw_require_password_file() {
+  local value="$1" label="$2" mode
+  gw_reject_placeholders "$value" "$label" || return 1
+  if [[ "$value" != /* ]]; then
+    _gw_report "$label must be an absolute path"
+    return 1
+  fi
+  if [[ -L "$value" || ! -f "$value" ]]; then
+    _gw_report "$label must be a regular, non-symlinked file"
+    return 1
+  fi
+  mode=$(stat -f '%Lp' "$value" 2>/dev/null || stat -c '%a' "$value" 2>/dev/null || echo '')
+  if [[ "$mode" != "600" ]]; then
+    _gw_report "$label has mode ${mode:-unknown}; it requires 600"
+    return 1
+  fi
+  return 0
+}
 gw_require_block()       { gw_require_match "$1" '^[0-9]+$' "$2"; }
 gw_require_secret()      { gw_require_match "$1" '^.{32,}$' "$2"; }
 gw_require_https_url()   { gw_require_match "$1" '^https://[^[:space:]]+$' "$2"; }

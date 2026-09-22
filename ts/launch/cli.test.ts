@@ -12,7 +12,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -28,6 +28,12 @@ import {
   type LaunchContext,
 } from './cli.js';
 import {
+  BASE_SEPOLIA_USDC_ADDRESS,
+  EXISTING_B11_CONTRACTS,
+  abiSelector,
+  type ChainReader,
+} from './deploy.js';
+import {
   PILOT_NEON_REGION,
   PILOT_RENDER_REGION,
   RESOURCE_NAMES,
@@ -41,13 +47,17 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function sandbox(): Promise<{ directory: string; statePath: string; envPath: string }> {
+async function sandbox(): Promise<{ directory: string; statePath: string; envPath: string; passwordFile: string }> {
   const directory = await mkdtemp(join(tmpdir(), 'zk-launch-cli-'));
   directories.push(directory);
+  const passwordFile = join(directory, 'keystore-password');
+  await writeFile(passwordFile, 'operator-password\n', { mode: 0o600 });
+  await chmod(passwordFile, 0o600);
   return {
     directory,
     statePath: join(directory, LAUNCH_STATE_PATH),
     envPath: join(directory, '.env.launch.local'),
+    passwordFile,
   };
 }
 
@@ -58,12 +68,23 @@ const COMPLETE_ENV: Record<string, string> = {
   NPM_TOKEN: 'npm_abcdefghijklmnopqrstuvwx',
   BASE_RPC_URL: 'https://alchemy.example/v2/key',
   BASE_DEPLOYMENT_DOMAIN: '84532',
-  BASE_USDC_ADDRESS: '0x1111111111111111111111111111111111111111',
+  BASE_USDC_ADDRESS: BASE_SEPOLIA_USDC_ADDRESS,
   BASE_DEPLOYER_KEYSTORE_ACCOUNT: 'pilot-deployer',
+  BASE_DEPLOYER_PASSWORD_FILE: '/tmp/foundry-password',
   BASE_TREASURY_ADDRESS: '0x1111111111111111111111111111111111111111',
   BASE_REFUND_VAULT: '0x2222222222222222222222222222222222222222',
   BASE_SPONSOR_PRIVATE_KEY: `0x${'cd'.repeat(32)}`,
+  BASE_SPEND_VERIFIER_ADDRESS: EXISTING_B11_CONTRACTS.adapter,
   BASESCAN_API_KEY: 'abcdefghijklmnopqrstuvwx',
+  BASE_SPONSOR_ADDRESS: '0x3333333333333333333333333333333333333333',
+  BASE_POSEIDON_T2_ADDRESS: '0x4444444444444444444444444444444444444444',
+  BASE_POSEIDON_T3_ADDRESS: '0x5555555555555555555555555555555555555555',
+  BASE_POSEIDON_T4_ADDRESS: '0x6666666666666666666666666666666666666666',
+  BASE_BOND_ADDRESS: '0x7777777777777777777777777777777777777777',
+  BASE_BOND_DEPLOYMENT_BLOCK: '123',
+  BASE_CONFIRMATIONS: '3',
+  BASE_PRIVATE_CREDIT_BOND_ADDRESS: '0x7777777777777777777777777777777777777777',
+  BASE_DEPLOYMENT_BLOCK: '123',
   NEON_API_KEY: 'napi_abcdefghijklmnopqrstuvwx',
   RENDER_API_KEY: 'rnd_abcdefghijklmnopqrstuvwx',
   RENDER_OWNER_ID: 'tea-abcdefghijklmnop',
@@ -143,8 +164,10 @@ async function harness(options: {
   provider?: (request: { method: string; url: string }) => unknown;
   /** Bytecode the fake chain reports for every address. */
   code?: string;
+  /** Overrides the fake chain for artifact and immutable reconciliation cases. */
+  chain?: (rpcUrl: string) => ChainReader;
 } = {}): Promise<Harness> {
-  const { statePath } = await sandbox();
+  const { statePath, envPath, passwordFile } = await sandbox();
   const printed: string[] = [];
   const commands: string[] = [];
   const confirmed: string[] = [];
@@ -152,19 +175,32 @@ async function harness(options: {
   // One stub per harness, so its create-then-read-back state persists.
   const provider = options.provider ?? providerStub();
   const state = new LaunchStateStore({ path: statePath, now: () => 1_800_000_000_000, isTracked: async () => false });
+  const env = {
+    ...COMPLETE_ENV,
+    ...options.env,
+    BASE_DEPLOYER_PASSWORD_FILE: options.env?.BASE_DEPLOYER_PASSWORD_FILE ?? passwordFile,
+  };
 
   const context: LaunchContext = {
-    env: options.env ?? COMPLETE_ENV,
+    env,
     state,
+    envPath,
     print: (line) => printed.push(line),
     async confirm(question) {
       confirmed.push(question);
       return options.confirm ?? true;
     },
-    chain: () => ({
+    chain: options.chain ?? (() => ({
+      chainId: async () => 84532,
+      balance: async () => 1n,
+      nonce: async () => 42,
+      call: async (_address: string, data: string) => {
+        if (data === abiSelector('decimals()')) return `0x${'0'.repeat(63)}6`;
+        return `0x${'0'.repeat(24)}${EXISTING_B11_CONTRACTS.verifier.slice(2)}`;
+      },
       receipt: async () => undefined,
       code: async () => options.code ?? '0x6080604052600436106100',
-    }),
+    })),
     transport: () => ({
       async send(request) {
         requests.push({ method: request.method, url: request.url });
@@ -264,16 +300,66 @@ describe('the plan', () => {
     ]));
   });
 
-  it('runs to completion when every command succeeds and every question is answered', async () => {
-    const { context } = await harness();
+  it('stops at the deployment authorization boundary without broadcasting', async () => {
+    const { context, printed } = await harness();
     const result = await runResume({ mode: 'resume', context });
-    if (result.stoppedAt) {
-      // Surface the recorded reason rather than only the step name.
-      const record = (await context.state.load()).steps[result.stoppedAt.step];
-      throw new Error(`stopped at ${result.stoppedAt.step} (${result.stoppedAt.reason}): ${record?.note ?? 'no note'}`);
-    }
-    expect(result.report.at(-1)).toBe('the launch plan is complete');
-    expect(result.completed).toEqual(buildLaunchPlan(COMPLETE_ENV).map((step) => step.name));
+    const plan = buildLaunchPlan(COMPLETE_ENV);
+    const deploymentIndex = plan.findIndex((step) => step.name === 'deploy:contracts');
+    expect(result.stoppedAt).toEqual({ step: 'deploy:contracts', reason: 'unknown' });
+    expect(result.completed).toEqual(plan.slice(0, deploymentIndex).map((step) => step.name));
+
+    const record = (await context.state.load()).steps['deploy:contracts'];
+    expect(record).toMatchObject({
+      status: 'unknown',
+      detail: { signer: DEPLOYER, startingNonce: 42, contractNonce: 45, commandExposed: true },
+    });
+    const output = printed.join('\n');
+    expect(output).toContain('no-broadcast simulation succeeded; no transaction was sent');
+    expect(output).toContain('--broadcast');
+    expect(output).toContain('resolved sponsor address');
+    expect(output).not.toContain(COMPLETE_ENV.BASE_SPONSOR_PRIVATE_KEY);
+  });
+
+  it('blocks an unreadable present artifact instead of offering a fresh broadcast', async () => {
+    const { context, printed } = await harness({ confirm: false });
+    const artifactPath = `${context.envPath}.run-latest.json`;
+    await writeFile(artifactPath, '{ not valid json', { mode: 0o600 });
+    context.env.BASE_DEPLOYMENT_ARTIFACT = artifactPath;
+
+    const deployment = buildLaunchPlan(COMPLETE_ENV).find((step) => step.name === 'deploy:contracts');
+    expect(deployment).toBeDefined();
+    const result = await deployment!.execute(context);
+
+    expect(result.status).toBe('unknown');
+    expect(result.note).toMatch(/present but unreadable/u);
+    expect(printed.join('\n')).not.toContain(' --broadcast');
+  });
+
+  it('retries explorer verification without changing reconciled deployment outputs', async () => {
+    const { context, printed } = await harness({ confirm: false });
+    await context.state.record('deploy:contracts', {
+      status: 'succeeded',
+      detail: {
+        poseidonT2: COMPLETE_ENV.BASE_POSEIDON_T2_ADDRESS,
+        poseidonT3: COMPLETE_ENV.BASE_POSEIDON_T3_ADDRESS,
+        poseidonT4: COMPLETE_ENV.BASE_POSEIDON_T4_ADDRESS,
+        bond: COMPLETE_ENV.BASE_BOND_ADDRESS,
+      },
+    });
+    const verification = buildLaunchPlan(COMPLETE_ENV).find((step) => step.name === 'deploy:verification');
+    expect(verification).toBeDefined();
+
+    const deferred = await verification!.execute(context);
+    expect(deferred).toEqual({ status: 'skipped', note: 'explorer verification deferred; deployment remains preserved' });
+    expect((await context.state.load()).steps['deploy:contracts']?.status).toBe('succeeded');
+
+    context.confirm = async () => true;
+    const retried = await verification!.execute(context);
+    expect(retried).toMatchObject({ status: 'succeeded', detail: { verification: 'confirmed' } });
+    const output = printed.join('\n');
+    expect(output).toContain('forge verify-contract');
+    expect(output).not.toContain(COMPLETE_ENV.BASESCAN_API_KEY);
+    expect((await context.state.load()).steps['deploy:contracts']?.status).toBe('succeeded');
   });
 });
 
@@ -282,7 +368,12 @@ describe('the plan', () => {
  * than at a convenient one.
  */
 describe('checkpoint resumption after every non-idempotent operation', () => {
-  const plan = buildLaunchPlan(COMPLETE_ENV);
+  // The repaired flow intentionally stops before live deployment. Exercise
+  // interruption recovery across every earlier step, then assert the full plan
+  // reaches (and holds at) the deployment boundary.
+  const fullPlan = buildLaunchPlan(COMPLETE_ENV);
+  const deploymentIndex = fullPlan.findIndex((step) => step.name === 'deploy:contracts');
+  const plan = fullPlan.slice(0, deploymentIndex);
 
   for (const [index, step] of plan.entries()) {
     it(`recovers from an interruption during ${step.name}`, async () => {
@@ -319,10 +410,10 @@ describe('checkpoint resumption after every non-idempotent operation', () => {
 
       // Reconciling the unknown is what unblocks the run, and it resumes here.
       await context.state.record(step.name, { status: 'succeeded', detail: { reconciled: true } });
-      const third = await runResume({ mode: 'resume', context, plan });
+      const third = await runResume({ mode: 'resume', context });
       expect(third.report.join('\n')).toMatch(new RegExp(`skip {2}${step.name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`, 'u'));
-      expect(third.stoppedAt).toBeUndefined();
-      expect(third.report.at(-1)).toBe('the launch plan is complete');
+      expect(third.stoppedAt).toEqual({ step: 'deploy:contracts', reason: 'unknown' });
+      expect(third.report.join('\n')).toMatch(/broadcast command exposed/u);
     });
   }
 

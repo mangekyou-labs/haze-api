@@ -19,8 +19,8 @@
 
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { chmod, lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -36,6 +36,7 @@ export type ValueShape =
   | 'address'
   | 'private_key'
   | 'keystore_account'
+  | 'password_file'
   | 'github_id'
   | 'https_url'
   | 'api_token'
@@ -54,6 +55,8 @@ export interface LaunchEnvVar {
    * only exist once the web host has an address to call back to.
    */
   deferred?: boolean;
+  /** Optional provider material; absence must not block deployment. */
+  optional?: boolean;
 }
 
 export const LAUNCH_VARS: readonly LaunchEnvVar[] = [
@@ -69,10 +72,25 @@ export const LAUNCH_VARS: readonly LaunchEnvVar[] = [
   { name: 'BASE_DEPLOYMENT_DOMAIN', label: 'chain id', shape: 'usdc_units', requiredFor: 'deploy' },
   { name: 'BASE_USDC_ADDRESS', label: 'test USDC address', shape: 'address', requiredFor: 'deploy' },
   { name: 'BASE_DEPLOYER_KEYSTORE_ACCOUNT', label: 'Foundry keystore account', shape: 'keystore_account', requiredFor: 'deploy' },
+  { name: 'BASE_DEPLOYER_PASSWORD_FILE', label: 'absolute Foundry keystore password-file path', shape: 'password_file', requiredFor: 'deploy' },
   { name: 'BASE_TREASURY_ADDRESS', label: 'treasury address', shape: 'address', requiredFor: 'deploy' },
   { name: 'BASE_REFUND_VAULT', label: 'refund vault address', shape: 'address', requiredFor: 'deploy' },
   { name: 'BASE_SPONSOR_PRIVATE_KEY', label: 'bounded runtime sponsor key', shape: 'private_key', requiredFor: 'deploy' },
-  { name: 'BASESCAN_API_KEY', label: 'BaseScan verification key', shape: 'api_token', requiredFor: 'deploy' },
+  { name: 'BASE_SPEND_VERIFIER_ADDRESS', label: 'reviewed SpendVerifier adapter address', shape: 'address', requiredFor: 'deploy' },
+  { name: 'BASESCAN_API_KEY', label: 'BaseScan verification key', shape: 'api_token', requiredFor: 'deploy', optional: true },
+
+  // These are launcher-managed outputs. Hosting is deliberately deferred
+  // until the four CREATE receipts and the post-deploy invariant checks have
+  // completed and all deployment outputs have been written atomically.
+  { name: 'BASE_SPONSOR_ADDRESS', label: 'derived sponsor address', shape: 'address', requiredFor: 'hosting' },
+  { name: 'BASE_POSEIDON_T2_ADDRESS', label: 'deployed Poseidon T2 address', shape: 'address', requiredFor: 'hosting' },
+  { name: 'BASE_POSEIDON_T3_ADDRESS', label: 'deployed Poseidon T3 address', shape: 'address', requiredFor: 'hosting' },
+  { name: 'BASE_POSEIDON_T4_ADDRESS', label: 'deployed Poseidon T4 address', shape: 'address', requiredFor: 'hosting' },
+  { name: 'BASE_BOND_ADDRESS', label: 'deployed PrivateCreditBond address', shape: 'address', requiredFor: 'hosting' },
+  { name: 'BASE_BOND_DEPLOYMENT_BLOCK', label: 'PrivateCreditBond deployment block', shape: 'usdc_units', requiredFor: 'hosting' },
+  { name: 'BASE_CONFIRMATIONS', label: 'Base confirmation count', shape: 'usdc_units', requiredFor: 'hosting' },
+  { name: 'BASE_PRIVATE_CREDIT_BOND_ADDRESS', label: 'legacy deployed bond address', shape: 'address', requiredFor: 'hosting' },
+  { name: 'BASE_DEPLOYMENT_BLOCK', label: 'legacy bond deployment block', shape: 'usdc_units', requiredFor: 'hosting' },
 
   // ── hosted infrastructure ──────────────────────────────────────────────
   { name: 'NEON_API_KEY', label: 'Neon API key', shape: 'api_token', requiredFor: 'hosting' },
@@ -120,6 +138,21 @@ export const GENERATED_SECRET_VARS = [
   'FACILITATOR_SERVICE_TOKEN',
   'CLAIM_STORE_OPERATOR_TOKEN',
   'NEXTAUTH_SECRET',
+] as const;
+
+/** Values produced by launch-pilot after on-chain reconciliation, never wizard inputs. */
+export const LAUNCH_OUTPUT_VARS = [
+  'BASE_SPONSOR_ADDRESS',
+  'BASE_POSEIDON_T2_ADDRESS',
+  'BASE_POSEIDON_T3_ADDRESS',
+  'BASE_POSEIDON_T4_ADDRESS',
+  'BASE_BOND_ADDRESS',
+  'BASE_BOND_DEPLOYMENT_BLOCK',
+  'BASE_CONFIRMATIONS',
+  // Legacy names remain as atomically-written compatibility aliases for the
+  // gateway and sidecar, but are still launcher-managed outputs.
+  'BASE_PRIVATE_CREDIT_BOND_ADDRESS',
+  'BASE_DEPLOYMENT_BLOCK',
 ] as const;
 
 export interface LaunchEnvViolation {
@@ -194,6 +227,8 @@ export function validateShape(value: string, shape: ValueShape): string | undefi
       return /^0x[0-9a-fA-F]{64}$/u.test(value) ? undefined : 'must be a 32-byte hex key';
     case 'keystore_account':
       return /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(value) ? undefined : 'must be a Foundry keystore account name, not a key';
+    case 'password_file':
+      return isAbsolute(value) ? undefined : 'must be an absolute path';
     case 'github_id':
       return /^[0-9]+$/u.test(value) ? undefined : 'must be the numeric GitHub account id';
     case 'api_token':
@@ -233,6 +268,10 @@ export function checkLaunchEnv(values: Record<string, string>, stage: LaunchStag
       continue;
     }
     if (value === undefined || value.length === 0) {
+      if (variable.optional) {
+        deferred.push(variable);
+        continue;
+      }
       missing.push(variable);
       continue;
     }
@@ -284,8 +323,10 @@ export const defaultGitProbe: GitProbe = {
 export async function prepareLaunchEnvFile(path: string = LAUNCH_ENV_PATH, probe: GitProbe = defaultGitProbe): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   try {
-    await stat(path);
-  } catch {
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) throw new Error(`${path} is a symlink; refusing to use it as the launch env file`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     await writeFile(path, '', { mode: 0o600 });
   }
   if (await probe.isTracked(path)) throw new Error(`${path} is tracked by git; a launch env file must never be committed`);
@@ -295,17 +336,42 @@ export async function prepareLaunchEnvFile(path: string = LAUNCH_ENV_PATH, probe
   if (mode !== 0o600) throw new Error(`${path} has mode ${mode.toString(8)}; a launch env file requires 600`);
 }
 
-/** Upserts one value, preserving the rest of the file verbatim. */
-export async function writeLaunchEnvValue(path: string, name: string, value: string): Promise<void> {
+/** Requires the Foundry password file to be a regular, non-symlinked 0600 file. */
+export async function requirePasswordFile(path: string): Promise<void> {
+  if (!isAbsolute(path)) throw new Error(`${path} is not an absolute password-file path`);
+  const info = await lstat(path);
+  if (info.isSymbolicLink() || !info.isFile()) throw new Error(`${path} must be a regular non-symlinked file`);
+  const mode = info.mode & 0o777;
+  if (mode !== 0o600) throw new Error(`${path} has mode ${mode.toString(8)}; the password file requires 600`);
+}
+
+function replaceEnvValues(text: string, values: Record<string, string>): string {
+  const names = new Set(Object.keys(values));
+  const lines = text.split('\n').filter((line) => {
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/u);
+    return !match || !names.has(match[1]!);
+  });
+  while (lines.length > 0 && lines.at(-1) === '') lines.pop();
+  for (const [name, value] of Object.entries(values)) lines.push(`${name}=${value}`);
+  return `${lines.join('\n')}\n`;
+}
+
+/** Atomically upserts outputs so a crash cannot leave half a deployment config. */
+export async function writeLaunchEnvValuesAtomically(path: string, values: Record<string, string>): Promise<void> {
   let text = '';
   try {
     text = await readFile(path, 'utf8');
   } catch {
     text = '';
   }
-  const lines = text.split('\n').filter((line) => !line.startsWith(`${name}=`));
-  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-  lines.push(`${name}=${value}`, '');
-  await writeFile(path, lines.join('\n'), { mode: 0o600 });
+  const temporary = join(dirname(path), `.${path.split('/').at(-1) ?? 'launch-env'}.tmp-${process.pid}-${Date.now()}`);
+  await writeFile(temporary, replaceEnvValues(text, values), { mode: 0o600 });
+  await chmod(temporary, 0o600);
+  await rename(temporary, path);
   await chmod(path, 0o600);
+}
+
+/** Upserts one value, preserving the rest of the file verbatim. */
+export async function writeLaunchEnvValue(path: string, name: string, value: string): Promise<void> {
+  await writeLaunchEnvValuesAtomically(path, { [name]: value });
 }

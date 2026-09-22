@@ -86,7 +86,48 @@ expect_fail "refuses the pooled host"   gw_require_direct_postgres 'postgresql:/
 expect_fail "refuses a missing sslmode" gw_require_direct_postgres 'postgresql://u:p@ep-cool.ap-southeast-1.aws.neon.tech/zk_credits' DSN
 expect_fail "refuses a non-postgres url" gw_require_direct_postgres 'mysql://u:p@host/db?sslmode=require' DSN
 
+password_file="$SANDBOX/keystore-password"
+printf 'operator-password\n' > "$password_file"
+chmod 600 "$password_file"
+expect_ok "accepts a regular 600 password file" gw_require_password_file "$password_file" PASSWORD_FILE
+chmod 644 "$password_file"
+expect_fail "refuses a password file with mode 644" gw_require_password_file "$password_file" PASSWORD_FILE
+ln -s "$SANDBOX/does-not-matter" "$SANDBOX/password-link"
+expect_fail "refuses a symlinked password file" gw_require_password_file "$SANDBOX/password-link" PASSWORD_FILE
+
 echo "variable planes"
+
+echo "launch wizard deployment boundary"
+
+WIZARD="$SCRIPT_DIR/launch-wizard.sh"
+line_of() { grep -nF "$1" "$WIZARD" | head -n1 | cut -d: -f1; }
+rpc_line=$(line_of 'ask BASE_RPC_URL')
+domain_line=$(line_of 'ask BASE_DEPLOYMENT_DOMAIN')
+usdc_line=$(line_of 'ask BASE_USDC_ADDRESS')
+account_line=$(line_of 'ask BASE_DEPLOYER_KEYSTORE_ACCOUNT')
+password_line=$(line_of 'ask BASE_DEPLOYER_PASSWORD_FILE')
+sponsor_line=$(line_of 'ask_secret BASE_SPONSOR_PRIVATE_KEY')
+treasury_line=$(line_of 'ask BASE_TREASURY_ADDRESS')
+refund_line=$(line_of 'ask BASE_REFUND_VAULT')
+provider_line=$(line_of 'stage "Postgres:')
+if (( rpc_line < provider_line && domain_line < provider_line && usdc_line < provider_line &&
+      account_line < provider_line && password_line < provider_line && sponsor_line < provider_line &&
+      treasury_line < provider_line && refund_line < provider_line )); then
+  pass "collects every deployment input before provider setup"
+else
+  fail "collects every deployment input before provider setup"
+fi
+
+if grep -Eq 'ask(_validated_secret)? (BASE_BOND_ADDRESS|BASE_BOND_DEPLOYMENT_BLOCK|BASE_CONFIRMATIONS)' "$WIZARD"; then
+  fail "does not prompt for launcher-managed bond outputs"
+else
+  pass "does not prompt for launcher-managed bond outputs"
+fi
+
+expect_ok "wizard pins the official Base Sepolia USDC default" \
+  grep -qF "BASE_SEPOLIA_USDC_ADDRESS='0x036CbD53842c5426634e7929541eC2318f3dCF7e'" "$WIZARD"
+expect_ok "wizard pins the reviewed SpendVerifier adapter" \
+  grep -qF "BASE_REVIEWED_SPEND_VERIFIER_ADDRESS='0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD'" "$WIZARD"
 
 if grep -Eq '^[[:space:]]+PILOT_RELEASE_REVIEWED([[:space:]]|$)' "$SCRIPT_DIR/launch-wizard.sh"; then
   pass "launch wizard owns the release review gate"

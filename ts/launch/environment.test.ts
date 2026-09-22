@@ -9,7 +9,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -20,6 +20,7 @@ import {
   generateSecret,
   parseEnvFile,
   prepareLaunchEnvFile,
+  requirePasswordFile,
   validateShape,
   writeLaunchEnvValue,
   type GitProbe,
@@ -49,10 +50,21 @@ function completeEnv(overrides: Record<string, string> = {}): Record<string, str
     BASE_DEPLOYMENT_DOMAIN: '84532',
     BASE_USDC_ADDRESS: ADDRESS,
     BASE_DEPLOYER_KEYSTORE_ACCOUNT: 'pilot-deployer',
+    BASE_DEPLOYER_PASSWORD_FILE: '/tmp/foundry-password',
     BASE_TREASURY_ADDRESS: ADDRESS,
     BASE_REFUND_VAULT: '0x2222222222222222222222222222222222222222',
     BASE_SPONSOR_PRIVATE_KEY: SPONSOR,
+    BASE_SPEND_VERIFIER_ADDRESS: '0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD',
     BASESCAN_API_KEY: 'abcdefghijklmnopqrstuvwx',
+    BASE_SPONSOR_ADDRESS: '0x3333333333333333333333333333333333333333',
+    BASE_POSEIDON_T2_ADDRESS: '0x4444444444444444444444444444444444444444',
+    BASE_POSEIDON_T3_ADDRESS: '0x5555555555555555555555555555555555555555',
+    BASE_POSEIDON_T4_ADDRESS: '0x6666666666666666666666666666666666666666',
+    BASE_BOND_ADDRESS: '0x7777777777777777777777777777777777777777',
+    BASE_BOND_DEPLOYMENT_BLOCK: '123',
+    BASE_CONFIRMATIONS: '3',
+    BASE_PRIVATE_CREDIT_BOND_ADDRESS: '0x7777777777777777777777777777777777777777',
+    BASE_DEPLOYMENT_BLOCK: '123',
     NEON_API_KEY: 'napi_abcdefghijklmnopqrstuvwx',
     RENDER_API_KEY: 'rnd_abcdefghijklmnopqrstuvwx',
     RENDER_OWNER_ID: 'tea-abcdefghijklmnop',
@@ -202,6 +214,22 @@ describe('permissions', () => {
     await chmod(path, 0o644);
     await prepareLaunchEnvFile(path, permissive);
     expect(((await stat(path)).mode & 0o777).toString(8)).toBe('600');
+  });
+
+  it('requires a regular, non-symlinked password file with mode 0600', async () => {
+    const directory = await sandbox();
+    const password = join(directory, 'password');
+    await writeFile(password, 'secret\n', { mode: 0o600 });
+    await expect(requirePasswordFile(password)).resolves.toBeUndefined();
+
+    await chmod(password, 0o644);
+    await expect(requirePasswordFile(password)).rejects.toThrow(/requires 600/u);
+
+    const target = join(directory, 'target-password');
+    const link = join(directory, 'linked-password');
+    await writeFile(target, 'secret\n', { mode: 0o600 });
+    await symlink(target, link);
+    await expect(requirePasswordFile(link)).rejects.toThrow(/regular non-symlinked file/u);
   });
 
   it('upserts one value without disturbing the others', async () => {

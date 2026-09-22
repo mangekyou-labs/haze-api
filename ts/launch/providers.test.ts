@@ -356,7 +356,12 @@ describe('the JSON-RPC chain reader', () => {
     });
 
     // 0x1400000 is 20971520; the reader reports the block exactly as sent.
-    await expect(chain.receipt('0xhash')).resolves.toEqual({ status: 'success', contractAddress: '0xabc', blockNumber: 20_971_520n });
+    await expect(chain.receipt('0xhash')).resolves.toEqual({
+      status: 'success',
+      contractAddress: '0xabc',
+      blockNumber: 20_971_520n,
+      transactionHash: '0xhash',
+    });
     await expect(chain.code('0xabc')).resolves.toBe('0x6080');
   });
 

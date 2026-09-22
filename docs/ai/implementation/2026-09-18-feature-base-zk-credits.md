@@ -358,12 +358,41 @@ steps *between* the two publish groups rather than part of either. An existing
 registry version whose packed contents differ from this checkout stops the
 release rather than being overwritten.
 
-`ts/launch/deploy.ts` writes the broadcast intent down before sending it — the
-signer, the nonce, and the CREATE address that pair implies — so a resumed run
-compares against a prediction instead of a log line. Bytecode at the predicted
-address confirms a deployment whose hash was never recorded, a receipt at a
-different address or a reverted receipt is a hard stop, and neither means a
-retry is safe. The runtime sponsor's USDC approval is bounded to 80 test USDC.
+`ts/launch/deploy.ts` writes the deployment intent down before an operator can
+broadcast it — the signer, starting/contract nonce, and each CREATE address
+that pair implies — so a resumed run compares against predictions instead of
+log lines. `scripts/launch-wizard.sh` is configuration-only: it collects the
+Base Sepolia RPC/domain, official USDC default, Foundry keystore/password-file
+path, sponsor key, role addresses, reviewed adapter, and optional BaseScan key;
+bond address and deployment block are launcher outputs. The password file must
+be regular, non-symlinked, and mode `0600`, and neither it nor private key
+material is printed.
+
+The Solidity entrypoint deploys Poseidon T2, T3, T4, then
+`PrivateCreditBond`, reading launch-native environment names and decimal
+domain `84532`. The launcher derives the keystore signer and sponsor address,
+checks chain/balance/nonce, USDC bytecode/decimals, role distinctness, and the
+reviewed adapter's underlying verifier, then runs a no-broadcast simulation.
+It asks for fresh human authorization before displaying the dotenv-wrapped
+keystore command; it never runs that command. Artifact resume requires all four
+CREATEs to match signer, nonce, order, predicted address, chain, successful
+receipt, and deployed bytecode. Ambiguous partial, reverted, reordered,
+missing, or unreadable results stay `unknown` and expose only a guarded
+`forge script --resume` command after another confirmation. Post-deploy checks
+cover all nine bond immutables and the initial commitment root, after which
+outputs are atomically persisted. Explorer verification is independent and
+retryable, and the runtime sponsor's USDC approval remains bounded to 80 test
+USDC.
+
+### Base Sepolia launch repair evidence (2026-09-22)
+
+The repair is intentionally stopped before a live bond broadcast. Wayfinder
+B22 remains open until the three founder activations and observation period
+complete. The implementation and tests cover wizard ordering and output-only
+bond fields, secret redaction, password-file permissions, environment
+validation, four-contract order and constructor wiring, Foundry artifact
+parsing, nonce drift, partial/resumed broadcasts, reverted receipts, missing
+bytecode, immutable/root mismatches, and verification-only retries.
 
 ### Activation measurement
 

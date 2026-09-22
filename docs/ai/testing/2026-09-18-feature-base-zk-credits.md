@@ -43,6 +43,33 @@ A proof failure (prove miss, 10s abort, hash mismatch, or failed
 self-verify) must leave no claim row, consume no slot, and must not be
 counted as a cancellation.
 
+## Base Sepolia launch repair evidence (2026-09-22)
+
+This repair stops before a live `PrivateCreditBond` broadcast. The shell wizard
+is checked for prompt ordering, output-only bond address/block fields, official
+USDC and adapter defaults, and redacted secret handling. The TypeScript launch
+suite covers the strict Foundry four-CREATE parser/reconciler, nonce/order/type
+drift, partial artifacts, reverted receipts, missing bytecode, password-file
+permissions, immutable/root validation, and an explorer-verification retry that
+preserves the reconciled deployment checkpoint. The Solidity script is built
+and tested offline; its order is Poseidon T2, T3, T4, then the bond.
+
+Fresh repair checks from the feature worktree:
+
+| Surface | Command | Result |
+| --- | --- | --- |
+| TypeScript | `cd ts && npm run typecheck` | passed |
+| TypeScript launch and regression suites | `cd ts && npm test -- --run` | passed; 27 files passed, 5 skipped; 340 tests passed, 28 skipped |
+| Shell syntax and guardrails | `bash -n scripts/launch-wizard.sh scripts/launch-guardrails.sh scripts/guardrails.test.sh scripts/launch-pilot.sh && bash scripts/guardrails.test.sh` | passed |
+| ShellCheck | `shellcheck scripts/launch-wizard.sh scripts/launch-guardrails.sh scripts/guardrails.test.sh` | unavailable on this workstation; syntax/guardrail checks still passed |
+| Contracts | `cd contracts && FOUNDRY_OFFLINE=true forge build` | passed with compiler warnings only |
+| Contract tests | `cd contracts && FOUNDRY_OFFLINE=true forge test --summary` | 42 passed, 0 failed, 0 skipped |
+| Launcher dry check | `scripts/launch-pilot.sh --check` | read-only entrypoint ran; expected not-ready result with incomplete local config; no live credentials or broadcast used |
+
+No password contents, private key, sponsor key, or BaseScan token is emitted
+by the wizard/launcher output or checkpoint. Hosting and activation remain
+behind the atomically persisted deployment-output boundary.
+
 ## Local B2/B3/B4 evidence (2026-09-20)
 
 Run from the `feature-base-zk-credits` worktree. This is local evidence for

@@ -32,27 +32,38 @@ process; unit tests use deterministic mocks.
 
 ## Base Sepolia deployment
 
-Deploy Poseidon T2/T3/T4 and the generated spend verifier first. Then set the
-following environment variables without committing them:
+The checkpointed launcher owns the Base Sepolia deployment boundary. The
+wizard collects these values in a gitignored mode-0600 file; it does not ask
+for a bond address or deployment block because those are outputs:
 
 ```sh
-export BASE_RPC_URL=...
-export BASE_USDC=...
-export BASE_SPONSOR=...
-export BASE_REFUND_VAULT=...
-export BASE_TREASURY=...
-export POSEIDON_T2=...
-export POSEIDON_T3=...
-export POSEIDON_T4=...
-export SPEND_VERIFIER=...
-export BASE_DEPLOYMENT_DOMAIN=0x...
-forge script script/DeployBaseSepolia.s.sol:DeployBaseSepolia \
-  --rpc-url "$BASE_RPC_URL" --broadcast --verify
+# Run from the repository root. The wizard prompts for the values below.
+scripts/launch-wizard.sh
+scripts/launch-pilot.sh --check
 ```
 
-The script intentionally does not choose keys, tokens, verifier artifacts, or
-addresses. Mainnet requires an external audit, production proving ceremony,
-protected sponsor/treasury keys, and recovery drills before any broadcast.
+The launch-native inputs are `BASE_RPC_URL`, decimal
+`BASE_DEPLOYMENT_DOMAIN=84532`, Circle's Base Sepolia USDC
+`0x036CbD53842c5426634e7929541eC2318f3dCF7e`,
+`BASE_DEPLOYER_KEYSTORE_ACCOUNT`, an absolute regular non-symlinked
+`BASE_DEPLOYER_PASSWORD_FILE` with mode `0600`,
+`BASE_SPONSOR_PRIVATE_KEY`, `BASE_TREASURY_ADDRESS`, `BASE_REFUND_VAULT`,
+the reviewed adapter `BASE_SPEND_VERIFIER_ADDRESS`, and optionally
+`BASESCAN_API_KEY`. The launcher derives `BASE_SPONSOR_ADDRESS` and verifies
+that the adapter wraps `0xC66CC4866f945Ce39c207729CF136fd03d58207E`.
+
+After a no-broadcast simulation, it predicts and displays all four CREATE
+addresses and asks for fresh authorization before showing the operator a
+dotenv-wrapped, keystore-backed `forge script ... --broadcast` command. The
+launcher never handles or prints the password and never executes that command.
+Resume only after the operator runs it; `run-latest.json` is reconciled against
+signer, nonce, order, predicted address, receipts, and bytecode before the
+bond's nine immutables and initial root are checked. Deployment outputs are
+written atomically only after that succeeds; explorer verification is a
+separate retryable step.
+
+Mainnet requires an external audit, production proving ceremony, protected
+sponsor/treasury keys, and recovery drills before any broadcast.
 
 The former Stellar contract remains under `archive/stellar/` for historical
 reference and is not part of the Foundry source or test set.

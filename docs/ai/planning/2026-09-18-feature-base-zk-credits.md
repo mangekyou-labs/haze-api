@@ -25,6 +25,35 @@ complete.
 Base mainnet and a production proving ceremony are **B22**: blocked on a
 later go/no-go map. They are not tasks on this queue.
 
+## Base Sepolia launch repair (2026-09-22)
+
+The launch workflow is now configuration-only until a separately checkpointed
+launcher reconciles a human-run deployment. The wizard collects the dedicated
+RPC, decimal domain `84532`, Circle's Base Sepolia USDC address
+`0x036CbD53842c5426634e7929541eC2318f3dCF7e`, Foundry keystore account and
+absolute mode-`0600` password-file path, sponsor key, treasury, refund-vault,
+the reviewed SpendVerifier adapter
+`0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD`, and an optional BaseScan key.
+It does not ask for a bond address or deployment block; those are launcher
+outputs. Password contents and private keys are never printed.
+
+`launch-pilot` derives the keystore signer and sponsor address, validates Base
+Sepolia, bytecode, decimals, roles, verifier linkage, and balance/nonce,
+simulates without broadcast, predicts the four CREATE addresses, and requires
+a fresh authorization before displaying a dotenv-wrapped keystore command.
+Resume reconciliation is strict about signer, nonce, order, predicted address,
+receipt, chain, and runtime bytecode. Partial, reverted, reordered, missing, or
+unreadable artifacts remain unknown and only expose a guarded `--resume`
+command after another explicit authorization. Successful reconciliation checks
+all nine bond immutables and the empty commitment root before atomically
+writing the four deployment addresses, bond block, sponsor address, and
+`BASE_CONFIRMATIONS=3`; hosting and activation remain after that boundary.
+
+This repair deliberately does not broadcast the bond. Wayfinder B22 remains
+open/blocked until the three founder activations and the required observation
+period are complete; this launch repair is evidence for the pre-activation
+gate, not a mainnet or paid-traffic approval.
+
 ## Artifact status (as of 2026-09-20)
 
 | Artifact | Status | Note |

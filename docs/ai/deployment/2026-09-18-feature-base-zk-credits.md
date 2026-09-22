@@ -21,6 +21,48 @@ rewrite. Paid design-partner traffic waits on the paid-traffic gate
 Base mainnet and a production proving ceremony are a later go/no-go map.
 They are not an automatic promotion from Sepolia.
 
+## Base Sepolia launch wizard repair (2026-09-22)
+
+The repaired wizard is configuration-only. Before it asks for provider or
+hosting setup it records the dedicated RPC, deployment domain `84532`, default
+USDC `0x036CbD53842c5426634e7929541eC2318f3dCF7e`, Foundry keystore account,
+an absolute regular non-symlinked password file with mode `0600`, sponsor hot
+key, treasury, refund vault, the reviewed adapter
+`0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD`, and an optional BaseScan key.
+Bond address and deployment-block prompts are removed. The wizard never prints
+the password or a private key.
+
+The launch-native environment names are `BASE_RPC_URL`,
+`BASE_DEPLOYMENT_DOMAIN`, `BASE_USDC_ADDRESS`,
+`BASE_DEPLOYER_KEYSTORE_ACCOUNT`, `BASE_DEPLOYER_PASSWORD_FILE`,
+`BASE_SPONSOR_PRIVATE_KEY`, `BASE_TREASURY_ADDRESS`,
+`BASE_REFUND_VAULT`, and `BASE_SPEND_VERIFIER_ADDRESS`. The launcher derives
+`BASE_SPONSOR_ADDRESS`; it never passes the sponsor private key as an address.
+The Solidity script reads those names directly and deploys, in order, Poseidon
+T2, Poseidon T3, Poseidon T4, and `PrivateCreditBond`, wiring the bond to the
+adapter whose `verifier()` must be
+`0xC66CC4866f945Ce39c207729CF136fd03d58207E`.
+
+`launch-pilot` performs read-only chain and keystore checks, runs the Foundry
+simulation without `--broadcast`, persists scalar deployment intent, prints a
+nonsecret input/prediction summary, and waits for fresh human authorization
+before exposing the operator's dotenv-wrapped keystore command. The launcher
+does not run that command. On resume it parses `run-latest.json` and reconciles
+all four CREATEs against the intended signer, nonce, order, predicted address,
+receipt, chain, and bytecode. Ambiguous partial/reverted/reordered/missing or
+unreadable results stay `unknown` and block blind retry; verification is an
+independent retryable step that never redeploys. Only after all nine bond
+immutables and the initial commitment root match are the four addresses, bond
+deployment block, sponsor address, and `BASE_CONFIRMATIONS=3` atomically
+written. Hosting, GitHub-variable, and activation stages follow that output
+boundary.
+
+Validation for this repair is recorded in the implementation/testing lifecycle
+documents and includes shell guardrails, TypeScript typecheck and tests,
+offline Foundry build/tests, and a dry `launch-pilot --check`. No live bond
+broadcast is part of this repair. Wayfinder B22 remains open until the three
+founder activations and the observation period are complete.
+
 ## Local and CI
 
 1. Run `npx ai-devkit@latest lint --feature base-zk-credits` and

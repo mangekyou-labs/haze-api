@@ -16,12 +16,18 @@ import {
   EXISTING_B11_CONTRACTS,
   MAX_PILOT_APPROVAL_USDC,
   PILOT_CHAIN_ID,
+  CONTRACT_DEPLOY_ORDER,
+  abiSelector,
   assertBoundedApproval,
   assertChainId,
   assertImmutables,
   broadcastIntent,
+  deploymentIntentDetail,
+  intentsFromDetail,
+  parseFoundryRunLatest,
   predictDeploymentAddress,
   reconcileBroadcast,
+  reconcileDeploymentArtifact,
   type ChainReader,
 } from './deploy.js';
 
@@ -87,11 +93,12 @@ describe('reconciliation on resume', () => {
   it('confirms a deployment whose hash was never recorded but whose nonce was consumed', async () => {
     const intent = broadcastIntent('PrivateCreditBond', SIGNER, 7);
     const result = await reconcileBroadcast(intent, chain({ code: BYTECODE }));
-    expect(result).toMatchObject({ kind: 'confirmed', address: intent.predictedAddress });
+    expect(result.kind).toBe('unknown');
+    expect(result).toMatchObject({ reason: expect.stringContaining('no transaction hash or receipt') });
   });
 
   it('reports an absent deployment so a retry is safe', async () => {
-    const intent = broadcastIntent('PrivateCreditBond', SIGNER, 7, '0xhash');
+    const intent = broadcastIntent('PrivateCreditBond', SIGNER, 7);
     const result = await reconcileBroadcast(intent, chain({ code: '0x' }));
     expect(result.kind).toBe('absent');
     expect(result).toMatchObject({ reason: expect.stringContaining('has no bytecode at') });
@@ -103,7 +110,7 @@ describe('reconciliation on resume', () => {
       receipt: { status: 'reverted', contractAddress: null, blockNumber: 21_000_000n },
       code: '0x',
     }));
-    expect(result.kind).toBe('mismatch');
+    expect(result.kind).toBe('unknown');
     expect(result).toMatchObject({ reason: expect.stringContaining('reverted') });
   });
 
@@ -113,7 +120,7 @@ describe('reconciliation on resume', () => {
       receipt: { status: 'success', contractAddress: '0x9999999999999999999999999999999999999999', blockNumber: 1n },
       code: BYTECODE,
     }));
-    expect(result.kind).toBe('mismatch');
+    expect(result.kind).toBe('unknown');
     expect(result).toMatchObject({ reason: expect.stringContaining('was predicted from nonce 7') });
   });
 
@@ -123,7 +130,7 @@ describe('reconciliation on resume', () => {
       receipt: { status: 'success', contractAddress: intent.predictedAddress, blockNumber: 1n },
       code: '0x',
     }));
-    expect(result.kind).toBe('mismatch');
+    expect(result.kind).toBe('unknown');
     expect(result).toMatchObject({ reason: expect.stringContaining('has no bytecode') });
   });
 });
@@ -131,11 +138,14 @@ describe('reconciliation on resume', () => {
 describe('deployed immutables', () => {
   const expected = {
     usdc: '0x3333333333333333333333333333333333333333',
-    treasury: '0x4444444444444444444444444444444444444444',
+    sponsor: '0x4444444444444444444444444444444444444444',
     refundVault: '0x5555555555555555555555555555555555555555',
-    verifier: EXISTING_B11_CONTRACTS.verifier,
-    adapter: EXISTING_B11_CONTRACTS.adapter,
-    deploymentDomain: '84532',
+    treasury: '0x6666666666666666666666666666666666666666',
+    poseidonT2: '0x7777777777777777777777777777777777777777',
+    poseidonT3: '0x8888888888888888888888888888888888888888',
+    poseidonT4: '0x9999999999999999999999999999999999999999',
+    spendVerifier: EXISTING_B11_CONTRACTS.adapter,
+    deploymentDomain: `0x${PILOT_CHAIN_ID.toString(16).padStart(64, '0')}`,
   };
 
   it('accepts a bond that read back as intended, whatever the case', () => {
@@ -146,8 +156,120 @@ describe('deployed immutables', () => {
     expect(() => assertImmutables({
       ...expected,
       treasury: '0x6666666666666666666666666666666666666666',
-      deploymentDomain: '8453',
-    }, expected)).toThrow(/treasury is .*expected .*; deploymentDomain is 8453, expected 84532/u);
+      deploymentDomain: `0x${(8453).toString(16).padStart(64, '0')}`,
+    }, expected)).toThrow(/deploymentDomain is .*expected/u);
+  });
+});
+
+describe('Foundry artifact reconciliation', () => {
+  const startingNonce = 7;
+
+  function intents() {
+    return CONTRACT_DEPLOY_ORDER.map((contract, offset) => broadcastIntent(
+      contract,
+      SIGNER,
+      startingNonce + offset,
+      `0x${(offset + 1).toString(16).padStart(64, '0')}`,
+    ));
+  }
+
+  function artifactJson(current: ReturnType<typeof intents>, mutate?: (transactions: Record<string, unknown>[], receipts: Record<string, unknown>[]) => void): string {
+    const transactions = current.map((intent, index) => ({
+      contractName: intent.contract,
+      transactionType: 'CREATE',
+      hash: intent.transactionHash,
+      tx: {
+        type: 'CREATE',
+        from: SIGNER,
+        nonce: `0x${(startingNonce + index).toString(16)}`,
+        chainId: `0x${PILOT_CHAIN_ID.toString(16)}`,
+        to: null,
+      },
+    }));
+    const receipts = current.map((intent, index) => ({
+      transactionHash: intent.transactionHash,
+      status: '0x1',
+      contractAddress: intent.predictedAddress,
+      blockNumber: `0x${(100 + index).toString(16)}`,
+      from: SIGNER,
+      nonce: `0x${(startingNonce + index).toString(16)}`,
+    }));
+    mutate?.(transactions, receipts);
+    return JSON.stringify({ chain: `0x${PILOT_CHAIN_ID.toString(16)}`, transactions, receipts });
+  }
+
+  function chainFor(current: ReturnType<typeof intents>, missingAddress?: string): ChainReader {
+    const receipts = new Map(current.map((intent, index) => [intent.transactionHash!, {
+      status: 'success' as const,
+      contractAddress: intent.predictedAddress,
+      blockNumber: BigInt(100 + index),
+      transactionHash: intent.transactionHash!,
+      from: SIGNER,
+      nonce: startingNonce + index,
+    }]));
+    return {
+      chainId: async () => PILOT_CHAIN_ID,
+      receipt: async (hash) => receipts.get(hash),
+      code: async (address) => address.toLowerCase() === missingAddress?.toLowerCase() ? '0x' : BYTECODE,
+      transaction: async (hash) => {
+        const intent = current.find((candidate) => candidate.transactionHash === hash);
+        if (!intent) return undefined;
+        return { from: SIGNER, nonce: intent.nonce, to: null };
+      },
+    };
+  }
+
+  it('parses the four CREATEs and reconciles signer, nonce, order, receipts, and bytecode', async () => {
+    const current = intents();
+    const artifact = parseFoundryRunLatest(artifactJson(current));
+    expect(artifact.chainId).toBe(PILOT_CHAIN_ID);
+    expect(artifact.transactions.map((entry) => entry.contract)).toEqual([...CONTRACT_DEPLOY_ORDER]);
+
+    const result = await reconcileDeploymentArtifact(current, artifact, chainFor(current));
+    expect(result).toMatchObject({ kind: 'confirmed', bondDeploymentBlock: 103n });
+    expect(result.deployments?.map((deployment) => deployment.address)).toEqual(current.map((intent) => intent.predictedAddress));
+  });
+
+  it('round-trips scalar intent state without persisting private material', () => {
+    const current = intents();
+    const detail = deploymentIntentDetail(current, '/tmp/run-latest.json');
+    expect(detail).toMatchObject({ signer: SIGNER, startingNonce, contractNonce: startingNonce + 3 });
+    expect(JSON.stringify(detail)).not.toContain('cd'.repeat(32));
+    expect(intentsFromDetail(detail)).toEqual(current.map(({ transactionHash: _hash, ...intent }) => ({ ...intent, transactionHash: null })));
+  });
+
+  it.each([
+    ['nonce drift', (transactions: Record<string, unknown>[]) => { transactions[1]!.tx = { ...(transactions[1]!.tx as object), nonce: '0x99' }; }],
+    ['reordered deployment', (transactions: Record<string, unknown>[]) => { [transactions[0], transactions[1]] = [transactions[1]!, transactions[0]!]; }],
+    ['unexpected transaction type', (transactions: Record<string, unknown>[]) => { transactions[2]!.transactionType = 'CALL'; }],
+    ['reverted receipt', (_transactions: Record<string, unknown>[], receipts: Record<string, unknown>[]) => { receipts[3]!.status = '0x0'; }],
+  ])('keeps %s artifacts unknown', async (_label, mutate) => {
+    const current = intents();
+    const artifact = parseFoundryRunLatest(artifactJson(current, mutate));
+    const result = await reconcileDeploymentArtifact(current, artifact, chainFor(current));
+    expect(result.kind).toBe('unknown');
+  });
+
+  it('keeps partial artifacts unknown instead of retrying blind', async () => {
+    const current = intents();
+    const raw = JSON.parse(artifactJson(current)) as { transactions: unknown[]; receipts: unknown[]; chain: string };
+    raw.transactions.pop();
+    const result = await reconcileDeploymentArtifact(current, parseFoundryRunLatest(JSON.stringify(raw)), chainFor(current));
+    expect(result.kind).toBe('unknown');
+    expect(result.reason).toMatch(/expected 4/u);
+  });
+
+  it('keeps a missing deployed bytecode unknown', async () => {
+    const current = intents();
+    const artifact = parseFoundryRunLatest(artifactJson(current));
+    const result = await reconcileDeploymentArtifact(current, artifact, chainFor(current, current[2]!.predictedAddress));
+    expect(result.kind).toBe('unknown');
+    expect(result.reason).toMatch(/no deployed bytecode/u);
+  });
+
+  it('exposes selectors used by the post-deploy immutable checks', () => {
+    expect(abiSelector('poseidonT2()')).toMatch(/^0x[0-9a-f]{8}$/u);
+    expect(abiSelector('verifier()')).toMatch(/^0x[0-9a-f]{8}$/u);
   });
 });
 

@@ -24,6 +24,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import {
   LAUNCH_ENV_PATH,
@@ -31,7 +32,9 @@ import {
   generateSecret,
   prepareLaunchEnvFile,
   readLaunchEnv,
+  requirePasswordFile,
   writeLaunchEnvValue,
+  writeLaunchEnvValuesAtomically,
   GENERATED_SECRET_VARS,
   type GitProbe,
   type LaunchEnvCheck,
@@ -48,14 +51,29 @@ import {
 } from './release.js';
 import {
   CONTRACT_DEPLOY_ORDER,
+  BASE_CONFIRMATIONS,
+  BASE_SEPOLIA_USDC_ADDRESS,
   EXISTING_B11_CONTRACTS,
   PILOT_CHAIN_ID,
+  abiSelector,
+  assertInitialCommitmentRoot,
+  assertImmutables,
+  assertRoleAddresses,
+  assertVerifierLinkage,
   assertChainId,
   broadcastIntent,
-  reconcileBroadcast,
+  deriveAddressFromPrivateKey,
+  deploymentIntentDetail,
+  initialCommitmentRoot,
+  intentsFromDetail,
+  parseFoundryRunLatest,
+  reconcileDeploymentArtifact,
+  readBondImmutables,
+  readVerifierLinkage,
   rpcChainReader,
   type BroadcastIntent,
   type ChainReader,
+  type FoundryRunArtifact,
 } from './deploy.js';
 import {
   githubOAuthCallback,
@@ -92,7 +110,7 @@ export interface LaunchContext {
   chain(rpcUrl: string): ChainReader;
   transport(): HttpTransport;
   /** Runs a command in the repository, returning its exit code and output. */
-  run(command: string, args: string[], options?: { cwd?: string }): Promise<CommandResult>;
+  run(command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<CommandResult>;
   /** Asks the founder to confirm an irreversible action. Never defaulted to yes. */
   confirm(question: string): Promise<boolean>;
   /** Prints a line, already redacted. */
@@ -103,7 +121,7 @@ export type StepOutcome =
   | { status: 'succeeded'; detail?: StepDetail }
   | { status: 'unknown'; note: string; detail?: StepDetail }
   | { status: 'failed'; note: string; detail?: StepDetail }
-  | { status: 'skipped'; note: string };
+  | { status: 'skipped'; note: string; detail?: StepDetail };
 
 export interface LaunchStep {
   name: string;
@@ -152,6 +170,132 @@ function manualStep(options: {
       return { status: 'succeeded' };
     },
   };
+}
+
+const DEPLOY_SCRIPT = 'script/DeployBaseSepolia.s.sol:DeployBaseSepolia';
+const DEPLOY_ARTIFACT_PATH = 'contracts/broadcast/DeployBaseSepolia.s.sol/84532/run-latest.json';
+
+function deploymentArtifactPath(context: LaunchContext): string {
+  return context.env.BASE_DEPLOYMENT_ARTIFACT ?? DEPLOY_ARTIFACT_PATH;
+}
+
+function deployedCode(code: string): boolean {
+  return /^0x[0-9a-fA-F]+$/u.test(code) && code.length > 2;
+}
+
+function parseSafeInteger(value: string, label: string): number {
+  const raw = value.trim();
+  if (!/^[0-9]+$/u.test(raw)) throw new Error(`${label} must be a decimal integer`);
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`${label} was not a safe integer`);
+  return parsed;
+}
+
+function parseAbiInteger(value: string, label: string): bigint {
+  const token = value.trim().split(/\s+/u)[0] ?? '';
+  if (!/^(?:0x[0-9a-fA-F]+|[0-9]+)$/u.test(token)) throw new Error(`${label} returned an unreadable ABI integer`);
+  return BigInt(token);
+}
+
+function parseAbiAddress(value: string, label: string): string {
+  const matches = value.match(/0x[0-9a-fA-F]{40,64}/gu);
+  const match = matches?.at(-1);
+  if (!match) throw new Error(`${label} returned an unreadable address`);
+  return match.length === 66 ? `0x${match.slice(-40)}` : match;
+}
+
+function rpcDisplay(rpcUrl: string): string {
+  try {
+    const url = new URL(rpcUrl);
+    return url.origin;
+  } catch {
+    return '<configured RPC endpoint>';
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/gu, `'\\''`)}'`;
+}
+
+function broadcastCommand(context: LaunchContext, resume = false): string {
+  const envPath = context.envPath ?? LAUNCH_ENV_PATH;
+  const suffix = resume ? ' --resume' : '';
+  return [
+    `dotenv -e ${shellQuote(envPath)} -- sh -c`,
+    shellQuote(`cd contracts && forge script ${DEPLOY_SCRIPT} --account "$BASE_DEPLOYER_KEYSTORE_ACCOUNT" --password-file "$BASE_DEPLOYER_PASSWORD_FILE" --rpc-url "$BASE_RPC_URL" --broadcast${suffix}`),
+  ].join(' ');
+}
+
+async function commandQuantity(context: LaunchContext, command: string, args: string[], label: string): Promise<bigint> {
+  const result = await context.run(command, args);
+  if (result.code !== 0) throw new Error(`${label} command failed`);
+  return parseAbiInteger(result.stdout, label);
+}
+
+async function resolveDeployer(context: LaunchContext): Promise<string> {
+  const account = context.env.BASE_DEPLOYER_KEYSTORE_ACCOUNT ?? '';
+  const passwordFile = context.env.BASE_DEPLOYER_PASSWORD_FILE ?? '';
+  await requirePasswordFile(passwordFile);
+  const result = await context.run('cast', [
+    'wallet', 'address', '--account', account, '--password-file', passwordFile,
+  ]);
+  if (result.code !== 0) throw new Error(`could not read the deployment address from keystore account ${account}`);
+  return parseAbiAddress(result.stdout, 'keystore deployer address');
+}
+
+async function resolveChainId(context: LaunchContext, chain: ChainReader, rpcUrl: string): Promise<number> {
+  if (chain.chainId) return await chain.chainId();
+  return Number(await commandQuantity(context, 'cast', ['chain-id', '--rpc-url', rpcUrl], 'chain id'));
+}
+
+async function resolveBalance(context: LaunchContext, chain: ChainReader, deployer: string, rpcUrl: string): Promise<bigint> {
+  if (chain.balance) return await chain.balance(deployer);
+  return await commandQuantity(context, 'cast', ['balance', deployer, '--wei', '--rpc-url', rpcUrl], 'deployer balance');
+}
+
+async function resolvePendingNonce(context: LaunchContext, chain: ChainReader, deployer: string, rpcUrl: string): Promise<number> {
+  if (chain.nonce) return await chain.nonce(deployer, 'pending');
+  return Number(await commandQuantity(context, 'cast', ['nonce', deployer, '--rpc-url', rpcUrl], 'pending nonce'));
+}
+
+async function resolveCall(context: LaunchContext, chain: ChainReader, address: string, data: string, signature: string, rpcUrl: string): Promise<string> {
+  if (chain.call) return await chain.call(address, data);
+  const result = await context.run('cast', ['call', address, signature, '--rpc-url', rpcUrl]);
+  if (result.code !== 0) throw new Error(`${signature} call failed`);
+  return result.stdout;
+}
+
+function resolvedInputLines(context: LaunchContext, signer: string, sponsor: string, artifactPath: string): string[] {
+  const env = context.env;
+  return [
+    `    resolved chain: Base Sepolia (${PILOT_CHAIN_ID}) via ${rpcDisplay(env.BASE_RPC_URL ?? '')}`,
+    `    resolved USDC: ${env.BASE_USDC_ADDRESS ?? BASE_SEPOLIA_USDC_ADDRESS}`,
+    `    resolved deployer account: ${env.BASE_DEPLOYER_KEYSTORE_ACCOUNT ?? '<missing>'} (${signer})`,
+    `    resolved password-file path: ${env.BASE_DEPLOYER_PASSWORD_FILE ?? '<missing>'}`,
+    `    resolved sponsor address: ${sponsor}`,
+    `    resolved treasury: ${env.BASE_TREASURY_ADDRESS ?? '<missing>'}`,
+    `    resolved refund vault: ${env.BASE_REFUND_VAULT ?? '<missing>'}`,
+    `    resolved SpendVerifier adapter: ${env.BASE_SPEND_VERIFIER_ADDRESS ?? EXISTING_B11_CONTRACTS.adapter}`,
+    `    resolved BaseScan verification: ${(env.BASESCAN_API_KEY ?? '').length > 0 ? 'configured' : 'deferred'}`,
+    `    deployment artifact: ${artifactPath}`,
+  ];
+}
+
+function intentDetailWithFlags(intents: readonly BroadcastIntent[], artifactPath: string, flags: Record<string, boolean> = {}): StepDetail {
+  return { ...deploymentIntentDetail(intents, artifactPath), ...flags };
+}
+
+async function readDeploymentArtifact(path: string): Promise<{ artifact?: FoundryRunArtifact; error?: string; present: boolean }> {
+  try {
+    const text = await readFile(path, 'utf8');
+    return { artifact: parseFoundryRunLatest(text), present: true };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return {
+      error: error instanceof Error ? error.message : 'deployment artifact is unreadable',
+      present: code !== 'ENOENT',
+    };
+  }
 }
 
 /**
@@ -293,82 +437,263 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
     {
       name: 'deploy:preflight',
       stage: 'deploy',
-      description: 'the RPC is Base Sepolia, the deployer and sponsor are known, and the B11 artifacts are present',
+      description: 'the RPC, keystore, roles, USDC, and reviewed verifier are independently validated',
       async execute(context) {
-        assertChainId(Number(context.env.BASE_DEPLOYMENT_DOMAIN), PILOT_CHAIN_ID);
+        const rpcUrl = context.env.BASE_RPC_URL ?? '';
+        const chain = context.chain(rpcUrl);
+        try {
+          const domain = parseSafeInteger(context.env.BASE_DEPLOYMENT_DOMAIN ?? '', 'deployment domain');
+          assertChainId(domain, PILOT_CHAIN_ID);
+          const deployer = await resolveDeployer(context);
+          const observedChain = await resolveChainId(context, chain, rpcUrl);
+          assertChainId(observedChain, PILOT_CHAIN_ID);
+          const balance = await resolveBalance(context, chain, deployer, rpcUrl);
+          if (balance <= 0n) return { status: 'failed', note: `deployer ${deployer} has no Base Sepolia balance` };
+          const pendingNonce = await resolvePendingNonce(context, chain, deployer, rpcUrl);
+          const sponsor = deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? '');
+          assertRoleAddresses({
+            sponsor,
+            treasury: context.env.BASE_TREASURY_ADDRESS ?? '',
+            refundVault: context.env.BASE_REFUND_VAULT ?? '',
+          });
+          const configuredAdapter = context.env.BASE_SPEND_VERIFIER_ADDRESS ?? '';
+          if (configuredAdapter.toLowerCase() !== EXISTING_B11_CONTRACTS.adapter.toLowerCase()) {
+            return { status: 'failed', note: `BASE_SPEND_VERIFIER_ADDRESS must be the reviewed adapter ${EXISTING_B11_CONTRACTS.adapter}` };
+          }
+          const usdc = context.env.BASE_USDC_ADDRESS ?? '';
+          const usdcCode = await chain.code(usdc);
+          if (!deployedCode(usdcCode)) return { status: 'failed', note: `USDC at ${usdc} has no bytecode on this RPC` };
+          const decimals = parseAbiInteger(
+            await resolveCall(context, chain, usdc, abiSelector('decimals()'), 'decimals()(uint8)', rpcUrl),
+            'USDC decimals',
+          );
+          if (decimals !== 6n) return { status: 'failed', note: `USDC at ${usdc} reports ${decimals} decimals; expected 6` };
+          for (const [label, contract] of Object.entries(EXISTING_B11_CONTRACTS)) {
+            const code = await chain.code(contract);
+            if (!deployedCode(code)) return { status: 'failed', note: `the reviewed B11 ${label} at ${contract} has no bytecode on this RPC` };
+          }
+          const linkedVerifier = parseAbiAddress(
+            await resolveCall(context, chain, configuredAdapter, abiSelector('verifier()'), 'verifier()(address)', rpcUrl),
+            'SpendVerifier.verifier',
+          );
+          assertVerifierLinkage(linkedVerifier);
+          const outputPath = context.envPath ?? LAUNCH_ENV_PATH;
+          await writeLaunchEnvValuesAtomically(outputPath, { BASE_SPONSOR_ADDRESS: sponsor });
+          context.env.BASE_SPONSOR_ADDRESS = sponsor;
+          context.print(`    deployer ${deployer}, pending nonce ${pendingNonce}, balance ${balance} wei`);
+          context.print(`    USDC ${usdc} has bytecode and 6 decimals`);
+          context.print(`    reviewed SpendVerifier adapter ${configuredAdapter} wraps ${linkedVerifier}`);
+          return {
+            status: 'succeeded',
+            detail: {
+              signer: deployer,
+              chainId: observedChain,
+              pendingNonce,
+              sponsorAddress: sponsor,
+              usdcAddress: usdc,
+              spendVerifierAddress: configuredAdapter,
+              verifierAddress: linkedVerifier,
+            } as StepDetail,
+          };
+        } catch (error) {
+          return { status: 'failed', note: error instanceof Error ? error.message : 'deployment preflight failed' };
+        }
+      },
+    },
+    {
+      name: 'deploy:simulation',
+      stage: 'deploy',
+      description: 'run the four-contract deployment as a no-broadcast Foundry simulation',
+      async execute(context) {
         const rpcUrl = context.env.BASE_RPC_URL ?? '';
         const account = context.env.BASE_DEPLOYER_KEYSTORE_ACCOUNT ?? '';
-        const address = await context.run('cast', ['wallet', 'address', '--account', account]);
-        if (address.code !== 0 || !/^0x[0-9a-fA-F]{40}$/u.test(address.stdout.trim())) {
-          return { status: 'failed', note: `could not read the deployment address from keystore account ${account}` };
-        }
-        const deployer = address.stdout.trim() as `0x${string}`;
-        const chain = context.chain(rpcUrl);
-        for (const [label, contract] of Object.entries(EXISTING_B11_CONTRACTS)) {
-          const code = await chain.code(contract);
-          if (code.length <= 2) return { status: 'failed', note: `the B11 ${label} at ${contract} has no bytecode on this RPC` };
-        }
-        context.print(`    deployer ${deployer}, B11 verifier and adapter both hold bytecode`);
-        return { status: 'succeeded', detail: { deployer, chainId: PILOT_CHAIN_ID } as StepDetail };
+        const passwordFile = context.env.BASE_DEPLOYER_PASSWORD_FILE ?? '';
+        const result = await context.run('forge', [
+          'script', DEPLOY_SCRIPT,
+          '--account', account,
+          '--password-file', passwordFile,
+          '--rpc-url', rpcUrl,
+        ], {
+          cwd: 'contracts',
+          env: { ...process.env, ...context.env },
+        });
+        if (result.code !== 0) return { status: 'failed', note: 'the no-broadcast Foundry simulation failed' };
+        context.print('    no-broadcast simulation succeeded; no transaction was sent');
+        return { status: 'succeeded' };
       },
     },
     {
       name: 'deploy:contracts',
       stage: 'deploy',
-      description: 'deploy the Poseidon libraries and PrivateCreditBond from the protected keystore',
+      description: 'reconcile the operator broadcast and persist deployment outputs only after all four contracts are proven',
       irreversible: true,
       async execute(context) {
         const rpcUrl = context.env.BASE_RPC_URL ?? '';
-        const account = context.env.BASE_DEPLOYER_KEYSTORE_ACCOUNT ?? '';
-        const address = await context.run('cast', ['wallet', 'address', '--account', account]);
-        if (address.code !== 0) return { status: 'failed', note: 'could not read the deployment address' };
-        const deployer = address.stdout.trim();
-
-        // Resolve every contract's intent first, so the signer, the nonce, and
-        // the address each nonce implies are durable *before* anything is sent.
-        const intents: BroadcastIntent[] = [];
-        for (const [offset, contract] of CONTRACT_DEPLOY_ORDER.entries()) {
-          const nonceResult = await context.run('cast', ['nonce', deployer, '--rpc-url', rpcUrl]);
-          if (nonceResult.code !== 0) return { status: 'failed', note: 'could not read the deployer nonce' };
-          const nonce = Number(nonceResult.stdout.trim()) + offset;
-          if (!Number.isSafeInteger(nonce)) return { status: 'failed', note: `cast reported an unreadable nonce (${nonceResult.stdout.trim()})` };
-          intents.push(broadcastIntent(contract, deployer, nonce));
+        const artifactPath = deploymentArtifactPath(context);
+        const state = await context.state.load();
+        const prior = state.steps['deploy:contracts']?.detail;
+        let intents: BroadcastIntent[];
+        try {
+          if (prior && typeof prior.signer === 'string' && prior.startingNonce !== undefined) {
+            intents = intentsFromDetail(prior);
+          } else {
+            const preflight = state.steps['deploy:preflight']?.detail;
+            const signer = typeof preflight?.signer === 'string' ? preflight.signer : await resolveDeployer(context);
+            const pendingNonce = typeof preflight?.pendingNonce === 'number'
+              ? preflight.pendingNonce
+              : await resolvePendingNonce(context, context.chain(rpcUrl), signer, rpcUrl);
+            intents = CONTRACT_DEPLOY_ORDER.map((contract, offset) => broadcastIntent(contract, signer, pendingNonce + offset));
+          }
+        } catch (error) {
+          return { status: 'failed', note: error instanceof Error ? error.message : 'deployment intent could not be reconstructed' };
         }
-        await context.state.record('deploy:contracts', {
-          status: 'unknown',
-          note: 'broadcast intent recorded; reconcile before retrying',
-          detail: { intents: intents.map((intent) => `${intent.contract}@${intent.nonce}=${intent.predictedAddress}`).join(',') },
-        });
 
-        // Reconcile first: a resumed run must find an already-landed deployment
-        // rather than deploy a second bond at the next nonce.
+        const artifactResult = await readDeploymentArtifact(artifactPath);
+        if (artifactResult.artifact === undefined) {
+          if (artifactResult.present || prior?.commandExposed === true) {
+            const reason = artifactResult.present
+              ? 'deployment artifact is present but unreadable; inspect it before retrying: ' + (artifactResult.error ?? 'unreadable artifact')
+              : 'deployment artifact is unavailable after the broadcast command was exposed: ' + (artifactResult.error ?? 'unreadable artifact');
+            context.print('    ' + reason);
+            for (const line of resolvedInputLines(context, intents[0]!.signer, context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''), artifactPath)) context.print(line);
+            if (!await context.confirm('Authorize exposing the guarded forge --resume command?')) {
+              return {
+                status: 'unknown',
+                note: reason,
+                detail: intentDetailWithFlags(intents, artifactPath, { commandExposed: true }),
+              };
+            }
+            context.print('    Guarded operator command (inspect the chain before running it): ' + broadcastCommand(context, true));
+            return {
+              status: 'unknown',
+              note: reason,
+              detail: intentDetailWithFlags(intents, artifactPath, { commandExposed: true, resumeCommandExposed: true }),
+            };
+          }
+          if (state.steps['deploy:contracts']?.status === 'unknown') {
+            return {
+              status: 'unknown',
+              note: 'deployment artifact is unavailable for an unresolved broadcast; refusing to expose a retry command blindly',
+              detail: intentDetailWithFlags(intents, artifactPath),
+            };
+          }
+          const sponsor = context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? '');
+          for (const line of resolvedInputLines(context, intents[0]!.signer, sponsor, artifactPath)) context.print(line);
+          for (const intent of intents) context.print('    ' + intent.contract + ': ' + intent.predictedAddress + ' (nonce ' + intent.nonce + ')');
+          if (!await context.confirm('Authorize exposing the keystore-backed broadcast command?')) {
+            return {
+              status: 'skipped',
+              note: 'deployment authorization not granted',
+              detail: intentDetailWithFlags(intents, artifactPath),
+            };
+          }
+          context.print('    ' + broadcastCommand(context));
+          context.print('    After the operator runs it, resume to reconcile run-latest.json; this launcher does not broadcast.');
+          return {
+            status: 'unknown',
+            note: 'broadcast command exposed; awaiting Foundry artifact reconciliation',
+            detail: intentDetailWithFlags(intents, artifactPath, { commandExposed: true }),
+          };
+        }
+
+        const artifact = artifactResult.artifact;
         const chain = context.chain(rpcUrl);
-        const landed: string[] = [];
-        for (const intent of intents) {
-          const result = await reconcileBroadcast(intent, chain);
-          if (result.kind === 'mismatch') return { status: 'failed', note: result.reason };
-          if (result.kind === 'confirmed') landed.push(`${intent.contract} at ${result.address}`);
-        }
-        if (landed.length === intents.length) {
-          context.print(`    already deployed: ${landed.join(', ')}`);
-          return { status: 'succeeded', detail: { contracts: landed.join(',') } as StepDetail };
-        }
-        if (landed.length > 0) {
-          context.print(`    already deployed: ${landed.join(', ')}`);
-          return { status: 'unknown', note: 'the deployment is partly complete; finish the remaining contracts, then resume' };
+        const reconciliation = await reconcileDeploymentArtifact(intents, artifact, chain);
+        if (reconciliation.kind !== 'confirmed') {
+          const reason = reconciliation.reason ?? 'deployment artifact is not reconciled';
+          context.print('    ' + reason);
+          for (const line of resolvedInputLines(context, intents[0]!.signer, context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''), artifactPath)) context.print(line);
+          if (!await context.confirm('Authorize exposing the guarded forge --resume command?')) {
+            return {
+              status: 'unknown',
+              note: reason,
+              detail: intentDetailWithFlags(intents, artifactPath, { commandExposed: prior?.commandExposed === true }),
+            };
+          }
+          context.print('    Guarded operator command (inspect the artifact and chain first): ' + broadcastCommand(context, true));
+          return {
+            status: 'unknown',
+            note: reason,
+            detail: intentDetailWithFlags(intents, artifactPath, { commandExposed: true, resumeCommandExposed: true }),
+          };
         }
 
-        for (const intent of intents) context.print(`    ${intent.contract} would deploy to ${intent.predictedAddress} at nonce ${intent.nonce}`);
-        for (const line of [
-          'Run the broadcast from the protected keystore account:',
-          '  cd contracts && forge script script/DeployBaseSepolia.s.sol:DeployBaseSepolia \\',
-          `    --account "${account}" --rpc-url "$BASE_RPC_URL" --broadcast --verify`,
-          'Then resume: every contract is reconciled against the predicted address above.',
-        ]) context.print(`    ${line}`);
-        if (!await context.confirm('Has the broadcast been sent from the keystore account?')) {
-          return { status: 'unknown', note: 'the broadcast may or may not have been sent; resume to reconcile by predicted address' };
+        try {
+          const expectedDomain = '0x' + BigInt(context.env.BASE_DEPLOYMENT_DOMAIN ?? '0').toString(16).padStart(64, '0');
+          const deployments = reconciliation.deployments ?? [];
+          const bond = deployments.at(-1);
+          if (!bond) throw new Error('bond deployment is missing from the reconciled artifact');
+          const observed = await readBondImmutables(chain, bond.address);
+          assertImmutables(observed, {
+            usdc: context.env.BASE_USDC_ADDRESS ?? BASE_SEPOLIA_USDC_ADDRESS,
+            sponsor: context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''),
+            refundVault: context.env.BASE_REFUND_VAULT ?? '',
+            treasury: context.env.BASE_TREASURY_ADDRESS ?? '',
+            poseidonT2: deployments[0]!.address,
+            poseidonT3: deployments[1]!.address,
+            poseidonT4: deployments[2]!.address,
+            spendVerifier: context.env.BASE_SPEND_VERIFIER_ADDRESS ?? EXISTING_B11_CONTRACTS.adapter,
+            deploymentDomain: expectedDomain,
+          });
+          const linkedVerifier = await readVerifierLinkage(chain, observed.spendVerifier);
+          assertVerifierLinkage(linkedVerifier);
+          assertInitialCommitmentRoot(observed.currentRoot, await initialCommitmentRoot());
+          const block = reconciliation.bondDeploymentBlock ?? bond.blockNumber;
+          const outputs = {
+            BASE_SPONSOR_ADDRESS: observed.sponsor,
+            BASE_POSEIDON_T2_ADDRESS: deployments[0]!.address,
+            BASE_POSEIDON_T3_ADDRESS: deployments[1]!.address,
+            BASE_POSEIDON_T4_ADDRESS: deployments[2]!.address,
+            BASE_BOND_ADDRESS: bond.address,
+            BASE_BOND_DEPLOYMENT_BLOCK: block.toString(),
+            BASE_CONFIRMATIONS: String(BASE_CONFIRMATIONS),
+            BASE_PRIVATE_CREDIT_BOND_ADDRESS: bond.address,
+            BASE_DEPLOYMENT_BLOCK: block.toString(),
+          };
+          await writeLaunchEnvValuesAtomically(context.envPath ?? LAUNCH_ENV_PATH, outputs);
+          Object.assign(context.env, outputs);
+          context.print('    four contracts reconciled; bond ' + bond.address + ' at block ' + block);
+          return {
+            status: 'succeeded',
+            detail: {
+              ...deploymentIntentDetail(intents, artifactPath),
+              poseidonT2: deployments[0]!.address,
+              poseidonT3: deployments[1]!.address,
+              poseidonT4: deployments[2]!.address,
+              bond: bond.address,
+              bondDeploymentBlock: block.toString(),
+              sponsorAddress: observed.sponsor,
+            } as StepDetail,
+          };
+        } catch (error) {
+          return {
+            status: 'unknown',
+            note: error instanceof Error ? 'deployment succeeded but post-deploy validation is unknown: ' + error.message : 'post-deploy validation is unknown',
+            detail: intentDetailWithFlags(intents, artifactPath, { commandExposed: true }),
+          };
         }
-        return { status: 'unknown', note: 'awaiting reconciliation against the predicted addresses' };
+      },
+    },
+    {
+      name: 'deploy:verification',
+      stage: 'deploy',
+      description: 'verify the four deployed contracts independently without redeploying',
+      async execute(context) {
+        if (!(context.env.BASESCAN_API_KEY ?? '')) {
+          context.print('    BaseScan key not configured; deployment is preserved and explorer verification is deferred');
+          return { status: 'succeeded', detail: { verification: 'deferred' } as StepDetail };
+        }
+        const state = await context.state.load();
+        const detail = state.steps['deploy:contracts']?.detail ?? {};
+        const addresses = [detail.poseidonT2, detail.poseidonT3, detail.poseidonT4, detail.bond]
+          .filter((value): value is string => typeof value === 'string');
+        if (addresses.length !== 4) return { status: 'failed', note: 'deployment outputs are missing; cannot prepare explorer verification' };
+        context.print('    dotenv -e ' + shellQuote(context.envPath ?? LAUNCH_ENV_PATH) + ' -- sh -c ' +
+          "'forge verify-contract --verifier-url \"https://api-sepolia.basescan.org/api\" --etherscan-api-key \"$BASESCAN_API_KEY\" <address> <contract>'");
+        if (!await context.confirm('Has explorer verification been completed for all four contracts?')) {
+          return { status: 'skipped', note: 'explorer verification deferred; deployment remains preserved' };
+        }
+        return { status: 'succeeded', detail: { verification: 'confirmed', contracts: addresses.join(',') } as StepDetail };
       },
     },
     manualStep({
@@ -441,6 +766,8 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
           secretKeys: [
             'DATABASE_URL', 'BILLING_INTERNAL_TOKEN', 'FACILITATOR_SERVICE_TOKEN',
             'CLAIM_STORE_OPERATOR_TOKEN', 'OPENROUTER_API_KEY', 'BASE_SPONSOR_PRIVATE_KEY',
+            'BASE_SPONSOR_ADDRESS', 'BASE_POSEIDON_T2_ADDRESS', 'BASE_POSEIDON_T3_ADDRESS',
+            'BASE_POSEIDON_T4_ADDRESS', 'BASE_BOND_ADDRESS', 'BASE_BOND_DEPLOYMENT_BLOCK',
             'BASE_PRIVATE_CREDIT_BOND_ADDRESS', 'BASE_DEPLOYMENT_BLOCK', 'ZK_PREPAID_VERIFYING_KEY_PATH',
           ],
           plainEnv: { NODE_ENV: 'production', PORT: '3001', BASE_CONFIRMATIONS: '3', PILOT_ENVIRONMENT: 'production' },
@@ -668,7 +995,9 @@ export async function runResume(options: LaunchRunOptions): Promise<LaunchRunRes
 
   const completedNames = new Set(await context.state.completedSteps());
   const unresolved = await context.state.unresolvedSteps();
-  if (unresolved.length > 0) {
+  const canReconcileDeployment = unresolved.length > 0
+    && unresolved.every((step) => step.name === 'deploy:contracts');
+  if (unresolved.length > 0 && !canReconcileDeployment) {
     const names = unresolved.map((step) => step.name).join(', ');
     report.push(`refusing to resume: ${names} must be reconciled first`);
     return { mode: 'resume', completed, stoppedAt: { step: unresolved[0]!.name, reason: 'unresolved' }, report };
@@ -713,7 +1042,12 @@ export async function runResume(options: LaunchRunOptions): Promise<LaunchRunRes
       report.push(`      failed: ${outcome.note}`);
       return { mode: 'resume', completed, stoppedAt: { step: step.name, reason: 'failed' }, report };
     }
-    await context.state.record(step.name, { status: 'pending', note: outcome.note });
+    const existing = (await context.state.load()).steps[step.name];
+    await context.state.record(step.name, {
+      status: 'pending',
+      detail: outcome.detail ?? existing?.detail,
+      note: outcome.note,
+    });
     report.push(`      stopped: ${outcome.note}`);
     return { mode: 'resume', completed, stoppedAt: { step: step.name, reason: 'not confirmed' }, report };
   }
@@ -755,7 +1089,11 @@ export function createLaunchContext(dependencies: LaunchCliDependencies = {}): L
     },
     async run(command, args, options) {
       try {
-        const result = await execFileAsync(command, args, { cwd: options?.cwd ?? dependencies.cwd, maxBuffer: 16 * 1024 * 1024 });
+        const result = await execFileAsync(command, args, {
+          cwd: options?.cwd ?? dependencies.cwd,
+          env: options?.env ?? process.env,
+          maxBuffer: 16 * 1024 * 1024,
+        });
         return { code: 0, stdout: result.stdout, stderr: result.stderr };
       } catch (error) {
         const failure = error as { code?: number; stdout?: string; stderr?: string };
