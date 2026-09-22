@@ -449,6 +449,9 @@ describe('the plan', () => {
     expect(retried).toMatchObject({ status: 'succeeded', detail: { verification: 'confirmed' } });
     const output = printed.join('\n');
     expect(output).toContain('forge verify-contract');
+    expect(output).toContain('--chain-id 84532');
+    expect(output).not.toContain('--verifier-url');
+    expect(output).not.toContain('api-sepolia.basescan.org');
     expect(output).not.toContain(COMPLETE_ENV.BASESCAN_API_KEY);
     expect((await context.state.load()).steps['deploy:contracts']?.status).toBe('succeeded');
   });
