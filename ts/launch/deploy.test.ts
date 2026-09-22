@@ -230,6 +230,37 @@ describe('Foundry artifact reconciliation', () => {
     expect(result.deployments?.map((deployment) => deployment.address)).toEqual(current.map((intent) => intent.predictedAddress));
   });
 
+  it('uses receipt-linked metadata when Foundry shifts hashes and omits Poseidon names', async () => {
+    const current = intents();
+    const shiftedHashes = [current[0]!.transactionHash, current[3]!.transactionHash, current[1]!.transactionHash, current[2]!.transactionHash];
+    const transactions = current.map((intent, index) => ({
+      contractName: index === 3 ? intent.contract : null,
+      transactionType: 'CREATE',
+      hash: shiftedHashes[index],
+      contractAddress: intent.predictedAddress,
+      transaction: {
+        from: SIGNER,
+        nonce: `0x${(startingNonce + index).toString(16)}`,
+        chainId: `0x${PILOT_CHAIN_ID.toString(16)}`,
+        to: null,
+      },
+    }));
+    const receipts = current.map((intent, index) => ({
+      transactionHash: intent.transactionHash,
+      status: '0x1',
+      contractAddress: intent.predictedAddress,
+      blockNumber: `0x${(100 + index).toString(16)}`,
+      from: SIGNER,
+    }));
+    const artifact = parseFoundryRunLatest(JSON.stringify({ chain: `0x${PILOT_CHAIN_ID.toString(16)}`, transactions, receipts }));
+
+    expect(artifact.transactions.map((entry) => entry.transactionHash)).toEqual(current.map((intent) => intent.transactionHash));
+    expect(artifact.transactions.map((entry) => entry.contractAddress)).toEqual(current.map((intent) => intent.predictedAddress));
+    const result = await reconcileDeploymentArtifact(current, artifact, chainFor(current));
+
+    expect(result).toMatchObject({ kind: 'confirmed', bondDeploymentBlock: 103n });
+  });
+
   it('round-trips scalar intent state without persisting private material', () => {
     const current = intents();
     const detail = deploymentIntentDetail(current, '/tmp/run-latest.json');

@@ -262,6 +262,14 @@ function nullableQuantity(value: unknown, label: string): bigint | null {
 function findReceipt(raw: Record<string, unknown>, receipts: Record<string, Record<string, unknown>>): Record<string, unknown> {
   const nested = asRecord(raw.receipt);
   if (Object.keys(nested).length > 0) return nested;
+  const transaction = Object.keys(asRecord(raw.tx)).length > 0 ? asRecord(raw.tx) : asRecord(raw.transaction);
+  const declaredAddress = nullableString(raw.contractAddress) ?? nullableString(transaction.contractAddress);
+  if (declaredAddress) {
+    const addressMatches = Object.values(receipts).filter((receipt) =>
+      nullableString(receipt.contractAddress)?.toLowerCase() === declaredAddress.toLowerCase(),
+    );
+    if (addressMatches.length === 1) return addressMatches[0]!;
+  }
   const hash = nullableString(raw.hash) ?? nullableString(raw.transactionHash);
   return hash ? receipts[hash.toLowerCase()] ?? {} : {};
 }
@@ -308,9 +316,13 @@ export function parseFoundryRunLatest(input: string | unknown): FoundryRunArtifa
       ?? nullableString(raw.transactionHash)
       ?? nullableString(transaction.hash)
       ?? nullableString(receipt.transactionHash);
-    const contractAddress = nullableString(raw.contractAddress)
-      ?? nullableString(transaction.contractAddress)
-      ?? nullableString(receipt.contractAddress);
+    // Some Foundry versions shift the transaction hash fields while keeping
+    // the CREATE addresses aligned with nonce order. The receipt table is the
+    // authoritative hash/address pairing, selected by the declared address.
+    const contractAddress = nullableString(receipt.contractAddress)
+      ?? nullableString(raw.contractAddress)
+      ?? nullableString(transaction.contractAddress);
+    const receiptTransactionHash = nullableString(receipt.transactionHash);
     const signer = nullableString(raw.from) ?? nullableString(transaction.from) ?? nullableString(receipt.from);
     const rawNonce = raw.nonce ?? transaction.nonce ?? receipt.nonce;
     const nonce = rawNonce === undefined || rawNonce === null ? null : parseRpcNumber(rawNonce, `transaction ${index} nonce`);
@@ -323,7 +335,18 @@ export function parseFoundryRunLatest(input: string | unknown): FoundryRunArtifa
         ? 'reverted'
         : 'unknown';
     const blockNumber = nullableQuantity(receipt.blockNumber ?? raw.blockNumber, `transaction ${index} block number`);
-    return { contract, type, to, transactionHash, contractAddress, signer, nonce, chainId, status, blockNumber };
+    return {
+      contract,
+      type,
+      to,
+      transactionHash: receiptTransactionHash ?? transactionHash,
+      contractAddress,
+      signer,
+      nonce,
+      chainId,
+      status,
+      blockNumber,
+    };
   });
 
   if (transactions.length === 0) throw new Error('Foundry run-latest.json contains no transactions');
@@ -367,7 +390,10 @@ export async function reconcileDeploymentArtifact(
   for (const [index, intent] of intents.entries()) {
     const entry = artifact.transactions[index]!;
     const expected = CONTRACT_DEPLOY_ORDER[index]!;
-    if (entry.contract !== expected || intent.contract !== expected) return unknownDeployment(`Foundry artifact order is ${entry.contract || 'unknown'} at position ${index}; expected ${expected}`);
+    const unnamedPoseidon = entry.contract === '' && expected !== 'PrivateCreditBond';
+    if ((!unnamedPoseidon && entry.contract !== expected) || intent.contract !== expected) {
+      return unknownDeployment(`Foundry artifact order is ${entry.contract || 'unknown'} at position ${index}; expected ${expected}`);
+    }
     if (artifact.chainId !== undefined && artifact.chainId !== null && artifact.chainId !== intent.chainId) {
       return unknownDeployment(`Foundry artifact chain ${artifact.chainId} differs from the deployment intent chain ${intent.chainId}`);
     }
