@@ -192,9 +192,9 @@ describe('provider payloads', () => {
       runtime: 'docker',
       envSpecificDetails: { dockerContext: '.', dockerfilePath: './ts/Dockerfile' },
     });
-    // A secret is declared, never valued.
-    expect(payload.envVars.filter((variable) => variable.sync === false)).toHaveLength(4);
-    expect(payload.envVars.find((variable) => variable.key === 'DATABASE_URL')?.value).toBeUndefined();
+    // Secrets are not sent in the create body; they are injected out of band.
+    expect(payload.envVars).toEqual([{ key: 'NODE_ENV', value: 'production' }]);
+    expect(payload.envVars.find((variable) => variable.key === 'DATABASE_URL')).toBeUndefined();
   });
 
   it('names the staging service separately from production', () => {
@@ -278,9 +278,9 @@ describe('live provider adapters', () => {
     const stub = recorder(({ method, created: state }) => {
       if (method === 'POST') {
         state.add('render');
-        return { service };
+        return service;
       }
-      return state.has('render') ? [{ service }] : [];
+      return state.has('render') ? [service] : [];
     }, created);
 
     const resolution = await resolveResource(renderServiceAdapter({
@@ -295,13 +295,13 @@ describe('live provider adapters', () => {
     expect(resolution).toMatchObject({ kind: 'created', detail: { serviceId: 'srv_1', plan: 'free', region: PILOT_RENDER_REGION } });
 
     const body = stub.requests.find((request) => request.method === 'POST')!.body as {
-      envVars: { key: string; value?: string }[];
+      envVars: { key: string; value: string }[];
       serviceDetails: { plan: string; runtime: string; envSpecificDetails: { dockerfilePath: string } };
     };
     expect(body.serviceDetails.plan).toBe('free');
     expect(body.serviceDetails.runtime).toBe('docker');
     expect(body.serviceDetails.envSpecificDetails.dockerfilePath).toBe('./ts/Dockerfile');
-    expect(body.envVars.find((variable) => variable.key === 'DATABASE_URL')?.value).toBeUndefined();
+    expect(body.envVars).toEqual([{ key: 'NODE_ENV', value: 'production' }]);
   });
 
   it('refuses a Render service on the wrong plan before adopting it', async () => {

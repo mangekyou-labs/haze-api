@@ -245,13 +245,14 @@ export interface RenderServicePayload {
       dockerfilePath: string;
     };
   };
-  envVars: { key: string; sync: boolean; value?: string }[];
+  /** Current Render create accepts valued variables; secrets are added later. */
+  envVars: { key: string; value: string }[];
 }
 
 /**
- * Free, Singapore, non-auto-deploying. Every secret is declared `sync: false`
- * so its value is supplied out of band and never appears in a payload the
- * launch writes to disk.
+ * Free, Singapore, non-auto-deploying. Render's current create schema accepts
+ * only valued or generated variables, so secret names are deliberately omitted
+ * here and supplied later through the environment-variable endpoint.
  */
 export function renderCreateServicePayload(options: {
   name: string;
@@ -280,10 +281,7 @@ export function renderCreateServicePayload(options: {
         dockerfilePath: './ts/Dockerfile',
       },
     },
-    envVars: [
-      ...Object.entries(options.plainEnv ?? {}).map(([key, value]) => ({ key, value, sync: false })),
-      ...(options.secretKeys ?? []).map((key) => ({ key, sync: false })),
-    ],
+    envVars: Object.entries(options.plainEnv ?? {}).map(([key, value]) => ({ key, value })),
   };
 }
 
