@@ -8,7 +8,9 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { resolve } from 'node:path';
 import { runLaunchCli } from './launch/cli.js';
 
-const result = await runLaunchCli(process.argv.slice(2));
+const repoRoot = resolve(import.meta.dirname, '..');
+const result = await runLaunchCli(process.argv.slice(2), { repoRoot });
 process.exitCode = result.exitCode;

@@ -14,7 +14,8 @@
 
 import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   LAUNCH_STATE_PATH,
@@ -553,5 +554,25 @@ describe('the CLI surface', () => {
   it('exposes a context whose default state path is the gitignored launch file', async () => {
     const context = createLaunchContext({ statePath: join(await mkdtemp(join(tmpdir(), 'zk-ctx-')), LAUNCH_STATE_PATH) });
     expect(context.state.filePath).toMatch(/\.launch-state\.local\.json$/u);
+  });
+
+  it('resolves a relative command cwd from the repository root when launched inside ts', async () => {
+    const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const originalCwd = process.cwd();
+    process.chdir(join(repositoryRoot, 'ts'));
+
+    try {
+      const context = createLaunchContext({ repoRoot: repositoryRoot });
+      const result = await context.run(
+        process.execPath,
+        ['-e', 'process.stdout.write(process.cwd())'],
+        { cwd: 'packages/zk-credits-shared' },
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe(join(repositoryRoot, 'packages/zk-credits-shared'));
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });

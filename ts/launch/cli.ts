@@ -25,6 +25,7 @@
 
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   LAUNCH_ENV_PATH,
@@ -1058,6 +1059,8 @@ export async function runResume(options: LaunchRunOptions): Promise<LaunchRunRes
 
 export interface LaunchCliDependencies {
   env?: Record<string, string>;
+  /** Absolute repository root used to resolve step-level relative directories. */
+  repoRoot?: string;
   cwd?: string;
   print?: (line: string) => void;
   confirm?: (question: string) => Promise<boolean>;
@@ -1076,6 +1079,7 @@ export interface LaunchCliDependencies {
 export function createLaunchContext(dependencies: LaunchCliDependencies = {}): LaunchContext {
   const print = dependencies.print ?? ((line: string) => console.log(redact(line)));
   const state = new LaunchStateStore({ path: dependencies.statePath ?? LAUNCH_STATE_PATH, now: dependencies.now });
+  const repoRoot = dependencies.repoRoot ?? process.cwd();
   return {
     env: dependencies.env ?? {},
     state,
@@ -1090,7 +1094,11 @@ export function createLaunchContext(dependencies: LaunchCliDependencies = {}): L
     async run(command, args, options) {
       try {
         const result = await execFileAsync(command, args, {
-          cwd: options?.cwd ?? dependencies.cwd,
+          cwd: options?.cwd === undefined
+            ? dependencies.cwd
+            : isAbsolute(options.cwd)
+              ? options.cwd
+              : resolve(repoRoot, options.cwd),
           env: options?.env ?? process.env,
           maxBuffer: 16 * 1024 * 1024,
         });
