@@ -36,10 +36,13 @@ contract DeployBaseSepolia is Script {
             "SpendVerifier is not linked to the reviewed verifier"
         );
 
+        // The npm remapping records these sources under node_modules, while
+        // Foundry emits their artifacts at out/PoseidonT*.sol/*.json.
+        // deployCode must use the generated artifact path for this dependency.
         vm.startBroadcast();
-        poseidonT2 = deployCode("PoseidonT2.sol:PoseidonT2");
-        poseidonT3 = deployCode("PoseidonT3.sol:PoseidonT3");
-        poseidonT4 = deployCode("PoseidonT4.sol:PoseidonT4");
+        poseidonT2 = deployCode("out/PoseidonT2.sol/PoseidonT2.json");
+        poseidonT3 = deployCode("out/PoseidonT3.sol/PoseidonT3.json");
+        poseidonT4 = deployCode("out/PoseidonT4.sol/PoseidonT4.json");
         bond = new PrivateCreditBond(
             usdc,
             sponsor,

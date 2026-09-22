@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 // Imported for their artifacts: `deployCode` below needs the compiled bytecode,
 // and the bond reaches the deployed libraries through `IPoseidonT*` addresses.
+// The generated artifact paths are used below because the npm remapping's
+// source aliases do not resolve through Foundry's deployCode lookup.
 import {PoseidonT2} from "poseidon-solidity/PoseidonT2.sol";
 import {PoseidonT3} from "poseidon-solidity/PoseidonT3.sol";
 import {PoseidonT4} from "poseidon-solidity/PoseidonT4.sol";
@@ -36,9 +38,9 @@ abstract contract RealProofFixture is Test {
 
     function _deployRealStack() internal {
         vm.warp(F.EXPIRY - 30 days);
-        poseidonT2 = IPoseidonT2(deployCode("PoseidonT2.sol:PoseidonT2"));
-        poseidonT3 = IPoseidonT3(deployCode("PoseidonT3.sol:PoseidonT3"));
-        poseidonT4 = IPoseidonT4(deployCode("PoseidonT4.sol:PoseidonT4"));
+        poseidonT2 = IPoseidonT2(deployCode("out/PoseidonT2.sol/PoseidonT2.json"));
+        poseidonT3 = IPoseidonT3(deployCode("out/PoseidonT3.sol/PoseidonT3.json"));
+        poseidonT4 = IPoseidonT4(deployCode("out/PoseidonT4.sol/PoseidonT4.json"));
         groth16 = new Groth16Verifier();
         adapter = new SpendVerifier(address(groth16));
         usdc = new MockUSDC();
