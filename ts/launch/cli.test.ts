@@ -161,6 +161,7 @@ interface Harness {
 async function harness(options: {
   env?: Record<string, string>;
   confirm?: boolean;
+  git?: (args: string[]) => CommandResult | undefined;
   /** Provider responses keyed by a substring of the request URL. */
   provider?: (request: { method: string; url: string }) => unknown;
   /** Bytecode the fake chain reports for every address. */
@@ -210,7 +211,15 @@ async function harness(options: {
     }),
     async run(command, args): Promise<CommandResult> {
       commands.push([command, ...args].join(' '));
+      if (command === 'git') {
+        const custom = options.git?.(args);
+        if (custom) return custom;
+      }
       if (command === 'git' && args[0] === 'rev-parse' && args[1] === 'HEAD') return { code: 0, stdout: `${'a'.repeat(40)}\n`, stderr: '' };
+      if (command === 'git' && args[0] === 'rev-parse' && args[1] === '--abbrev-ref' && args[2] === '--symbolic-full-name') {
+        return { code: 0, stdout: 'haze-api/feature-base-zk-credits\n', stderr: '' };
+      }
+      if (command === 'git' && args[0] === 'merge-base' && args[1] === '--is-ancestor') return { code: 0, stdout: '', stderr: '' };
       if (command === 'git' && args[0] === 'rev-parse') return { code: 0, stdout: 'feature-base-zk-credits\n', stderr: '' };
       if (command === 'git' && args[0] === 'branch') return { code: 0, stdout: '  origin/feature-base-zk-credits\n', stderr: '' };
       if (command === 'git' && args[0] === 'status') return { code: 0, stdout: '', stderr: '' };
@@ -255,6 +264,54 @@ describe('preflight', () => {
     const result = await runCheck(context);
     expect(result.report.join('\n')).toMatch(/UNRESOLVED deploy:contracts: broadcast timed out/u);
     expect(result.report.at(-1)).toBe('preflight: not ready');
+  });
+
+  it('rejects a commit found only on the wrong remote', async () => {
+    const { context, commands } = await harness({
+      git: (args) => {
+        if (args[0] === 'merge-base' && args[1] === '--is-ancestor') {
+          return { code: 1, stdout: '', stderr: 'commit is not on haze-api/feature-base-zk-credits' };
+        }
+        return undefined;
+      },
+    });
+    const preflight = buildLaunchPlan(COMPLETE_ENV).find((step) => step.name === 'release:preflight');
+
+    const result = await preflight!.execute(context);
+
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(result.note).toMatch(/has not been pushed/u);
+    expect(commands).toContain('git rev-parse --abbrev-ref --symbolic-full-name @{upstream}');
+    expect(commands).toContain(`git merge-base --is-ancestor ${'a'.repeat(40)} haze-api/feature-base-zk-credits`);
+  });
+});
+
+describe('the dependency-only commit', () => {
+  it('pushes through the configured upstream instead of naming origin', async () => {
+    const { context, commands } = await harness({
+      git: (args) => {
+        if (args[0] === 'status') {
+          return {
+            code: 0,
+            stdout: ' M packages/zk-credits-sidecar/package.json\n M packages/zk-credits-sidecar/package-lock.json\n',
+            stderr: '',
+          };
+        }
+        if (args[0] === 'push') {
+          return args.length === 1
+            ? { code: 0, stdout: '', stderr: '' }
+            : { code: 1, stdout: '', stderr: 'the launcher must not name a remote' };
+        }
+        return undefined;
+      },
+    });
+    const commitAndPush = buildLaunchPlan(COMPLETE_ENV).find((step) => step.name === 'release:commit-and-push');
+
+    const result = await commitAndPush!.execute(context);
+
+    expect(result).toMatchObject({ status: 'succeeded' });
+    expect(commands).toContain('git push');
+    expect(commands).not.toContain('git push origin HEAD');
   });
 });
 

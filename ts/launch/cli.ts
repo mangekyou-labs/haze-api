@@ -316,10 +316,22 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
       async execute(context) {
         const status = await context.run('git', ['status', '--porcelain']);
         const head = await context.run('git', ['rev-parse', 'HEAD']);
-        const pushed = await context.run('git', ['branch', '-r', '--contains', head.stdout.trim()]);
+        // A commit found on any remote is not enough: this checkout's
+        // configured upstream is the canonical release destination. Resolve
+        // that exact ref and ask git whether it contains HEAD.
+        const upstream = await context.run('git', [
+          'rev-parse',
+          '--abbrev-ref',
+          '--symbolic-full-name',
+          '@{upstream}',
+        ]);
+        const upstreamRef = upstream.stdout.trim();
+        const pushed = head.code === 0 && head.stdout.trim().length > 0 && upstream.code === 0 && upstreamRef.length > 0
+          ? await context.run('git', ['merge-base', '--is-ancestor', head.stdout.trim(), upstreamRef])
+          : { code: 1, stdout: '', stderr: 'the configured upstream is unavailable' };
         const gate = assertReleaseReady({
           dirtyPaths: status.stdout.split('\n').map((line) => line.slice(3).trim()).filter(Boolean),
-          pushed: pushed.code === 0 && pushed.stdout.trim().length > 0,
+          pushed: pushed.code === 0,
           branch: (await context.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim(),
           headCommit: head.stdout.trim(),
         }, { reviewed: context.env.PILOT_RELEASE_REVIEWED === 'true' });
@@ -417,7 +429,10 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         const message = 'chore(zk-credits): depend on the published pilot package versions';
         const commit = await context.run('git', ['commit', '-m', message]);
         if (commit.code !== 0) return { status: 'failed', note: 'git commit failed' };
-        const push = await context.run('git', ['push', 'origin', 'HEAD']);
+        // No remote is named here on purpose. `git push` uses this branch's
+        // configured upstream, so a differently configured `origin` cannot
+        // receive the release commit by accident.
+        const push = await context.run('git', ['push']);
         return push.code === 0
           ? { status: 'succeeded', detail: { changed: paths.length, paths: paths.join(',') } as StepDetail }
           : { status: 'failed', note: 'git push failed' };
