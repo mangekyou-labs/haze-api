@@ -569,6 +569,35 @@ to write into either when git tracks it.
 | S33 | Archive Stellar/evaluation runtime is not on the paid path; search audit finds no live Stellar spend | B10 |
 | S34 | Full local verification matrix and release-gate checklist; mainnet and ceremony remain later-map | B11, B22 |
 
+## B22 launcher resume evidence (2026-09-22)
+
+The release safety regression was written first: with the production fix
+temporarily reverted, the focused launcher suite failed exactly two tests — a
+commit present only on the wrong remote was accepted, and commit-and-push
+named `origin`. With the fix restored, `npm test -- --run launch/cli.test.ts`
+passed all 34 tests. The repair resolves the configured upstream and uses
+`git merge-base --is-ancestor` for the exact-branch check, then pushes without
+hard-coding a remote.
+
+| Surface | Command | Result |
+| --- | --- | --- |
+| TypeScript + Postgres | `RUN_DB_TESTS=1 TEST_DATABASE_URL=postgres://localhost:5432/zk_credits_test npm test -- --run` in `ts` | 32 files, 371 passed |
+| TypeScript types | `npm run typecheck` in `ts` | exit 0 |
+| Sidecar | `npm run build && npm test -- --run && npm pack --dry-run` | 66 passed; 43 packed files |
+| Shared leaf | `npm run build && npm test -- --run` | 29 passed, 8 skipped |
+| x402 adapter leaf | `npm run build && npm test -- --run` | 22 passed |
+| Shell guardrails | `bash scripts/guardrails.test.sh` | 68 passed |
+| Whitespace | `git diff --check` | clean |
+
+The local launch checkpoint was stale at the former preflight commit and had a
+failed dependency-only commit step; the launcher fix is now pushed to
+`haze-api/feature-base-zk-credits`, while only the two expected sidecar
+manifest/lockfile files remain unstaged. Public registry checks for
+`@zk-credits/shared@0.1.0`, `@zk-credits/x402-zk-prepaid@0.1.0`, and
+`zk-credits@0.2.0` returned HTTP 404, and npm authentication returned HTTP 401.
+No package was published or republished; deployment, hosting, controls, and
+operator activation remain blocked at that release credential gate.
+
 ## Required suites
 
 - Shared crypto (S1).

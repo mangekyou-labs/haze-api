@@ -386,13 +386,25 @@ USDC.
 
 ### Base Sepolia launch repair evidence (2026-09-22)
 
-The repair is intentionally stopped before a live bond broadcast. Wayfinder
-B22 remains open until the three founder activations and observation period
-complete. The implementation and tests cover wizard ordering and output-only
-bond fields, secret redaction, password-file permissions, environment
-validation, four-contract order and constructor wiring, Foundry artifact
-parsing, nonce drift, partial/resumed broadcasts, reverted receipts, missing
-bytecode, immutable/root mismatches, and verification-only retries.
+The launcher repair is committed as `f3f697d` and pushed to the configured
+`haze-api/feature-base-zk-credits` upstream. Release preflight now resolves
+`@{upstream}` and asks `git merge-base --is-ancestor` whether `HEAD` is on that
+exact branch; it no longer treats an unrelated remote branch as proof of a
+push. The dependency-only release step uses `git push` without naming a remote,
+so it follows the same configured upstream. The CLI, checkpoint schema,
+protocol, and package APIs are unchanged.
+
+This resume is intentionally stopped before npm publication and a live bond
+broadcast. The exact leaf and sidecar versions were checked against the public
+registry and returned 404, while the configured npm authentication returned
+401; no existing version was republished and no publish was attempted.
+Wayfinder B22 remains open until the release credentials, three founder
+activations, and observation period complete. The implementation and tests
+cover wizard ordering and output-only bond fields, secret redaction,
+password-file permissions, environment validation, four-contract order and
+constructor wiring, Foundry artifact parsing, nonce drift, partial/resumed
+broadcasts, reverted receipts, missing bytecode, immutable/root mismatches,
+and verification-only retries.
 
 ### Activation measurement
 
