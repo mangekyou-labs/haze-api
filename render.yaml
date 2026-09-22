@@ -59,6 +59,11 @@ services:
         sync: false
       - key: BASE_CONFIRMATIONS
         value: "3"
+      # The current free-tier RPC permits eth_getLogs over at most ten blocks.
+      # Keep this explicit per provider; the synchronizer default remains 2,000
+      # for a dedicated endpoint with a larger range allowance.
+      - key: BASE_SYNC_MAX_BLOCK_RANGE
+        value: "10"
       # ─── Pinned proving material ────────────────────────────────────
       - key: ZK_PREPAID_VERIFYING_KEY_PATH
         value: /app/ts/circuits/verification_key_private_credit.json

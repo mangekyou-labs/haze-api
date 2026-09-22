@@ -23,6 +23,15 @@ import { LaunchMetrics } from './metrics.js';
 import type { Pool } from 'pg';
 
 const port = Number(process.env.PORT ?? 3000);
+function resolveBaseSyncMaxBlockRange(): bigint | undefined {
+  const raw = process.env.BASE_SYNC_MAX_BLOCK_RANGE?.trim();
+  if (!raw) return undefined;
+  if (!/^\d+$/u.test(raw) || BigInt(raw) <= 0n) {
+    throw new Error('BASE_SYNC_MAX_BLOCK_RANGE must be a positive whole number');
+  }
+  return BigInt(raw);
+}
+
 const hasDatabaseConfig = Boolean(
   process.env.DATABASE_URL || process.env.PGHOST || process.env.PGPORT || process.env.PGUSER
     || process.env.PGPASSWORD || process.env.PGDATABASE,
@@ -54,6 +63,7 @@ if (baseContractAddress && process.env.BASE_RPC_URL && /^0x[0-9a-fA-F]{40}$/u.te
     store: baseEventStore,
     deploymentBlock: initialBaseState.deploymentBlock,
     confirmations: BigInt(process.env.BASE_CONFIRMATIONS ?? '3'),
+    maxBlockRange: resolveBaseSyncMaxBlockRange(),
   });
   try {
     await baseEventSync.syncOnce();
