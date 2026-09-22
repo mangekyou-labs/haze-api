@@ -396,7 +396,10 @@ export async function neonConnectionUri(options: NeonAdapterOptions & { projectI
   const role = options.roleName ?? 'neondb_owner';
   const body = await call<{ uri?: string }>({
     method: 'GET',
-    url: `${NEON_API_BASE}/projects/${options.projectId}/connection_uri?database_name=${encodeURIComponent(database)}&role_name=${encodeURIComponent(role)}`,
+    // Neon otherwise defaults this endpoint to the pooler. The pilot gateway
+    // needs the direct endpoint so migrations and TLS verification see the
+    // project's actual database host.
+    url: `${NEON_API_BASE}/projects/${options.projectId}/connection_uri?database_name=${encodeURIComponent(database)}&role_name=${encodeURIComponent(role)}&pooled=false`,
   });
   if (!body.uri) throw new Error('Neon did not return a connection string for the project');
   return selectDirectConnectionUri([body.uri]);

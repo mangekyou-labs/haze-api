@@ -55,6 +55,8 @@ import {
   BASE_CONFIRMATIONS,
   BASE_SEPOLIA_USDC_ADDRESS,
   EXISTING_B11_CONTRACTS,
+  INITIAL_PILOT_APPROVAL_USDC,
+  MAX_PILOT_APPROVAL_USDC,
   PILOT_CHAIN_ID,
   abiSelector,
   assertInitialCommitmentRoot,
@@ -730,7 +732,8 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
       description: 'approve a bounded amount of test USDC from the runtime sponsor',
       irreversible: true,
       instructions: [
-        'The approval must stay within the 80 test-USDC pilot bound.',
+        `For the first single-bundle test, approve ${INITIAL_PILOT_APPROVAL_USDC} test USDC (20,000,000 base units).`,
+        `Increase the allowance only after that test passes; never exceed the ${MAX_PILOT_APPROVAL_USDC} test-USDC pilot bound.`,
         'The sponsor is a separate, narrowly funded hot key, not the deployment key.',
       ],
     }),

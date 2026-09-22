@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   EXISTING_B11_CONTRACTS,
+  INITIAL_PILOT_APPROVAL_USDC,
   MAX_PILOT_APPROVAL_USDC,
   PILOT_CHAIN_ID,
   CONTRACT_DEPLOY_ORDER,
@@ -307,6 +308,8 @@ describe('Foundry artifact reconciliation', () => {
 describe('the bounded USDC approval', () => {
   it('caps the approval at the pilot bound', () => {
     expect(MAX_PILOT_APPROVAL_USDC).toBe(80n);
+    expect(INITIAL_PILOT_APPROVAL_USDC).toBe(20n);
+    expect(INITIAL_PILOT_APPROVAL_USDC).toBeLessThanOrEqual(MAX_PILOT_APPROVAL_USDC);
     expect(() => assertBoundedApproval(1n)).not.toThrow();
     expect(() => assertBoundedApproval(80n)).not.toThrow();
   });

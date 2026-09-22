@@ -252,6 +252,8 @@ describe('live provider adapters', () => {
     expect(stub.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
 
     await expect(neonConnectionUri({ ...options, projectId: 'proj_1' })).resolves.toMatch(/sslmode=require/u);
+    const connectionUriRequest = stub.requests.find((request) => request.method === 'GET' && request.url.includes('connection_uri'))!;
+    expect(connectionUriRequest.url).toContain('pooled=false');
   });
 
   it('refuses a Neon project whose region drifted from the pilot region', async () => {

@@ -23,6 +23,9 @@ export const BASE_SEPOLIA_USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3d
 /** The approval bound the pilot commits to: at most 80 test USDC. */
 export const MAX_PILOT_APPROVAL_USDC = 80n;
 
+/** One funded bundle is the smallest useful first smoke test. */
+export const INITIAL_PILOT_APPROVAL_USDC = 20n;
+
 /** The number of confirmations the launch records for downstream consumers. */
 export const BASE_CONFIRMATIONS = 3;
 
