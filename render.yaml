@@ -61,7 +61,7 @@ services:
         value: "3"
       # ─── Pinned proving material ────────────────────────────────────
       - key: ZK_PREPAID_VERIFYING_KEY_PATH
-        value: /app/circuits/private_credit_spend/verification_key.json
+        value: /app/ts/circuits/verification_key_private_credit.json
       - key: ZK_PREPAID_CIRCUIT_ID
         value: private-credit-spend-bn254-dev
       - key: ZK_PREPAID_VERIFYING_KEY_ID
