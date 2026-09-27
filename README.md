@@ -1,3 +1,5 @@
+> **Archived worktree:** preserved for reference; active development is in `feature-base-zk-credits`.
+
 # zk-credits
 
 Anonymous API credits for coding agents. Buy 100 tickets, import a 24-word
