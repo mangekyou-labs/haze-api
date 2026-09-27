@@ -2,7 +2,7 @@
 
 Snapshot: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: hosted restore and three-pass synthetic verification complete; release evidence pending
+Status: T8.G–T8.I wallet-optional implementation and local verification complete; hosted restore and three-pass synthetic verification complete; release evidence pending
 
 This index is intentionally conservative. It will contain only fresh deployed
 links, consented cohort records, redacted exports, and current screenshots
@@ -81,7 +81,7 @@ deployment or cohort artifact.
 The web proxy and consent-gated checkout slice also has fresh focused tests
 and a clean typecheck recorded in the T5 testing record; these do not replace
 deployed Stripe, explorer, telemetry, screenshot, or cohort evidence.
-The dashboard consent/wallet/checkout/feedback slice, opt-in PostHog boundary,
+The historical dashboard consent/wallet/checkout/feedback slice, opt-in PostHog boundary,
 logout reset, browser Sentry scrubber, and target production build have fresh
 local evidence in the T6 testing record. The E2E uses mocked provider
 boundaries; it is not a hosted checkout, explorer, or telemetry artifact.
@@ -92,5 +92,15 @@ fingerprint ownership after purge, monotonic checkout, 405 browser mutations,
 and transactional challenge limits. Hosted GitHub Actions package CI is green
 on `de394b3` (PR run 34691343208, all seven jobs). That is not hosted
 synthetic, Stripe, Sentry, PostHog, or cohort evidence. Cohort remains 0 / 10.
+The T8.G walletless gateway/domain/evidence tests pass in memory, routes,
+webhook, and disposable Postgres (including ten-record export eligibility
+after raw-proof purge). The T8.H no-provider dashboard E2E and desktop/mobile
+CLI walk pass locally; the card uses Consent, `$1` checkout/deposit, and
+Feedback, while onboarding and the LLM Playground remain available. T8.I's
+fresh package-wide matrix and PR #2 wording reconciliation are complete. These
+are local or mocked results and do not count as hosted Stripe, explorer,
+telemetry, cohort, screenshot, demo, or publication evidence.
+
 Until the external gates above are directly evidenced, this index must not
-state that Level 4 is releasable.
+state that Level 4 is releasable. Hosted T8.B–E remain pending/blocked; cohort
+is 0 / 10.

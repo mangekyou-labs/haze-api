@@ -9,6 +9,12 @@ import {
   trackSurveySent,
 } from '@/lib/analytics';
 import { EVALUATION_CONSENT_VERSION } from '@/lib/evaluation-contract';
+import {
+  EVALUATION_PROGRESS_STEPS,
+  canStartEvaluationCheckout,
+  canSubmitEvaluationFeedback,
+  evaluationStep,
+} from './evaluation-progress';
 
 interface EvaluationStatus {
   participantCode: string;
@@ -26,26 +32,6 @@ interface EvaluationStatus {
   complete: boolean;
 }
 
-interface Challenge {
-  id: string;
-  message: string;
-  expiresAt: string;
-}
-
-type FreighterApi = {
-  getNetwork?: () => Promise<unknown>;
-  getNetworkDetails?: () => Promise<unknown>;
-  getPublicKey?: () => Promise<string>;
-  signMessage?: (message: string, options?: Record<string, unknown>) => Promise<unknown>;
-};
-
-declare global {
-  interface Window {
-    freighterApi?: FreighterApi;
-  }
-}
-
-const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
 const INITIAL_FEEDBACK = {
   easeRating: 0,
   taskCompleted: false,
@@ -54,12 +40,6 @@ const INITIAL_FEEDBACK = {
   biggestFriction: '',
   quoteConsent: false,
 };
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return window.btoa(binary);
-}
 
 function readCommitmentFromBrowser(): Promise<string | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -90,32 +70,6 @@ function readCommitmentFromBrowser(): Promise<string | null> {
   });
 }
 
-function normalizeSignature(value: unknown): string | null {
-  const candidate = typeof value === 'object' && value !== null
-    ? (value as { signedMessage?: unknown; signature?: unknown }).signedMessage
-      ?? (value as { signedMessage?: unknown; signature?: unknown }).signature
-    : value;
-
-  if (typeof candidate === 'string') {
-    if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(candidate)) {
-      return candidate;
-    }
-    if (/^[a-f0-9]{128}$/i.test(candidate)) {
-      const bytes = new Uint8Array(candidate.match(/.{2}/g)!.map((pair) => Number.parseInt(pair, 16)));
-      return bytesToBase64(bytes);
-    }
-    return null;
-  }
-  if (candidate instanceof Uint8Array) return bytesToBase64(candidate);
-  if (Array.isArray(candidate)) return bytesToBase64(new Uint8Array(candidate as number[]));
-  return null;
-}
-
-function isTestnetNetwork(value: unknown): boolean {
-  const text = typeof value === 'string' ? value.toLowerCase() : JSON.stringify(value ?? '').toLowerCase();
-  return text.includes('testnet') || text.includes('test sdf') || text.includes('sdf network');
-}
-
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -135,36 +89,16 @@ function safeErrorMessage(code: string, fallback: string): string {
     gateway_unreachable: 'The evaluation gateway is waking up. Retry in a moment.',
     not_enrolled: 'Enroll in the evaluation before continuing.',
     already_enrolled: 'This session is already enrolled.',
-    rate_limited: 'Too many wallet challenges. Wait a few minutes, then retry.',
-    challenge_expired: 'That wallet challenge expired. Request a fresh one.',
-    challenge_replayed: 'That wallet challenge was already used. Request a fresh one.',
-    wallet_proof_invalid: 'Wallet signing was rejected or could not be verified.',
-    wallet_already_used: 'That wallet is already associated with another participant.',
     commitment_required: 'Generate an API key first so the test deposit has a browser-held commitment.',
     enrollment_required: 'Enroll first, then start the test checkout.',
     evaluation_requires_stripe_test_mode: 'The evaluation checkout is available only with Stripe test mode.',
     stripe_not_configured: 'Stripe checkout is not configured on this deployment.',
     checkout_url_missing: 'Checkout did not return a redirect URL. Retry in a moment.',
     receipt_not_found: 'The checkout receipt is not available for this participant.',
-    feedback_not_ready: 'Complete the wallet and test deposit steps before sending feedback.',
+    feedback_not_ready: 'Complete the test deposit before sending feedback.',
   };
   return messages[code] ?? fallback;
 }
-
-function evaluationStep(status: EvaluationStatus | null): number {
-  if (!status) return 0;
-  if (!status.wallet.verified) return 1;
-  if (!status.deposit.confirmed) return 2;
-  if (!status.feedbackSubmitted) return 3;
-  return 4;
-}
-
-const PROGRESS_STEPS = [
-  ['Consent', 'Join voluntarily'],
-  ['Wallet', 'Freighter testnet proof'],
-  ['Payment', '$1 test checkout'],
-  ['Feedback', 'Six fixed fields'],
-] as const;
 
 export function EvaluationSection() {
   const [status, setStatus] = useState<EvaluationStatus | null>(null);
@@ -174,8 +108,6 @@ export function EvaluationSection() {
   const [notice, setNotice] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
   const [analyticsConsent, setAnalyticsConsent] = useState(() => analyticsEnabled());
-  const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [walletState, setWalletState] = useState<'idle' | 'install' | 'wrong-network' | 'rejected' | 'expired'>('idle');
   const [feedback, setFeedback] = useState(INITIAL_FEEDBACK);
   const [commitment, setCommitment] = useState<string | null>(null);
 
@@ -289,72 +221,11 @@ export function EvaluationSection() {
         body: JSON.stringify({ consentVersion: EVALUATION_CONSENT_VERSION }),
       });
       await refreshStatus();
-      setNotice('You are enrolled. Wallet proof and feedback are retained for 90 days, then raw proof is removed.');
+      setNotice('You are enrolled. Restricted evaluation data is retained for 90 days, then raw proof is removed.');
       trackEvaluationEvent('evaluation_enrollment_completed');
     } catch (requestError) {
       const code = requestError instanceof Error ? requestError.message : 'enrollment_failed';
       setError(safeErrorMessage(code, 'Enrollment could not be completed. Retry in a moment.'));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const verifyWallet = async () => {
-    const freighter = window.freighterApi;
-    if (!freighter?.signMessage || !freighter.getPublicKey) {
-      setWalletState('install');
-      return;
-    }
-
-    setBusy('wallet');
-    setError(null);
-    setNotice(null);
-    const startedAt = performance.now();
-    try {
-      const networkDetails = freighter.getNetworkDetails
-        ? await freighter.getNetworkDetails()
-        : freighter.getNetwork ? await freighter.getNetwork() : null;
-      if (networkDetails && !isTestnetNetwork(networkDetails)) {
-        setWalletState('wrong-network');
-        return;
-      }
-
-      const nextChallenge = await jsonRequest<Challenge>('/api/evaluation/challenge', { method: 'POST' });
-      setChallenge(nextChallenge);
-      trackEvaluationEvent('wallet_challenge_requested', { durationMs: performance.now() - startedAt });
-      const address = await freighter.getPublicKey();
-      trackEvaluationEvent('wallet_proof_started');
-      const signed = await freighter.signMessage(nextChallenge.message, {
-        address,
-        networkPassphrase: TESTNET_PASSPHRASE,
-      });
-      const signature = normalizeSignature(signed);
-      if (!signature) throw new Error('wallet_signature_format');
-
-      const result = await jsonRequest<{ verified: boolean }>('/api/evaluation/wallet-proof', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          challengeId: nextChallenge.id,
-          address,
-          signature,
-          network: 'testnet',
-        }),
-      });
-      if (!result.verified) throw new Error('wallet_proof_invalid');
-      setWalletState('idle');
-      setChallenge(null);
-      setNotice('Wallet verified on Stellar testnet.');
-      trackEvaluationEvent('wallet_proof_completed', {
-        durationMs: performance.now() - startedAt,
-        outcome: 'success',
-      });
-      await refreshStatus();
-    } catch (requestError) {
-      const code = requestError instanceof Error ? requestError.message : 'wallet_proof_failed';
-      setWalletState(code === 'challenge_expired' ? 'expired' : 'rejected');
-      setError(safeErrorMessage(code, 'Wallet signing was rejected or could not be verified. Retry when ready.'));
-      trackEvaluationEvent('wallet_proof_rejected', { errorCode: code, outcome: 'failure' });
     } finally {
       setBusy(null);
     }
@@ -430,7 +301,7 @@ export function EvaluationSection() {
   };
 
   const currentStep = evaluationStep(status);
-  const canFeedback = Boolean(status?.wallet.verified && status.deposit.confirmed);
+  const canFeedback = canSubmitEvaluationFeedback(status);
   const retentionDate = useMemo(
     () => status ? new Date(status.retentionDeadline).toLocaleDateString() : null,
     [status],
@@ -473,8 +344,8 @@ export function EvaluationSection() {
         )}
       </div>
 
-      <ol className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Evaluation progress">
-        {PROGRESS_STEPS.map(([label, description], index) => {
+      <ol className="mt-6 grid gap-2 sm:grid-cols-3" aria-label="Evaluation progress">
+        {EVALUATION_PROGRESS_STEPS.map(([label, description], index) => {
           const step = index + 1;
           const complete = currentStep > step;
           const active = currentStep === step || (!status && step === 1);
@@ -537,32 +408,7 @@ export function EvaluationSection() {
           </button>
         </div>
       ) : (
-        <div className="mt-6 grid gap-3 lg:grid-cols-3">
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Step 1</p>
-            <h3 className="mt-2 font-medium text-zinc-100">Verify a Freighter testnet wallet</h3>
-            <p className="mt-2 text-sm leading-5 text-zinc-400">
-              A one-time challenge expires in ten minutes and can be attempted five times per fifteen-minute window.
-            </p>
-            {status.wallet.verified ? (
-              <p className="mt-3 text-sm text-green-300">Verified {status.wallet.addressRedacted}</p>
-            ) : (
-              <button
-                type="button"
-                className="mt-4 min-h-10 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 motion-safe:transition-colors hover:border-indigo-500/70 hover:bg-indigo-950/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={verifyWallet}
-                disabled={busy !== null}
-              >
-                {busy === 'wallet' ? 'Waiting for Freighter…' : 'Verify wallet'}
-              </button>
-            )}
-            {walletState === 'install' && <p className="mt-3 text-xs text-amber-300">Install Freighter, select Testnet, then retry.</p>}
-            {walletState === 'wrong-network' && <p className="mt-3 text-xs text-amber-300">Freighter is on the wrong network. Select Stellar Testnet and retry.</p>}
-            {walletState === 'rejected' && <p className="mt-3 text-xs text-red-300">The signature was rejected or invalid. Nothing was recorded; retry safely.</p>}
-            {walletState === 'expired' && <p className="mt-3 text-xs text-amber-300">That challenge expired. Request a fresh one.</p>}
-            {challenge && <p className="mt-3 text-xs text-zinc-500">Challenge expires {new Date(challenge.expiresAt).toLocaleTimeString()}.</p>}
-          </div>
-
+        <div className="mt-6 grid gap-3 lg:grid-cols-2">
           <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Step 2</p>
             <h3 className="mt-2 font-medium text-zinc-100">Complete the $1 test checkout</h3>
@@ -578,7 +424,7 @@ export function EvaluationSection() {
                   type="button"
                   className="mt-4 min-h-10 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 motion-safe:transition-colors hover:border-indigo-500/70 hover:bg-indigo-950/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={beginCheckout}
-                  disabled={!status.wallet.verified || busy !== null}
+                  disabled={!canStartEvaluationCheckout(status, commitment) || busy !== null}
                 >
                   {busy === 'checkout' ? 'Opening checkout…' : 'Start $1 test checkout'}
                 </button>
@@ -604,7 +450,7 @@ export function EvaluationSection() {
                 ? 'Feedback submitted. Thank you for helping us evaluate the flow.'
                 : canFeedback
                   ? 'Your answers are stored with the restricted evaluation record.'
-                  : 'Complete the wallet and deposit steps first.'}
+                  : 'Complete the test deposit first.'}
             </p>
           </div>
         </div>

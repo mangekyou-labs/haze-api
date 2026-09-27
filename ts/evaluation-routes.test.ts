@@ -129,25 +129,42 @@ describe('authenticated internal evaluation routes', () => {
     expect(feedback.body.error).toBe('feedback_not_ready');
   });
 
-  it('links a confirmed deposit only after wallet proof and serves checkout ownership routes', async () => {
+  it('links a confirmed deposit and accepts feedback without wallet proof', async () => {
     const participant = deriveParticipantIdentity('route-deposit-checkout', 'secret');
     const headers = gatewayHeaders(participant.fullId);
     await request(app).post('/v1/evaluation/enroll').set(headers)
       .send({ consentVersion: EVALUATION_CONSENT_VERSION });
-    const challenge = await request(app).post('/v1/evaluation/challenge').set(headers).send({});
-    const wallet = Keypair.random();
-    const signature = wallet.sign(buildSep53PayloadDigest(challenge.body.message)).toString('base64');
-    await request(app).post('/v1/evaluation/wallet-proof').set(headers).send({
-      challengeId: challenge.body.id,
-      address: wallet.publicKey(),
-      signature,
-      network: 'testnet',
-    });
+
+    const feedbackInput = {
+      easeRating: 5,
+      taskCompleted: true,
+      wouldUseAgain: true,
+      mostValuableAspect: 'walletless evaluation',
+      biggestFriction: 'none',
+      quoteConsent: false,
+    };
+    const feedbackBeforeDeposit = await request(app)
+      .post('/v1/evaluation/feedback').set(headers).send(feedbackInput);
+    expect(feedbackBeforeDeposit.status).toBe(409);
+    expect(feedbackBeforeDeposit.body.error).toBe('feedback_not_ready');
 
     const transactionHash = 'c'.repeat(64);
     const deposit = await request(app).post('/v1/evaluation/deposit').set(headers).send({ transactionHash });
     expect(deposit.status).toBe(200);
-    expect(deposit.body.deposit).toMatchObject({ confirmed: true, transactionHash });
+    expect(deposit.body).toMatchObject({
+      wallet: { verified: false },
+      deposit: { confirmed: true, transactionHash },
+      complete: false,
+    });
+
+    const feedbackAfterDeposit = await request(app)
+      .post('/v1/evaluation/feedback').set(headers).send(feedbackInput);
+    expect(feedbackAfterDeposit.status).toBe(200);
+    expect(feedbackAfterDeposit.body).toMatchObject({
+      wallet: { verified: false },
+      feedbackSubmitted: true,
+      complete: true,
+    });
 
     const checkout = await request(app).post('/v1/evaluation/checkout').set(headers).send({
       checkoutSessionId: 'cs_route_1', amountCents: 100, eventId: 'evt_route_1',

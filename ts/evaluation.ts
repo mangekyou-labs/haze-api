@@ -32,7 +32,6 @@ export type EvaluationErrorCode =
   | 'challenge_expired'
   | 'wallet_proof_invalid'
   | 'wallet_already_used'
-  | 'wallet_not_verified'
   | 'invalid_transaction_hash'
   | 'deposit_already_used'
   | 'deposit_not_found'
@@ -210,7 +209,6 @@ interface CheckoutReceiptRecord extends CheckoutReceipt {
 
 export interface EvidenceParticipant {
   participantCode: string;
-  walletAddress: string;
   transactionHash: string;
   completedAt: string;
 }
@@ -496,9 +494,6 @@ export class MemoryEvaluationStore implements EvaluationStore {
     options: { newRoot?: string; confirmedAt?: number } = {},
   ): Promise<EvaluationStatus> {
     const participant = this.requireParticipant(participantId);
-    if (participant.walletVerifiedAtMs === null) {
-      throw new EvaluationError('wallet_not_verified', 'Wallet verification is required first');
-    }
     if (typeof transactionHash !== 'string' || !TRANSACTION_HASH_PATTERN.test(transactionHash)) {
       throw new EvaluationError('invalid_transaction_hash', 'A Stellar transaction hash is required');
     }
@@ -523,8 +518,8 @@ export class MemoryEvaluationStore implements EvaluationStore {
 
   async submitFeedback(participantId: string, input: Partial<FeedbackInput>): Promise<EvaluationStatus> {
     const participant = this.requireParticipant(participantId);
-    if (participant.walletVerifiedAtMs === null || !participant.depositTransactionHash) {
-      throw new EvaluationError('feedback_not_ready', 'Wallet verification and deposit are required first');
+    if (participant.depositConfirmedAtMs === null || !participant.depositTransactionHash) {
+      throw new EvaluationError('feedback_not_ready', 'A confirmed deposit is required first');
     }
     const validated = validateFeedback(input);
     if (!validated.ok) throw new EvaluationError(validated.code, 'Feedback fields are invalid');
@@ -661,8 +656,7 @@ export class MemoryEvaluationStore implements EvaluationStore {
         newRoot: participant.depositNewRoot,
       },
       feedbackSubmitted: participant.feedback !== null,
-      complete: participant.walletVerifiedAtMs !== null
-        && participant.depositConfirmedAtMs !== null
+      complete: participant.depositConfirmedAtMs !== null
         && participant.feedback !== null,
     };
   }
@@ -730,9 +724,7 @@ export class MemoryEvaluationStore implements EvaluationStore {
 }
 
 function isComplete(record: RestrictedEvaluationRecord): boolean {
-  return record.walletAddress !== null
-    && record.walletVerifiedAtMs !== null
-    && record.depositTransactionHash !== null
+  return record.depositTransactionHash !== null
     && record.depositConfirmedAtMs !== null
     && record.feedback !== null;
 }
@@ -742,15 +734,14 @@ export async function exportEvidence(
   store: Pick<EvaluationStore, 'listRestrictedRecords'>,
 ): Promise<Level4Evidence> {
   const records = (await store.listRestrictedRecords()).filter(isComplete);
-  const uniqueWallets = new Set(records.map((record) => record.walletAddress));
+  const uniqueParticipants = new Set(records.map((record) => record.participantCode));
   const uniqueTransactions = new Set(records.map((record) => record.depositTransactionHash));
-  if (records.length < 10 || uniqueWallets.size < 10 || uniqueTransactions.size < 10) {
+  if (records.length < 10 || uniqueParticipants.size < 10 || uniqueTransactions.size < 10) {
     throw new EvaluationError('minimum_participants', 'At least ten unique completed participants are required');
   }
 
   const participants = records.map((record) => ({
     participantCode: record.participantCode,
-    walletAddress: redactWalletAddress(record.walletAddress as string),
     transactionHash: record.depositTransactionHash as string,
     completedAt: toIso(record.feedback?.submittedAt ?? record.depositConfirmedAtMs as number),
   }));

@@ -168,8 +168,7 @@ function rowToStatus(row: ParticipantRow): EvaluationStatus {
       newRoot: restricted.depositNewRoot,
     },
     feedbackSubmitted: restricted.feedback !== null,
-    complete: restricted.walletVerifiedAtMs !== null
-      && restricted.depositConfirmedAtMs !== null
+    complete: restricted.depositConfirmedAtMs !== null
       && restricted.feedback !== null,
   };
 }
@@ -397,9 +396,6 @@ export class PostgresEvaluationStore implements EvaluationStore {
     options: { newRoot?: string; confirmedAt?: number } = {},
   ): Promise<EvaluationStatus> {
     const participant = await this.participant(participantId);
-    if (participant.wallet_verified_at === null) {
-      throw new EvaluationError('wallet_not_verified', 'Wallet verification is required first');
-    }
     if (typeof transactionHash !== 'string' || !/^[a-f0-9]{64}$/i.test(transactionHash)) {
       throw new EvaluationError('invalid_transaction_hash', 'A Stellar transaction hash is required');
     }
@@ -438,8 +434,8 @@ export class PostgresEvaluationStore implements EvaluationStore {
 
   async submitFeedback(participantId: string, input: Partial<FeedbackInput>): Promise<EvaluationStatus> {
     const participant = await this.participant(participantId);
-    if (participant.wallet_verified_at === null || !participant.deposit_tx_hash) {
-      throw new EvaluationError('feedback_not_ready', 'Wallet verification and deposit are required first');
+    if (participant.deposit_confirmed_at === null || !participant.deposit_tx_hash) {
+      throw new EvaluationError('feedback_not_ready', 'A confirmed deposit is required first');
     }
     const validated = validateFeedback(input);
     if (!validated.ok) throw new EvaluationError(validated.code, 'Feedback fields are invalid');

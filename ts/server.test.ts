@@ -16,7 +16,6 @@ import { MemoryGatewayStore } from './db/index.js';
 import { MemoryEvaluationStore } from './evaluation.js';
 import {
   EVALUATION_CONSENT_VERSION,
-  buildSep53PayloadDigest,
   deriveParticipantIdentity,
 } from './evaluation.js';
 import { MerkleTree } from './merkle.js';
@@ -948,15 +947,6 @@ describe('gateway server', () => {
       const evaluationStore = new MemoryEvaluationStore();
       setEvaluationStore(evaluationStore);
       await evaluationStore.enroll(participant.fullId, EVALUATION_CONSENT_VERSION);
-      const challenge = await evaluationStore.createChallenge(participant.fullId);
-      const wallet = Keypair.random();
-      const signature = wallet.sign(buildSep53PayloadDigest(challenge.message)).toString('base64');
-      await evaluationStore.verifyWallet(participant.fullId, {
-        challengeId: challenge.id,
-        address: wallet.publicKey(),
-        signature,
-        network: 'testnet',
-      });
       const checkout = await evaluationStore.recordCheckout(participant.fullId, {
         checkoutSessionId: 'cs_billing_evaluation',
         amountCents: 100,
@@ -1004,6 +994,10 @@ describe('gateway server', () => {
       expect(contractMock.deposit).toHaveBeenCalledTimes(1);
       expect((await evaluationStore.getCheckout(participant.fullId, 'cs_billing_evaluation')).processingStatus)
         .toBe('confirmed');
+      await expect(evaluationStore.getStatus(participant.fullId)).resolves.toMatchObject({
+        wallet: { verified: false },
+        deposit: { confirmed: true },
+      });
     });
 
     it('records the receipt but skips the deposit when commitment is missing', async () => {

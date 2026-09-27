@@ -7,6 +7,7 @@ import {
   RETENTION_MS,
   buildSep53PayloadDigest,
   deriveParticipantIdentity,
+  exportEvidence,
 } from './evaluation.js';
 import { PostgresEvaluationStore, type SqlPool } from './evaluation-postgres.js';
 
@@ -35,6 +36,58 @@ describe.skipIf(!dbTestsEnabled)('PostgresEvaluationStore (integration, requires
     const second = await runMigrations(pool, MIGRATIONS_DIR);
     expect(second.applied).toEqual([]);
     expect(second.skipped).toContain('0009_evaluation.sql');
+  });
+
+  it('persists walletless deposit, feedback, completion, and export evidence', async () => {
+    let now = 1_700_000_000_000;
+    const store = new PostgresEvaluationStore(pool, { now: () => now });
+    const feedback = {
+      easeRating: 5,
+      taskCompleted: true,
+      wouldUseAgain: true,
+      mostValuableAspect: 'walletless evaluation',
+      biggestFriction: 'none',
+      quoteConsent: false,
+    };
+
+    for (let index = 0; index < 10; index += 1) {
+      const participant = deriveParticipantIdentity(`postgres-walletless-${index}`, 'secret');
+      await store.enroll(participant.fullId, EVALUATION_CONSENT_VERSION);
+      if (index === 0) {
+        await expect(store.submitFeedback(participant.fullId, feedback))
+          .rejects.toMatchObject({ code: 'feedback_not_ready' });
+      }
+      await store.linkDeposit(participant.fullId, (index + 1).toString(16).padStart(64, '0'));
+      await expect(store.submitFeedback(participant.fullId, feedback)).resolves.toMatchObject({
+        wallet: { verified: false },
+        deposit: { confirmed: true },
+        feedbackSubmitted: true,
+        complete: true,
+      });
+    }
+
+    const first = deriveParticipantIdentity('postgres-walletless-0', 'secret');
+    await expect(store.getStatus(first.fullId)).resolves.toMatchObject({
+      wallet: { verified: false, addressRedacted: null },
+      complete: true,
+    });
+    const evidence = await exportEvidence(store);
+    expect(evidence.participants).toHaveLength(10);
+    expect(evidence.participants[0]).not.toHaveProperty('walletAddress');
+    expect(JSON.stringify(evidence)).not.toContain('walletAddress');
+    expect(JSON.stringify(evidence)).not.toMatch(/G[A-Z2-7]{55}/);
+
+    now += RETENTION_MS + 1;
+    await expect(store.purgeExpired()).resolves.toBe(10);
+    await expect(store.getStatus(first.fullId)).resolves.toMatchObject({
+      wallet: { verified: false, addressRedacted: null },
+      complete: true,
+    });
+    await expect(exportEvidence(store)).resolves.toMatchObject({
+      participants: expect.arrayContaining([
+        expect.objectContaining({ participantCode: first.publicCode }),
+      ]),
+    });
   });
 
   it('persists proofs and status across store instances', async () => {

@@ -1,21 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-test('dashboard gates the Level 4 flow behind consent and completes the mocked testnet path', async ({ page }) => {
+test('dashboard completes the mocked Level 4 path without a wallet provider', async ({ page }) => {
   let enrolled = false;
-  let walletVerified = false;
   let depositConfirmed = false;
-
-  await page.addInitScript(() => {
-    const signature = btoa('s'.repeat(64));
-    Object.defineProperty(window, 'freighterApi', {
-      configurable: true,
-      value: {
-        getNetworkDetails: async () => ({ network: 'TESTNET' }),
-        getPublicKey: async () => 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-        signMessage: async () => signature,
-      },
-    });
-  });
+  let feedbackSubmitted = false;
 
   await page.route('**/api/evaluation/status', async (route) => {
     if (!enrolled) {
@@ -30,15 +18,15 @@ test('dashboard gates the Level 4 flow behind consent and completes the mocked t
         consentVersion: 'level4-2026-09-11',
         enrolledAt: '2026-09-12T00:00:00.000Z',
         retentionDeadline: '2026-12-11T00:00:00.000Z',
-        wallet: { verified: walletVerified, addressRedacted: walletVerified ? 'GAAAA…WHF' : null },
+        wallet: { verified: false, addressRedacted: null },
         deposit: {
           confirmed: depositConfirmed,
           transactionHash: depositConfirmed ? 'a'.repeat(64) : null,
           explorerUrl: depositConfirmed ? 'https://stellar.expert/explorer/testnet/tx/' + 'a'.repeat(64) : null,
           newRoot: null,
         },
-        feedbackSubmitted: false,
-        complete: false,
+        feedbackSubmitted,
+        complete: depositConfirmed && feedbackSubmitted,
       }),
     });
   });
@@ -46,20 +34,6 @@ test('dashboard gates the Level 4 flow behind consent and completes the mocked t
   await page.route('**/api/evaluation/enroll', async (route) => {
     enrolled = true;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ participantCode: 'L4-aaaaaaaaaaaa' }) });
-  });
-  await page.route('**/api/evaluation/challenge', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ id: 'challenge-1', message: 'Stellar Signed Message:\nlevel4 challenge', expiresAt: '2026-09-12T00:10:00.000Z' }),
-    });
-  });
-  await page.route('**/api/evaluation/wallet-proof', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-    expect(body.network).toBe('testnet');
-    expect(body.signature).not.toContain('private');
-    walletVerified = true;
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ verified: true }) });
   });
   await page.route('**/api/checkout', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
@@ -72,6 +46,37 @@ test('dashboard gates the Level 4 flow behind consent and completes the mocked t
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ processingStatus: 'confirmed', transactionHash: 'a'.repeat(64) }),
+    });
+  });
+  await page.route('**/api/evaluation/feedback', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    expect(body).toMatchObject({
+      easeRating: 5,
+      taskCompleted: true,
+      wouldUseAgain: true,
+      mostValuableAspect: 'private API access',
+      biggestFriction: 'cold start',
+      quoteConsent: false,
+    });
+    feedbackSubmitted = true;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        participantCode: 'L4-aaaaaaaaaaaa',
+        consentVersion: 'level4-2026-09-11',
+        enrolledAt: '2026-09-12T00:00:00.000Z',
+        retentionDeadline: '2026-12-11T00:00:00.000Z',
+        wallet: { verified: false, addressRedacted: null },
+        deposit: {
+          confirmed: true,
+          transactionHash: 'a'.repeat(64),
+          explorerUrl: 'https://stellar.expert/explorer/testnet/tx/' + 'a'.repeat(64),
+          newRoot: null,
+        },
+        feedbackSubmitted: true,
+        complete: true,
+      }),
     });
   });
 
@@ -87,9 +92,9 @@ test('dashboard gates the Level 4 flow behind consent and completes the mocked t
   await expect(enroll).toBeEnabled();
   await enroll.click();
 
-  await expect(evaluation.getByRole('button', { name: 'Verify wallet' })).toBeVisible();
-  await evaluation.getByRole('button', { name: 'Verify wallet' }).click();
-  await expect(evaluation.getByText(/Wallet verified on Stellar testnet/)).toBeVisible();
+  await expect(evaluation).not.toContainText(/Verify wallet|Freighter/i);
+  const checkout = evaluation.getByRole('button', { name: 'Start $1 test checkout' });
+  await expect(checkout).toBeDisabled();
 
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
     const request = indexedDB.open('zk-credits-crypto', 1);
@@ -107,8 +112,18 @@ test('dashboard gates the Level 4 flow behind consent and completes the mocked t
     request.onerror = () => reject(request.error);
   }));
   await page.reload();
-  await expect(evaluation.getByRole('button', { name: 'Start $1 test checkout' })).toBeVisible();
-  await evaluation.getByRole('button', { name: 'Start $1 test checkout' }).click();
+  await expect(evaluation).not.toContainText(/Verify wallet|Freighter/i);
+  await expect(checkout).toBeEnabled();
+  await checkout.click();
   await expect(page.getByText(/Checkout confirmed; the Stellar testnet deposit is recorded/)).toBeVisible({ timeout: 15_000 });
   await expect(evaluation.getByText(/Deposit confirmed on Stellar testnet/)).toBeVisible();
+  await expect(evaluation.getByRole('link', { name: 'View Stellar Explorer transaction' })).toHaveAttribute('href', /stellar\.expert\/explorer\/testnet\/tx/);
+
+  await evaluation.getByLabel('Most valuable aspect').fill('private API access');
+  await evaluation.getByLabel('Biggest friction').fill('cold start');
+  await evaluation.getByText('5', { exact: true }).last().click();
+  await evaluation.getByText('I completed the requested task.').click();
+  await evaluation.getByText('I would use this flow again.').click();
+  await evaluation.getByRole('button', { name: 'Submit feedback' }).click();
+  await expect(evaluation.getByText('Thank you — your feedback was recorded.')).toBeVisible();
 });

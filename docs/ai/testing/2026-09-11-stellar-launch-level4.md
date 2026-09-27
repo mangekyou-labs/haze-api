@@ -8,9 +8,9 @@ description: Fresh verification evidence for the additive evaluation milestone
 
 Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: wallet-optional scope approved; follow-up verification pending; hosted restore and synthetic verification complete; release evidence pending
+Status: wallet-optional scope approved; T8.G, T8.H, and T8.I verified locally; PR #2 wording reconciled; hosted restore and synthetic verification complete; release evidence pending
 
-Only commands run in the clean Level 4 worktree may be recorded here. Donor
+Only commands run in the dedicated Level 4 worktree may be recorded here. Donor
 claims, development screenshots, and stale lockfile results are excluded.
 
 ## Scope-change follow-up
@@ -27,7 +27,7 @@ from the historical mocked E2E.
 
 ## Local command matrix
 
-This-session matrix (2026-09-12) after Phase 7 remediations. Logs:
+Phase 7 matrix (2026-09-12) after Phase 7 remediations. Logs:
 `/tmp/stellar-l4-matrix/`. Do not reuse the earlier T8 196/60/5 counts.
 
 | Area | Command | Result |
@@ -111,7 +111,7 @@ implemented. No external deployment or cohort evidence is claimed.
 
 | Behavior | Command | Result |
 |---|---|---|
-| Fingerprint ownership, post-purge idempotent re-verify, status keyed on `wallet_verified_at` | `cd ts && npm test -- --run evaluation.test.ts` | pass (14 tests, including post-purge ownership) |
+| Fingerprint ownership, post-purge idempotent re-verify, optional wallet status, and deposit-plus-feedback completion | `cd ts && npm test -- --run evaluation.test.ts` | pass; current T8.G evidence is recorded below |
 | Postgres monotonic confirmed, post-purge fingerprint, concurrent challenge `FOR UPDATE` | disposable cluster, 8 integration tests above | pass |
 | 405 browser mutations (`Allow: GET` on checkout POST) | `cd web && npm test -- --run src/app/api/evaluation/routes.test.ts src/app/api/checkout/route.test.ts` | pass (9 tests) |
 | App Router `POST(_req: NextRequest)` typecheck | `cd web && npm run typecheck` | pass after the handler signature fix |
@@ -126,8 +126,9 @@ purge, unique deposit/session ownership, monotonic checkout claims, 405
 browser mutations, transactional challenge limits, filtered Stripe relay
 metadata, opt-in telemetry, recursive scrubbing, and preservation of the
 launch-era deposit and ticket-allocation path. The walletless
-completion/evidence predicates are a follow-up behavior change and remain
-unverified until T8.G tests pass.
+completion/evidence predicates are verified by the T8.G red/green evidence
+below. The wallet challenge/proof subsystem remains covered as optional
+compatibility behavior.
 
 The crash window after chain accept and before receipt-hash persistence is
 documented; it is not claimed as resume-without-resubmit.
@@ -180,6 +181,72 @@ with the exact reason; never convert them into local passes.
 
 | Task | Behavior | Result |
 |---|---|---|
-| T8.G | Walletless gateway deposit, feedback, completion, and evidence | pending failing-first tests and implementation |
-| T8.H | Dashboard path without Freighter, receipt/explorer state, and logout reset | pending failing-first web/E2E tests and implementation |
-| T8.I | Full local matrix and hosted acceptance reconciliation | pending fresh verification after T8.G/T8.H |
+| T8.G | Walletless gateway deposit, feedback, completion, and evidence | pass; fresh memory 17/17, routes/webhook 62/62, typecheck, and disposable Postgres 9/9 |
+| T8.H | Dashboard path without Freighter, receipt/explorer state, and logout reset | pass; focused web tests, no-provider E2E, typecheck/lint/build, and desktop/mobile CLI walk |
+| T8.I | Full local matrix and hosted acceptance reconciliation | pass; fresh package-wide matrix and PR #2 reconciliation complete; hosted T8.B–E remain pending |
+
+### T8.G fresh evidence (2026-09-13)
+
+| Behavior | Command | Result |
+|---|---|---|
+| Memory walletless deposit, feedback readiness, completion, optional wallet invariants, ten-record export, and post-purge export eligibility | `cd ts && npm test -- --run evaluation.test.ts` | EXIT 0; 17/17 passed |
+| Gateway routes and evaluation Stripe webhook without wallet proof | `cd ts && npm test -- --run evaluation-routes.test.ts server.test.ts` | EXIT 0; 62/62 passed |
+| Gateway adapter type safety | `cd ts && npm run typecheck` | EXIT 0 |
+| Disposable Postgres walletless deposit, feedback, completion, ten-record export before/after purge, and existing concurrency cases | `RUN_DB_TESTS=1 TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres npm test -- --run evaluation-postgres.integration.test.ts` | EXIT 0; 9/9 passed |
+| T8.G patch whitespace | `git diff --check` | EXIT 0 |
+
+The T8.G export shape contains participant code, confirmed transaction hash,
+completion time, and aggregate feedback only. It does not serialize wallet
+address, fingerprint, signature, subject, commitment, prompt, or API key.
+Hosted checkout, telemetry, cohort, screenshots, demo, and publication remain
+external T8.B–E gates and are not inferred from these local results.
+
+### T8.H fresh evidence (2026-09-13)
+
+| Behavior | Command | Result |
+|---|---|---|
+| Progress stages and walletless checkout/feedback gates | `cd web && npm test -- --run src/app/dashboard/evaluation-progress.test.ts` | EXIT 0; 2/2 passed |
+| Checkout, evaluation proxy, and analytics regressions | `cd web && npm test -- --run src/app/api/checkout/route.test.ts src/app/api/evaluation/routes.test.ts src/lib/analytics.test.ts` | EXIT 0; 15/15 passed |
+| Web type safety | `cd web && npm run typecheck` | EXIT 0 |
+| Web lint | `cd web && npm run lint` | EXIT 0; 0 errors, 9 existing warnings |
+| Production build | `cd web && npm run build` | EXIT 0; Next.js lockfile-root warning only |
+| Walletless dashboard journey | `cd web && E2E_PORT=3210 npm run test:e2e -- e2e/level4.spec.ts` | EXIT 0; 1/1 passed; no wallet provider injected |
+| Real-browser responsive walk | `playwright-cli` desktop and mobile sessions with mocked evaluation APIs | pass; desktop completed checkout/deposit/feedback; 390x844 mobile showed enabled checkout after commitment, no Freighter step, existing onboarding link, and LLM Playground |
+
+The T8.H E2E and CLI walk use mocked gateway/Stripe responses and are not
+hosted acceptance evidence. The two CLI sessions logged unrelated local
+dashboard/gateway configuration errors while the mocked evaluation path
+completed; no wallet-provider failure or wallet material was emitted by the
+evaluation card.
+
+### T8.I fresh matrix (2026-09-13)
+
+| Area | Command | Result |
+|---|---|---|
+| AI DevKit lint | `npx ai-devkit@latest lint --feature stellar-launch` | EXIT 0 from the Level 4 worktree |
+| Gateway typecheck/tests | `cd ts && npm run typecheck && npm test` | EXIT 0; 22 files passed, 4 skipped; 201 tests passed, 20 skipped |
+| Disposable Postgres | `RUN_DB_TESTS=1 TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres npm test -- --run evaluation-postgres.integration.test.ts` | EXIT 0; 9/9 passed |
+| Web tests | `cd web && npm test` | EXIT 0; 21 files, 64 tests passed |
+| Web typecheck | `cd web && npm run typecheck` | EXIT 0 |
+| Web lint | `cd web && npm run lint` | EXIT 0; 0 errors, 9 existing warnings |
+| Web build | `cd web && npm run build` | EXIT 0; existing Next.js lockfile-root warning only |
+| Web E2E | `cd web && E2E_PORT=3210 npm run test:e2e` | EXIT 0; 17/17 passed, including no-provider Level 4 |
+| Shared package | `cd packages/zk-credits-shared && npm ci && npm run build && npm test` | EXIT 0; build and 23 tests passed |
+| Sidecar package | `cd packages/zk-credits-sidecar && npm ci && npm run build && npm test && npm pack --dry-run` | EXIT 0; build, 64 tests, and pack dry-run passed; local-listener test rerun with loopback access after sandbox EPERM |
+| Fee sponsor | `cd services/fee-sponsor && npm run typecheck && npm test` | EXIT 0; typecheck and 1 test passed |
+| Circuits | `cd circuits && npm ci && node scripts/test.js` | EXIT 0; circuit, RLN, withdrawal, and slash suites passed |
+| Synthetic monitor | `node --check scripts/level4-synthetic.mjs && node --test scripts/level4-synthetic.test.mjs` | EXIT 0; 3/3 passed |
+| Soroban contract | `cd zk-credits-contract && cargo +1.94 test` | EXIT 0; 24/24 passed; six existing warnings |
+| Whitespace | `git diff --check` | EXIT 0 after the final docs/code changes |
+
+The task-tracing probe was also re-confirmed unavailable:
+`npx ai-devkit@latest task list --name stellar-launch --json` returns
+`error: unknown command 'task'`. No task events were fabricated or used as a
+completion gate.
+
+PR #2 was updated after this matrix. Its description now records the
+wallet-optional primary journey, Freighter-free local path, optional-only
+SEP-53 APIs, hosted restore/synthetic facts, cohort 0/10, and the fact that no
+hosted checkout, telemetry, screenshot, demo, or publication evidence is
+inferred. Hosted T8.B–E remain pending/blocked for their direct external
+artifacts.

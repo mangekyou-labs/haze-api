@@ -10,7 +10,7 @@ Date: 2026-09-13
 Feature slug: `stellar-launch`  
 Branch: `feature-stellar-launch-level4`  
 Base: `1c17e14`  
-Status: wallet-optional scope approved; documentation reconciliation in progress; hosted restore and synthetic verification complete; hosted product/evidence gates pending
+Status: wallet-optional scope approved; repository documentation reconciled; T8.G, T8.H, and T8.I complete locally; PR #2 wording reconciled; hosted restore and synthetic verification complete; hosted product/evidence gates pending
 
 ## Worktree and source boundary
 
@@ -33,15 +33,38 @@ its full diff and lockfiles are not applied.
 | T8 | Full verification and final review reconciliation | complete locally | fresh command matrix and requirement audit |
 | T8 follow-up | Phase 7 remediations: fingerprint, monotonic checkout, 405 mutations, transactional challenge limit, `$1`/test-mode gates, crash-window honesty | complete locally | this-session matrix; hosted package CI green on `de394b3`; hosted product/evidence gates still pending |
 | T8 hosted restore/synthetic | Restricted database, gateway/fee-sponsor/web restore, and three cold/warm synthetic passes | complete | hosted URLs, restricted store, and Deploy Smoke `level4-synthetic` evidence |
-| T8.A | Reconcile lifecycle docs, evidence index, and PR description | complete | lockstep docs and updated PR #2 description |
-| T8.F | Reconcile wallet-optional requirements, design, planning, implementation, testing, deployment, monitoring, evidence, and PR wording | in progress | approved web2 design; lockstep docs; no stale wallet gate claims |
-| T8.G | Remove wallet proof from gateway deposit/feedback/completion/evidence gates while preserving optional wallet APIs | todo | failing-first memory/Postgres/domain/route tests; affected gateway suite |
-| T8.H | Remove Freighter from the primary dashboard journey and update browser/E2E coverage | todo | failing-first web tests; no-provider E2E; typecheck/lint/build |
-| T8.I | Re-run the full local matrix and reconcile hosted acceptance artifacts | todo | fresh verification record; external blockers recorded, not inferred |
+| T8.A | Reconcile lifecycle docs, evidence index, and PR description | complete | lockstep docs and evidence index reconciled; PR #2 description updated with wallet-optional and conservative hosted-status wording |
+| T8.F | Reconcile wallet-optional requirements, design, planning, implementation, testing, deployment, monitoring, evidence, and PR wording | complete for repository docs | approved Web2 design and lockstep repository docs; PR wording remains tracked in T8.A |
+| T8.G | Remove wallet proof from gateway deposit/feedback/completion/evidence gates while preserving optional wallet APIs | complete locally | red/green memory, Postgres, route, and webhook tests; gateway typecheck |
+| T8.H | Remove Freighter from the primary dashboard journey and update browser/E2E coverage | complete locally | failing-first web tests; no-provider E2E; typecheck/lint/build; desktop/mobile CLI walk |
+| T8.I | Re-run the full local matrix and reconcile hosted acceptance artifacts | complete locally | fresh package-wide verification record; external blockers recorded, not inferred; PR #2 description reconciled |
 | T8.B | Hosted product path: OAuth, browser identity, retried `$1` test checkout, explorer confirmation, feedback, logout reset | todo | direct live participant evidence; Freighter is not required |
 | T8.C | Scrubbed Sentry and consented PostHog evidence | todo | dashboard captures with no sensitive data |
 | T8.D | Ten-person distinct consenting cohort and redacted export | blocked (0 / 10) | ten unique authenticated participants/deposits/transactions required |
 | T8.E | Fresh screenshots, 4–6 minute demo, final review, and publication | todo | depends on T8.B–D |
+
+## Current planning handoff
+
+On 2026-09-13 the operator approved the Web2/agentic-user path: Freighter is
+not required for the primary evaluation journey, while the gateway continues
+to fund and submit the real Stellar testnet deposit. Wallet proof remains an
+optional compatibility capability rather than a deposit, feedback, completion,
+or evidence prerequisite.
+
+The repository-side scope reconciliation is complete in commit `f38ebb4`.
+The follow-up gateway and walletless dashboard implementations are complete
+locally. T8.H's no-provider E2E and desktop/mobile CLI walk confirm the primary
+card uses Consent, `$1` checkout/deposit, and Feedback while launch onboarding
+and the playground remain available. T8.I's package-wide matrix is complete,
+and PR #2 now describes the wallet-optional path and the remaining hosted
+gates conservatively.
+
+No further local implementation task remains. Hosted T8.B–E remain external
+evidence gates and are not advanced by this planning update. The task-tracing
+probe remains unavailable because `npx ai-devkit@latest task ...` reports
+`unknown command 'task'`.
+Hosted T8.B–E remain external evidence gates and are not advanced by this
+planning update.
 
 ## Per-task workflow
 

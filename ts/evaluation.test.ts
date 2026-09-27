@@ -29,18 +29,9 @@ function makeFeedback() {
   };
 }
 
-async function completeParticipant(store: MemoryEvaluationStore, subject: string, index: number) {
+async function completeWalletlessParticipant(store: MemoryEvaluationStore, subject: string, index: number) {
   const participant = deriveParticipantIdentity(subject, 'evaluation-secret');
   await store.enroll(participant.fullId, EVALUATION_CONSENT_VERSION);
-  const keypair = Keypair.random();
-  const challenge = await store.createChallenge(participant.fullId);
-  const signature = keypair.sign(buildSep53PayloadDigest(challenge.message)).toString('base64');
-  await store.verifyWallet(participant.fullId, {
-    challengeId: challenge.id,
-    address: keypair.publicKey(),
-    signature,
-    network: 'testnet',
-  });
   await store.linkDeposit(participant.fullId, index.toString(16).padStart(64, '0'));
   await store.submitFeedback(participant.fullId, makeFeedback());
 }
@@ -150,7 +141,19 @@ describe('evaluation enrollment and retention', () => {
     await expect(store.createChallenge(participant.fullId)).resolves.toBeDefined();
   });
 
-  it('rejects duplicate wallets and requires a verified wallet before deposits', async () => {
+  it('links a confirmed deposit without wallet proof', async () => {
+    const store = new MemoryEvaluationStore();
+    const participant = deriveParticipantIdentity('walletless-deposit', 'secret');
+    await store.enroll(participant.fullId, EVALUATION_CONSENT_VERSION);
+
+    await expect(store.linkDeposit(participant.fullId, 'a'.repeat(64)))
+      .resolves.toMatchObject({
+        wallet: { verified: false },
+        deposit: { confirmed: true, transactionHash: 'a'.repeat(64) },
+      });
+  });
+
+  it('retains duplicate wallet uniqueness for optional wallet proofs', async () => {
     const store = new MemoryEvaluationStore();
     const first = deriveParticipantIdentity('subject-1', 'secret');
     const second = deriveParticipantIdentity('subject-2', 'secret');
@@ -160,8 +163,6 @@ describe('evaluation enrollment and retention', () => {
     const challenge = await store.createChallenge(first.fullId);
     const signature = keypair.sign(buildSep53PayloadDigest(challenge.message)).toString('base64');
 
-    await expect(store.linkDeposit(first.fullId, 'a'.repeat(64)))
-      .rejects.toMatchObject({ code: 'wallet_not_verified' });
     await store.verifyWallet(first.fullId, {
       challengeId: challenge.id,
       address: keypair.publicKey(),
@@ -221,6 +222,24 @@ describe('evaluation feedback, checkout, and evidence', () => {
       .rejects.toMatchObject({ code: 'checkout_not_found' });
   });
 
+  it('requires a confirmed deposit before feedback, then completes without wallet proof', async () => {
+    const store = new MemoryEvaluationStore();
+    const participant = deriveParticipantIdentity('walletless-feedback', 'secret');
+    await store.enroll(participant.fullId, EVALUATION_CONSENT_VERSION);
+
+    await expect(store.submitFeedback(participant.fullId, makeFeedback()))
+      .rejects.toMatchObject({ code: 'feedback_not_ready' });
+
+    await store.linkDeposit(participant.fullId, 'f'.repeat(64));
+    await expect(store.submitFeedback(participant.fullId, makeFeedback()))
+      .resolves.toMatchObject({
+        wallet: { verified: false },
+        deposit: { confirmed: true },
+        feedbackSubmitted: true,
+        complete: true,
+      });
+  });
+
   it('claims a checkout exactly once and allows a failed claim to resume', async () => {
     const store = new MemoryEvaluationStore();
     const participant = deriveParticipantIdentity('checkout-claim-subject', 'secret');
@@ -244,24 +263,48 @@ describe('evaluation feedback, checkout, and evidence', () => {
     expect(retry.receipt.processingStatus).toBe('processing');
   });
 
-  it('publishes only redacted evidence and enforces ten completed participants', async () => {
+  it('publishes walletless evidence and enforces ten unique participants and transactions', async () => {
     const store = new MemoryEvaluationStore();
     await expect(exportEvidence(store)).rejects.toMatchObject({ code: 'minimum_participants' });
 
     for (let index = 0; index < 10; index += 1) {
-      await completeParticipant(store, `subject-${index}`, index);
+      await completeWalletlessParticipant(store, `walletless-subject-${index}`, index);
     }
 
     const evidence = await exportEvidence(store);
     expect(evidence.participants).toHaveLength(10);
     expect(evidence.participants[0]).toMatchObject({
       participantCode: expect.stringMatching(/^L4-/),
-      walletAddress: expect.stringMatching(/^G...[…]/),
       transactionHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      completedAt: expect.any(String),
     });
+    expect(evidence.participants[0]).not.toHaveProperty('walletAddress');
+    expect(JSON.stringify(evidence)).not.toContain('walletAddress');
+    expect(JSON.stringify(evidence)).not.toMatch(/G[A-Z2-7]{55}/);
     expect(JSON.stringify(evidence)).not.toContain('signature');
-    expect(JSON.stringify(evidence)).not.toContain('subject-');
+    expect(JSON.stringify(evidence)).not.toContain('walletless-subject-');
     expect(redactWalletAddress(Keypair.fromSecret(SEP53_SEED).publicKey())).toMatch(/^G...[…]/);
+  });
+
+  it('keeps a walletless complete record export-eligible after raw proof purge', async () => {
+    let now = 1_700_000_000_000;
+    const store = new MemoryEvaluationStore({ now: () => now });
+    for (let index = 0; index < 10; index += 1) {
+      await completeWalletlessParticipant(store, `purge-walletless-${index}`, index + 20);
+    }
+
+    now += RETENTION_MS + 1;
+    await expect(store.purgeExpired()).resolves.toBe(10);
+    const first = deriveParticipantIdentity('purge-walletless-0', 'evaluation-secret');
+    await expect(store.getStatus(first.fullId)).resolves.toMatchObject({
+      wallet: { verified: false, addressRedacted: null },
+      complete: true,
+    });
+    await expect(exportEvidence(store)).resolves.toMatchObject({
+      participants: expect.arrayContaining([
+        expect.objectContaining({ participantCode: first.publicCode }),
+      ]),
+    });
   });
 
   it('purges wallet and signature material after ninety days', async () => {

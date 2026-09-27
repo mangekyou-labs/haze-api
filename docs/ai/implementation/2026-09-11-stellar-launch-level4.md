@@ -8,7 +8,7 @@ description: Reconciled implementation notes for the evaluation milestone
 
 Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: wallet-optional scope approved; local behavior update in progress; hosted restore and synthetic verification complete; hosted product/evidence gates pending
+Status: wallet-optional scope approved; T8.G, T8.H, and T8.I complete locally; PR #2 wording reconciled; hosted restore and synthetic verification complete; hosted product/evidence gates pending
 
 This document is updated after each planned task. It records target-branch
 facts only; donor-worktree claims and stale screenshots are not evidence.
@@ -261,11 +261,10 @@ now includes:
 - `wallet_fingerprint` (SHA-256, unique 64-hex) retained after 90-day raw
   proof purge; same-wallet re-verify is idempotent and does not restore
   address/signature; a different wallet still fails `wallet_already_used`.
-- Public status keys `wallet.verified` and `complete` currently key on
-  `wallet_verified_at`; evidence `isComplete` currently requires a raw wallet
-  address. These are known wallet-gated predicates to be replaced by T8.G;
-  the approved target is deposit-plus-feedback completion and walletless
-  evidence eligibility.
+- Public status still reports optional `wallet.verified`, while `complete` now
+  keys on confirmed deposit plus feedback. Evidence completion uses the same
+  deposit-plus-feedback predicate and has no public wallet field; unique gates
+  are participant codes plus confirmed transaction hashes.
 - Monotonic `markCheckout` / `claimCheckout`: `confirmed` cannot be
   downgraded (`processing_status <> 'confirmed'`).
 - Transactional challenge rate-limit: `connect` / `BEGIN` /
@@ -287,7 +286,7 @@ now includes:
   leaf, but the hash cannot be rebuilt without a chain reconciler. No
   reconciler was added.
 
-This-session local matrix (2026-09-12, logs in `/tmp/stellar-l4-matrix/`):
+Phase 7 local matrix (2026-09-12, logs in `/tmp/stellar-l4-matrix/`):
 
 - `npx ai-devkit@latest lint --feature stellar-launch`: EXIT 0. This
   validates the 2026-08-04 `feature-stellar-launch` document set and that
@@ -349,31 +348,117 @@ Soroban). Package CI is not hosted synthetic, Stripe, Sentry, PostHog, or
 cohort evidence. The fresh `node scripts/level4-synthetic.mjs` run from the
 Level 4 worktree passed `cold`, `warm`, `warm`; all four checks returned 200.
 
-### T8.F — wallet-optional documentation reconciliation (in progress)
+### T8.F — wallet-optional documentation reconciliation (complete for repository docs)
 
 The approved wallet-optional design, requirements, planning, implementation,
-testing, deployment, monitoring, and evidence records are being reconciled in
-the target worktree. Hosted restore and synthetic facts remain complete; the
-walletless product path is not yet deployed or externally accepted.
+testing, deployment, monitoring, and evidence records are reconciled in the
+target worktree. Hosted restore and synthetic facts remain complete; the
+walletless product path is not yet deployed or externally accepted. PR wording
+was intentionally tracked in T8.A and is reconciled by the T8.I follow-up.
 
-### T8.G — walletless gateway behavior (todo)
+### T8.G — walletless gateway behavior (complete locally)
 
-Add failing memory, Postgres, and route tests for deposit linking, feedback,
-completion, and ten-record evidence without wallet proof. Then remove wallet
-checks from those gates while preserving optional wallet challenge/proof
-validation, ownership, purge, checkout claims, and the existing gateway-funded
-staged deposit path.
+TDD red tests first established the old wallet gate in memory, routes, and the
+evaluation billing webhook. The minimum implementation then removed wallet
+checks from memory and Postgres deposit linking and feedback, changed completion
+and evidence eligibility to confirmed deposit plus feedback, removed wallet
+fields and wallet uniqueness from the public export, and removed the webhook
+checkout guard. Optional SEP-53 challenge/proof validation, wallet uniqueness,
+Testnet-only verification, purge/fingerprint ownership, checkout claims, and
+the staged `submitDeposit` path remain intact.
 
-### T8.H — walletless dashboard path (todo)
+Fresh evidence from 2026-09-13:
 
-Add failing web/E2E coverage with no Freighter provider, remove the required
-wallet step and wallet-gated checkout/feedback conditions, and preserve
-browser-held commitment checkout, receipt polling, explorer-safe status,
-feedback validation, and logout analytics reset.
+- `cd ts && npm test -- --run evaluation.test.ts`: EXIT 0; 17/17 passed,
+  including walletless deposit/feedback/completion, ten-record export, and
+  post-purge export eligibility.
+- `cd ts && npm test -- --run evaluation-routes.test.ts server.test.ts`:
+  EXIT 0; 62/62 passed, including walletless deposit/feedback and the
+  evaluation webhook without `wallet_not_verified`.
+- `cd ts && npm run typecheck`: EXIT 0.
+- `RUN_DB_TESTS=1 TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres
+  npm test -- --run evaluation-postgres.integration.test.ts`: EXIT 0; 9/9
+  passed against the disposable cluster, including walletless export before
+  and after raw-proof purge.
 
-### T8.I — follow-up verification and acceptance reconciliation (todo)
+### T8.H — walletless dashboard path (complete locally)
 
-Run the affected and full local verification matrix, update the evidence index
-with fresh results, and record hosted T8.B–E as pending until direct Stripe,
-explorer, telemetry, cohort, screenshot, demo, and final-review evidence
-exists.
+Added `web/src/app/dashboard/evaluation-progress.ts` and focused tests for the
+three-stage Consent / `$1` checkout + deposit / Feedback progression. The
+primary evaluation card no longer references Freighter, requests a wallet
+challenge, or submits wallet proof. Checkout requires enrolled status plus the
+browser-held commitment; feedback requires only a confirmed deposit. The
+existing optional wallet-proof proxy and analytics allowlist remain available,
+but this path emits no wallet-provider detection or proof events.
+
+Rewrote `web/e2e/level4.spec.ts` as a no-provider mocked journey: exact consent,
+browser-held IndexedDB commitment, `$1` checkout, confirmed receipt and
+explorer link, then all six feedback fields. Launch onboarding and the LLM
+playground remain rendered by the dashboard.
+
+Fresh evidence from 2026-09-13:
+
+- Red: `cd web && npm test -- --run src/app/dashboard/evaluation-progress.test.ts`
+  failed before implementation because `./evaluation-progress` did not exist.
+- Green: the focused progress/gating test passed (2 tests), the checkout/
+  evaluation/analytics regression tests passed (15 tests), and
+  `cd web && npm run typecheck` passed.
+- `cd web && npm run lint` passed with 0 errors and 9 existing warnings;
+  `cd web && npm run build` passed.
+- `cd web && E2E_PORT=3210 npm run test:e2e -- e2e/level4.spec.ts` passed
+  (1/1), with no `window.freighterApi` provider.
+- `playwright-cli` walked the mocked flow at desktop and 390x844 mobile
+  sizes. The desktop session reached confirmed deposit, explorer, feedback,
+  and thank-you states. The mobile session showed the three-stage card, an
+  enabled checkout after enrollment plus commitment, no Freighter copy, and
+  the existing Guided setup and LLM Playground surfaces. Screenshots are under
+  `web/output/playwright/level4-cli/`.
+
+### T8.I — follow-up verification and acceptance reconciliation (complete locally)
+
+The full local matrix was re-run from the dedicated Level 4 worktree. The
+walletless follow-up is verified locally, while hosted T8.B–E remain pending
+until direct Stripe, explorer, telemetry, cohort, screenshot, demo, and
+final-review evidence exists.
+
+Fresh evidence from 2026-09-13:
+
+- `npx ai-devkit@latest lint --feature stellar-launch`: EXIT 0. The command's
+  task probe remains unavailable: `npx ai-devkit@latest task list --name
+  stellar-launch --json` returns `error: unknown command 'task'`; no task
+  events were inferred.
+- `cd ts && npm run typecheck && npm test`: EXIT 0; 22 test files passed and 4
+  were skipped; 201 tests passed and 20 were skipped.
+- `RUN_DB_TESTS=1 TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres
+  npm test -- --run evaluation-postgres.integration.test.ts`: EXIT 0; 9/9
+  passed against the disposable cluster.
+- `cd web && npm test`: EXIT 0; 21 files and 64 tests passed. Standalone
+  `npm run typecheck`: EXIT 0. `npm run lint`: EXIT 0 with 0 errors and 9
+  existing warnings. `npm run build`: EXIT 0 with the existing Next.js
+  lockfile-root warning.
+- `cd web && E2E_PORT=3210 npm run test:e2e`: EXIT 0; 17/17 passed, including
+  the no-provider Level 4 journey.
+- `cd packages/zk-credits-shared && npm ci && npm run build && npm test`: EXIT
+  0; build and 23 tests passed.
+- `cd packages/zk-credits-sidecar && npm ci && npm run build && npm test &&
+  npm pack --dry-run`: EXIT 0; build, 64 tests, and pack dry-run passed. The
+  test/pack verification was rerun with loopback access after the sandbox
+  rejected the sidecar's local listener.
+- `cd services/fee-sponsor && npm run typecheck && npm test`: EXIT 0;
+  typecheck and 1 test passed.
+- `cd circuits && npm ci && node scripts/test.js`: EXIT 0; circuit, RLN,
+  withdrawal, and slash suites passed.
+- `node --check scripts/level4-synthetic.mjs && node --test
+  scripts/level4-synthetic.test.mjs`: EXIT 0; 3/3 tests passed.
+- `cd zk-credits-contract && cargo +1.94 test`: EXIT 0; 24/24 tests passed
+  with six existing warnings.
+- `git diff --check`: EXIT 0.
+
+PR #2's description was updated after the matrix. It now states that the
+primary journey is GitHub auth, exact consent, browser-held commitment, `$1`
+Stripe test checkout, gateway-funded Testnet deposit, and feedback; Freighter
+is not required; optional SEP-53 remains compatibility-only; hosted restore
+and synthetic verification are complete; cohort is 0/10; and no hosted
+checkout, telemetry, screenshot, demo, or publication evidence is inferred.
+The hosted deployment facts are tied to the earlier Level 4 deployment and do
+not count as hosted acceptance of this walletless follow-up.

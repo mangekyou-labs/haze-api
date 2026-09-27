@@ -336,7 +336,6 @@ function evaluationErrorResponse(res: Response, error: unknown): void {
             'deposit_already_used',
             'checkout_already_used',
             'challenge_replayed',
-            'wallet_not_verified',
             'feedback_not_ready',
           ].includes(error.code)
             ? 409
@@ -1340,9 +1339,6 @@ app.post('/v1/billing/stripe-event', async (req: Request, res: Response) => {
 
       try {
         const status = await evaluationStore.getStatus(participantId);
-        if (!status.wallet.verified) {
-          throw new EvaluationError('wallet_not_verified', 'Wallet verification is required before checkout');
-        }
         const receipt = await evaluationStore.recordCheckout(participantId, {
           checkoutSessionId,
           amountCents,

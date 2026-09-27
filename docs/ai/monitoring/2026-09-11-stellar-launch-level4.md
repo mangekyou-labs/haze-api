@@ -8,7 +8,7 @@ description: Privacy-preserving telemetry and synthetic response plan
 
 Date: 2026-09-13
 Feature slug: `stellar-launch`  
-Status: local monitoring implementation complete; wallet-optional path pending local implementation; hosted restore and synthetic verification complete; telemetry evidence pending
+Status: local monitoring implementation complete; wallet-optional path locally verified; hosted restore and synthetic verification complete; telemetry evidence pending
 
 ## PostHog
 
