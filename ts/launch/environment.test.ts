@@ -47,6 +47,7 @@ function completeEnv(overrides: Record<string, string> = {}): Record<string, str
     NPM_TOKEN: 'npm_abcdefghijklmnopqrstuvwx',
     PILOT_RELEASE_REVIEWED: 'true',
     BASE_RPC_URL: 'https://base-sepolia.g.alchemy.com/v2/abc',
+    BASE_BUILDER_CODE: 'bc_testcode',
     BASE_DEPLOYMENT_DOMAIN: '84532',
     BASE_USDC_ADDRESS: ADDRESS,
     BASE_DEPLOYER_KEYSTORE_ACCOUNT: 'pilot-deployer',
@@ -114,6 +115,12 @@ describe('value shapes', () => {
   it('refuses the shared public Base Sepolia endpoint', () => {
     expect(validateShape('https://sepolia.base.org', 'rpc_url')).toMatch(/shared public endpoint/u);
     expect(validateShape('https://alchemy.example/v2/key', 'rpc_url')).toBeUndefined();
+  });
+
+  it('accepts only the Base Builder Code character set and length', () => {
+    expect(validateShape('bc_testcode', 'builder_code')).toBeUndefined();
+    expect(validateShape('UPPERCASE', 'builder_code')).toMatch(/lowercase/u);
+    expect(validateShape('a'.repeat(33), 'builder_code')).toMatch(/1-32/u);
   });
 
   it('requires a keystore account name rather than a raw key', () => {

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { formatDate, importCredentialFile, PILOT_TIER_ALLOWANCE } from '@/lib/credits';
+import { formatDate, importCredentialFile, PILOT_TIER_ALLOWANCE, restoreCapsuleFromFunding } from '@/lib/credits';
 
 export function RecoverCredentialForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -21,7 +21,13 @@ export function RecoverCredentialForm() {
     setBusy(true);
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
-      const { credential, activated } = await importCredentialFile(parsed, password);
+      const isRecoveryCapsule = typeof parsed === 'object'
+        && parsed !== null
+        && 'kind' in parsed
+        && parsed.kind === 'recovery-capsule';
+      const { credential, activated } = isRecoveryCapsule
+        ? await restoreCapsuleFromFunding(parsed, password)
+        : await importCredentialFile(parsed, password);
       setRestored({
         version: activated ? 2 : 1,
         tierId: credential.tierId,
@@ -40,10 +46,11 @@ export function RecoverCredentialForm() {
       <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Local recovery</p>
       <h1 className="mt-3 text-3xl font-bold tracking-tight text-white">Restore an encrypted credential</h1>
       <p className="mt-3 text-sm leading-6 text-zinc-400">
-        Version-2 activated credentials and legacy version-1 exports are both
-        accepted. The file is decrypted in this browser, and the credential is
-        verified against the secret it wraps. Nothing is uploaded and no
-        commitment is displayed.
+        Version-2 recovery capsules, activated credentials, and legacy
+        version-1 exports are accepted. Capsules are decrypted here, then
+        their derived commitment is used only to look up an existing funded
+        bundle. The capsule and password are never uploaded, and recovery never
+        starts funding.
       </p>
       <p className="mt-3 text-xs leading-5 text-zinc-500">
         Invite-only, unpaid, experimental Base Sepolia pilot. The circuit is
@@ -65,7 +72,7 @@ export function RecoverCredentialForm() {
           <Link href="/dashboard" className="mt-3 inline-flex text-sm underline underline-offset-4">Return to dashboard</Link>
         </div>
       )}
-      <button type="button" onClick={() => void recover()} disabled={busy} className="mt-6 min-h-11 w-full rounded-lg bg-cyan-300 px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Decrypting locally…' : 'Restore credential'}</button>
+      <button type="button" onClick={() => void recover()} disabled={busy} className="mt-6 min-h-11 w-full rounded-lg bg-cyan-300 px-5 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Restoring locally…' : 'Restore credential'}</button>
     </section>
   );
 }

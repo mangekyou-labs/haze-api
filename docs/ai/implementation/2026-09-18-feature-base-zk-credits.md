@@ -104,6 +104,20 @@ tier, expiry, deployment domain, network, contract, and transaction hash, then
 verified locally against the secret. Version-1 exports remain readable by the
 recovery page and the sidecar.
 
+Recovery lookup first asks the gateway for the funded-bundle record using only
+the commitment derived in the browser. If that exact lookup returns
+`bundle_not_found`, `web/src/lib/base-recovery.ts` performs read-only calls to
+the configured Base Sepolia RPC and bond contract. The server checks chain ID,
+deployment domain, active bundle state, tier 0, future expiry, positive bond,
+one matching `BundleFunded` event with the configured confirmation count, and
+the event root against `rootAt(leafIndex + 1)`. It returns only activation
+metadata after every check passes; no recovery path calls funding. Missing
+contract, RPC, or deployment-block configuration fails closed. `BASE_RPC_URL`,
+`BASE_PRIVATE_CREDIT_BOND_ADDRESS`, `BASE_DEPLOYMENT_BLOCK`,
+`BASE_DEPLOYMENT_DOMAIN`, and `BASE_CONFIRMATIONS` are server-only preview
+settings. The browser checks expiry again, wraps the unchanged capsule, verifies
+the commitment locally, then saves and downloads the activated export.
+
 Removed from the deployed pilot path: `POST /api/checkout`,
 `GET /api/orders/:orderId`, `POST /api/webhooks/stripe`,
 `GET|POST /api/wallet/link`, `POST /v1/billing/orders`,

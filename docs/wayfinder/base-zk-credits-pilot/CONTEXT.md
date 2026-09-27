@@ -110,13 +110,19 @@ plus the challenge period.
 
 An attempt to consume one or more credits for a particular request. A claim
 exists only after the sidecar has produced a self-verified spend proof and
-presented it for reservation. A claim can be reserved, committed, or
+presented it for reservation. A claim can be reserved, ready, committed, or
 cancelled.
 
 ## Reservation
 
 A temporary exclusive hold on the credit identified by a claim while the
 resource server determines whether it can return a successful response.
+
+## Ready claim
+
+A claim is ready after a successful response is staged but before the credit's
+commit is confirmed. It remains held and cannot be safely cancelled or
+redispatched; a failed commit is treated as ambiguous until it is reconciled.
 
 ## Commit
 

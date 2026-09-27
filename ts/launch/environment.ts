@@ -40,6 +40,7 @@ export type ValueShape =
   | 'github_id'
   | 'https_url'
   | 'api_token'
+  | 'builder_code'
   | 'usdc_units'
   | 'postgres_direct_url'
   | 'boolean';
@@ -69,6 +70,7 @@ export const LAUNCH_VARS: readonly LaunchEnvVar[] = [
 
   // ── Base Sepolia deployment ────────────────────────────────────────────
   { name: 'BASE_RPC_URL', label: 'dedicated Base Sepolia RPC', shape: 'rpc_url', requiredFor: 'deploy' },
+  { name: 'BASE_BUILDER_CODE', label: 'Base transaction attribution code', shape: 'builder_code', requiredFor: 'hosting' },
   { name: 'BASE_DEPLOYMENT_DOMAIN', label: 'chain id', shape: 'usdc_units', requiredFor: 'deploy' },
   { name: 'BASE_USDC_ADDRESS', label: 'test USDC address', shape: 'address', requiredFor: 'deploy' },
   { name: 'BASE_DEPLOYER_KEYSTORE_ACCOUNT', label: 'Foundry keystore account', shape: 'keystore_account', requiredFor: 'deploy' },
@@ -233,6 +235,8 @@ export function validateShape(value: string, shape: ValueShape): string | undefi
       return /^[0-9]+$/u.test(value) ? undefined : 'must be the numeric GitHub account id';
     case 'api_token':
       return value.length >= 16 ? undefined : 'is too short to be a token';
+    case 'builder_code':
+      return /^[a-z0-9_]{1,32}$/u.test(value) ? undefined : 'must contain 1-32 lowercase letters, digits, or underscores';
     case 'usdc_units':
       return /^[0-9]+$/u.test(value) ? undefined : 'must be a whole number';
     case 'postgres_direct_url':

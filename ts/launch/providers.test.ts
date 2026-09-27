@@ -16,10 +16,12 @@ import {
   NEON_API_BASE,
   PILOT_NEON_REGION,
   PILOT_RENDER_REGION,
+  RENDER_API_BASE,
   VERCEL_PROJECTS_VERSION,
   ProviderRequestError,
   ProviderTimeoutError,
   RESOURCE_NAMES,
+  configureRenderBuilderCode,
   githubOAuthCallback,
   httpTransport,
   neonCreateDatabasePayload,
@@ -203,6 +205,32 @@ describe('provider payloads', () => {
 
   it('creates the Vercel project as a Next.js app', () => {
     expect(vercelCreateProjectPayload()).toEqual({ name: RESOURCE_NAMES.vercelProject, framework: 'nextjs' });
+  });
+
+  it('sets only the Builder Code variable and triggers a no-cache-preserving Render deploy', async () => {
+    const stub = recorder(({ method }) => method === 'POST' ? { id: 'dep_1', status: 'created' } : {});
+
+    await expect(configureRenderBuilderCode({
+      transport: stub.transport,
+      apiKey: 'rnd_key',
+      serviceId: 'srv_1',
+      builderCode: 'bc_testcode',
+    })).resolves.toEqual({ deployId: 'dep_1', deployStatus: 'created' });
+
+    expect(stub.requests).toEqual([
+      {
+        method: 'PUT',
+        url: `${RENDER_API_BASE}/services/srv_1/env-vars/BASE_BUILDER_CODE`,
+        headers: { authorization: 'Bearer rnd_key' },
+        body: { value: 'bc_testcode' },
+      },
+      {
+        method: 'POST',
+        url: `${RENDER_API_BASE}/services/srv_1/deploys`,
+        headers: { authorization: 'Bearer rnd_key' },
+        body: { clearCache: 'do_not_clear' },
+      },
+    ]);
   });
 
   it('derives the GitHub callback from the deployed host', () => {

@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth';
 import GitHub from 'next-auth/providers/github';
 import Credentials from 'next-auth/providers/credentials';
+import { authCallbacks } from '@/lib/auth-callbacks';
 
 // Opt-in dev/test-only login (ENABLE_DEV_LOGIN=1). Lets the signed-in flow
 // (dashboard, API keys, buy credits) be exercised locally and in Playwright
@@ -34,16 +35,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   providers,
   session: { strategy: 'jwt' },
-  callbacks: {
-    session({ session, token }) {
-      if (token.sub) {
-        session.user.id = token.sub;
-      }
-      return session;
-    },
-  },
+  callbacks: authCallbacks,
   pages: {
     signIn: '/sign-in',
   },
 });
-

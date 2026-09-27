@@ -43,6 +43,7 @@ import {
 } from './environment.js';
 import { redact } from './redact.js';
 import { LaunchStateStore, type StepDetail, type StepRecord, type StepStatus } from './state.js';
+import { collectTrialGate } from './trial-gate.js';
 import {
   RELEASE_PACKAGES,
   assertReleaseReady,
@@ -81,6 +82,7 @@ import {
 import {
   githubOAuthCallback,
   httpTransport,
+  configureRenderBuilderCode,
   neonConnectionUri,
   neonProjectAdapter,
   renderOwnerId,
@@ -812,7 +814,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
           // the launch writes to disk or prints.
           secretKeys: [
             'DATABASE_URL', 'BILLING_INTERNAL_TOKEN', 'FACILITATOR_SERVICE_TOKEN',
-            'CLAIM_STORE_OPERATOR_TOKEN', 'OPENROUTER_API_KEY', 'BASE_SPONSOR_PRIVATE_KEY',
+            'CLAIM_STORE_OPERATOR_TOKEN', 'OPENROUTER_API_KEY', 'BASE_SPONSOR_PRIVATE_KEY', 'BASE_BUILDER_CODE',
             'BASE_SPONSOR_ADDRESS', 'BASE_POSEIDON_T2_ADDRESS', 'BASE_POSEIDON_T3_ADDRESS',
             'BASE_POSEIDON_T4_ADDRESS', 'BASE_BOND_ADDRESS', 'BASE_BOND_DEPLOYMENT_BLOCK',
             'BASE_PRIVATE_CREDIT_BOND_ADDRESS', 'BASE_DEPLOYMENT_BLOCK', 'ZK_PREPAID_VERIFYING_KEY_PATH',
@@ -868,6 +870,47 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         'Then add the pair to .env.launch.local and re-run --check.',
       ],
     }),
+    {
+      name: 'hosting:render-attribution',
+      stage: 'hosting',
+      description: 'configure Base transaction attribution and deploy the gateway',
+      irreversible: true,
+      async execute(context) {
+        if (!await context.confirm('Authorize applying Base transaction attribution and deploying the gateway?')) {
+          return { status: 'skipped', note: 'Render attribution deployment was not authorized' };
+        }
+        const transport = context.transport();
+        const apiKey = context.env.RENDER_API_KEY ?? '';
+        const ownerId = (context.env.RENDER_OWNER_ID ?? '').trim() || await renderOwnerId(transport, apiKey);
+        const adapter = renderServiceAdapter({
+          transport,
+          apiKey,
+          ownerId,
+          repo: `https://github.com/${repo}`,
+          branch,
+        });
+        const services = await adapter.lookup();
+        if (services.length === 0) return { status: 'failed', note: 'Render gateway is missing; run hosting:render first' };
+        if (services.length > 1) {
+          return { status: 'failed', note: `several Render services match "${adapter.name}": ${services.map((service) => adapter.identify(service)).join(', ')}` };
+        }
+        const mismatches = adapter.verify(services[0]!);
+        if (mismatches.length > 0) {
+          return { status: 'failed', note: `${adapter.name} does not match the intended configuration: ${mismatches.join(', ')}` };
+        }
+        const deployment = await configureRenderBuilderCode({
+          transport,
+          apiKey,
+          serviceId: adapter.idOf(services[0]!),
+          builderCode: context.env.BASE_BUILDER_CODE ?? '',
+        });
+        context.print(`    Base transaction attribution configured; Render deployment ${deployment.deployId} (${deployment.deployStatus})`);
+        return {
+          status: 'succeeded',
+          detail: { serviceId: adapter.idOf(services[0]!), ...deployment, attribution: 'configured' },
+        };
+      },
+    },
 
     {
       name: 'controls:migrations',
@@ -1196,13 +1239,16 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
     return { exitCode, report };
   };
 
-  const unknownFlag = argv.find((arg) => arg.startsWith('-') && !['--check', '--status', '--reviewed', '--help'].includes(arg));
-  if (unknownFlag) return emit([`unknown flag ${unknownFlag}; use --check, --status, or no argument to resume`], 2);
+  const knownFlags = ['--check', '--status', '--trial-gate', '--render-attribution', '--reviewed', '--help'];
+  const unknownFlag = argv.find((arg) => arg.startsWith('-') && !knownFlags.includes(arg));
+  if (unknownFlag) return emit([`unknown flag ${unknownFlag}; use --check, --status, --trial-gate, --render-attribution, or no argument to resume`], 2);
   if (argv.includes('--help')) {
     return emit([
-      'usage: scripts/launch-pilot.sh [--check] [--status] [--reviewed]',
+      'usage: scripts/launch-pilot.sh [--check] [--status] [--trial-gate] [--render-attribution] [--reviewed]',
       '  --check     read-only dependency, credential, git, package, chain, and provider preflight',
       '  --status    read-only local and remote reconciliation',
+      '  --trial-gate read-only JSON gate for the internal Base Sepolia trial',
+      '  --render-attribution configure Builder Code on Render and stop after its checkpoint',
       '  --reviewed  declare the release commit reviewed (required before publishing)',
       '  (no flags)  start or resume from the last completed checkpoint',
       'There is no unattended confirmation flag and no flag that deletes a resource.',
@@ -1211,6 +1257,69 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
 
   const envPath = dependencies.envPath ?? process.env.ZK_CREDITS_LAUNCH_ENV ?? LAUNCH_ENV_PATH;
   const env = dependencies.env ?? {};
+
+  const specialModes = ['--check', '--status', '--trial-gate', '--render-attribution']
+    .filter((flag) => argv.includes(flag));
+  if (specialModes.length > 1) return emit(['choose exactly one launcher mode'], 2);
+  if ((argv.includes('--trial-gate') || argv.includes('--render-attribution')) && argv.includes('--reviewed')) {
+    return emit(['--reviewed cannot be combined with this launcher mode'], 2);
+  }
+
+  // These two explicit modes read the protected file without preparing it.
+  // The gate therefore cannot create, chmod, or write launcher files.
+  if (argv.includes('--trial-gate') || argv.includes('--render-attribution')) {
+    const fileEnv = await readLaunchEnv(envPath).catch(() => ({}));
+    const context = createLaunchContext({
+      ...dependencies,
+      print,
+      envPath,
+      env: { ...fileEnv, ...env },
+    });
+
+    if (argv.includes('--trial-gate')) {
+      const envCheck = checkLaunchEnv(context.env, 'finalize');
+      let localPreflightPassed = envCheck.missing.length === 0
+        && envCheck.invalid.length === 0
+        && envCheck.forbidden.length === 0;
+      try {
+        if ((await context.state.unresolvedSteps()).length > 0) localPreflightPassed = false;
+      } catch {
+        localPreflightPassed = false;
+      }
+      const report = await collectTrialGate({
+        localPreflightPassed,
+        gatewayUrl: context.env.PUBLIC_GATEWAY_URL,
+        adminToken: context.env.BILLING_INTERNAL_TOKEN,
+        transport: dependencies.transport?.() ?? httpTransport({ timeoutMs: 10_000 }),
+        now: dependencies.now,
+      });
+      return emit([JSON.stringify(report)], report.result === 'pass' ? 0 : 1);
+    }
+
+    const plan = buildLaunchPlan(context.env);
+    const targetIndex = plan.findIndex((step) => step.name === 'hosting:render-attribution');
+    const target = plan[targetIndex];
+    if (!target) return emit(['Render attribution step is unavailable'], 1);
+    const state = await context.state.load().catch(() => undefined);
+    if (!state) return emit(['launcher state is unreadable; refusing the targeted Render action'], 1);
+    const unresolved = Object.values(state.steps).find((step) => step.status === 'unknown');
+    if (unresolved) return emit([`refusing the targeted Render action while ${unresolved.name} is unresolved`], 1);
+    const incomplete = plan.slice(0, targetIndex).find((step) => state.steps[step.name]?.status !== 'succeeded');
+    if (incomplete) return emit([`refusing the targeted Render action; prerequisite ${incomplete.name} is not checkpointed as succeeded`], 1);
+    const prior = state.steps[target.name];
+    if (prior?.status === 'succeeded') return emit(['Render attribution is already checkpointed as succeeded'], 0);
+    if (prior?.status === 'failed' || prior?.status === 'unknown') {
+      return emit([`refusing to retry the ${prior.status} Render attribution checkpoint without reconciliation`], 1);
+    }
+    const envCheck = checkLaunchEnv(context.env, 'finalize');
+    if (envCheck.missing.length > 0 || envCheck.invalid.length > 0 || envCheck.forbidden.length > 0) {
+      return emit(['refusing the targeted Render action; local launch preflight failed'], 1);
+    }
+    const result = await runResume({ mode: 'resume', context, plan: [target] });
+    for (const line of result.report) context.print(line);
+    return { exitCode: result.stoppedAt ? 1 : 0, report: result.report };
+  }
+
   await prepareLaunchEnvFile(envPath, dependencies.gitProbe);
   const fileEnv = await readLaunchEnv(envPath).catch(() => ({}));
 

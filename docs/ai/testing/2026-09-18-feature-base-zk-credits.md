@@ -613,27 +613,56 @@ rolling micro-USD: the first dispatch debit was retained, the second was
 refused with the UTC-day cap outcome, and staging durably entered the paused
 state. No production spend or launch state was changed by that exercise.
 
-The staging service has non-secret configuration only; its separate runtime
-credentials have not been exported pending explicit authorization. The
-launcher is paused before slot A, where GitHub account ownership, invite
-handling, sidecar traffic, and redacted operator evidence must be supplied by
-the real operator. No activation evidence was fabricated.
+The staging Render service was not given runtime credentials. The completed
+isolated Postgres cap-exhaustion run is the staging control evidence; no
+additional request was sent through that service. The launcher records slot A
+as aborted with Ctrl+C and slots B and C as pending. No slot has a qualifying
+operator bundle, and no activation evidence was fabricated.
 
 The activation rehearsal initially exposed a launcher environment-forwarding
 defect. The fix forwards only the three runtime values required by the founder
 CLI, and `launch/cli.test.ts` now has 37 passing tests including that boundary;
 `npm run typecheck` also passes.
 
-The fresh final checks then recorded strict hosted readiness as green: the
-gateway returned `ready: true`, launch control was enabled, and the six
-readiness checks were healthy. Playwright against the adopted Vercel
-deployment rendered the landing and onboarding routes and confirmed anonymous
-dashboard gating. The deployment's `/api/auth/session` returned `500`, however,
-because its production environment is empty; adding the OAuth, NextAuth,
-gateway, and billing values was blocked pending explicit authorization to send
-those secrets to Vercel. Guardrail tests passed `68/68`, operator-evidence
-schema tests passed `12/12`, and no activation bundle was fabricated while the
-launcher remained paused before slot A.
+The earlier Vercel check was superseded on 2026-09-23 after the authorized
+production runtime values were added to the `zk-credits-web` Vercel project.
+The production deployment at `https://zk-credits-web.vercel.app` is
+`zk-credits-eo52ylymp-gadillacers-projects.vercel.app` (deployment
+`dpl_BcvYR7PerjL4GqdPMy36ZKyZB1TG`). The configured names are
+`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`,
+`GATEWAY_URL`, and `BILLING_INTERNAL_TOKEN`; no values are recorded here. The
+canonical `NEXTAUTH_URL` is the stable production alias, and the GitHub OAuth
+redirect observed in the browser targets its `/api/auth/callback/github` path.
+
+Playwright confirmed the landing page, sign-in page, and public onboarding
+entry render. The GitHub sign-in button opened the GitHub login page without a
+callback error. No account credentials were entered, so the authenticated
+session and signed-in dashboard remain unverified. A fresh anonymous
+`/api/auth/session` response was HTTP 200 with body `null`, `/dashboard`
+redirected to `/sign-in`, and the onboarding action led to that protected
+dashboard. No operator activation was attempted or fabricated.
+
+The launcher’s requested final verification commands were rerun on
+2026-09-23: `ts` typecheck passed; `ts` tests passed 349 with 28 skipped;
+`x402-zk-prepaid` passed 22; `zk-credits-shared` passed 29 with 8 skipped;
+`zk-credits-sidecar` passed 66; and `web` passed 47. The TypeScript suite
+includes `privacy-scan.test.ts`. The launch guardrail scan passed on the newly
+recorded B22 evidence text; the historical testing document contains older
+fixture-shaped values, so it was excluded from that artifact scan. There is
+not yet an aggregate activation summary or operator bundle to scan. The
+launcher’s final evidence step stays open until all three serialized, real
+operator activations qualify and their redacted bundles and aggregate summary
+are scanned and recorded. The GitHub issue remains open.
+
+Package publication was reconciled on 2026-09-23. All three pinned versions
+now resolve from npm, and the public `dist.integrity` value exactly matches a
+fresh local `npm pack --json` for each package: `@zk-credits/shared@0.1.0`,
+`@zk-credits/x402-zk-prepaid@0.1.0`, and `zk-credits@0.2.0`. The sidecar's
+clean `npm ci` resolved its leaf dependencies from the registry; its build
+passed and its tests passed 66/66. These versions are already consumed and
+must not be published again. This supersedes the earlier 404/401 registry
+checkpoint. Publication is therefore complete; operator activation and
+authenticated sign-in remain outstanding.
 
 ## Required suites
 
@@ -678,3 +707,138 @@ Record numeric fixtures, not slogans.
 - Dated written renewal intent at live SKU (S32).
 
 Do not claim these from local mocks.
+
+## Recovery capsule web implementation (2026-09-23)
+
+The hosted `/recover` code now accepts a recovery capsule. It verifies the
+capsule and derives its commitment in the browser, performs a same-origin
+commitment-only lookup for an existing funded bundle, wraps and locally
+verifies the activated metadata, and downloads the activated credential. A
+missing bundle is a terminal result; this path does not call the funding API.
+The API route validates the commitment and returns only activation metadata
+with `Cache-Control: no-store`.
+
+Local verification on the Base worktree:
+
+- `web/npm test`: 54 passed across 6 files.
+- `web/npx vitest run src/app/api/pilot/recovery/route.test.ts`: 7 passed.
+- `web/E2E_PORT=3412 npx playwright test e2e/pilot-recovery.spec.ts`: 6
+  passed, including version-2 activated and legacy version-1 imports, capsule
+  recovery/download, wrong password, malformed capsule, missing bundle, and
+  mismatched metadata.
+- `web/npm run typecheck`: passed.
+- `web/npm run lint`: passed with 8 warnings in existing unrelated files.
+- `web/npm run build -- --webpack`: passed and includes `/api/pilot/recovery`.
+  Build output retains existing workspace-root and dynamic `web-worker`
+  dependency warnings.
+
+The recovery app is deployed as a Vercel preview at
+`https://zk-credits-quoubld5z-gadillacers-projects.vercel.app` (deployment
+`dpl_DVq1mdaYZY8uu1WtzA4AtEMxC2Wx`), inspected as `Ready` on 2026-09-23.
+The first CLI deploy used the monorepo root and failed because Next.js is in
+`web/`; redeploying with `vercel deploy web -y --no-wait` succeeded. The
+preview was not promoted to production. `gh auth status` still reports an
+invalid GitHub token, and the issue page could not be fetched in this
+environment. No credential or password was collected, no live sidecar
+exchange was run, and no issue claim or result was posted. The user must still
+restore and install the credential, and the pinned sidecar must accept it,
+before fresh `/ready`, authenticated admin, and launcher gates are collected
+for the two separate exchange paths. Internal exchanges do not count as
+independent operator activations.
+
+## Base Sepolia recovery fallback (2026-09-23)
+
+The gateway's exact `404 bundle_not_found` response now triggers a read-only
+Base lookup. Other gateway errors pass through without a chain query. The
+lookup requires an active tier-0 contract entry, an unexpired bundle, one
+matching `BundleFunded` event with the configured confirmation depth, and the
+event root at `rootAt(leafIndex + 1)`. The browser independently rejects an
+expired activation before local verification or download.
+
+Fresh local verification in the Base worktree:
+
+- `web/npm test -- --run src/app/api/pilot/recovery/route.test.ts src/lib/base-recovery.test.ts`:
+  19 passed across 2 files. The tests cover gateway success, invalid
+  commitments, exact-404 fallback, absent chain bundle, RPC error redaction,
+  gateway errors outside the fallback condition, a confirmed matching funding
+  event/root, expired and unusable state, metadata mismatch, and insufficient
+  confirmations.
+- `web/npm test`: 66 passed across 7 files.
+- `web/npm run test:e2e -- pilot-recovery.spec.ts`: 7 passed, including a
+  generated capsule that is locally verified and downloaded after mocked
+  activation metadata, rejection of expired metadata before save/download,
+  no-funding behavior, wrong password, malformed input, and commitment
+  mismatch.
+- `web/npm run typecheck`: passed.
+- `web/npx eslint src/app/api/pilot/recovery/route.ts src/app/api/pilot/recovery/route.test.ts src/lib/base-recovery.ts src/lib/base-recovery.test.ts src/lib/credits.ts`:
+  passed.
+- `web/npm run lint`: passed with 0 errors and 8 existing warnings in the
+  archive and PostCSS config.
+- `web/npm run build -- --webpack`: passed and includes the dynamic
+  `/api/pilot/recovery` route; Next.js reported existing multiple-lockfile and
+  `web-worker` dependency warnings.
+- The AI DevKit lint gate could not run because npm registry DNS resolution
+  failed with `ENOTFOUND` in this environment.
+
+The recovery fallback is deployed to the unpromoted Preview with deployment-
+scoped Base Sepolia runtime settings. A synthetic unfunded commitment sent via
+authenticated Vercel CLI access returned HTTP 404 `bundle_not_found`, which
+confirms the deployed route could reach its gateway and read-only Base fallback.
+The same synthetic check in the operator's browser was redirected or blocked
+by Preview protection. The hosted browser route therefore remains inaccessible
+to the operator. No capsule or password was requested, no live exchange was
+run, and the issue remains open.
+
+## Internal direct registered-adapter harness (2026-09-23)
+
+`zk-credits trial-registered-adapter` is the one-call maintainer path for
+testing the official x402 client registration after local capsule recovery.
+It uses the same request-bound proof factory and durable slot ledger as
+`serve`, performs an unpaid challenge request before preparing a proof, and
+then validates the payment response and gateway counter delta. It does not
+start the Codex sidecar; the command refuses if that sidecar is already
+running. The caller must confirm one remaining local credit and approve one
+billable internal exchange. Before sending it, the command requires enabled
+Base Sepolia readiness, an authenticated admin snapshot with positive spend
+headroom, a current root shared by the local witness and gateway, an unexpired
+tier-0 credential, and local ledger capacity. Output contains sanitized
+exchange phases and counter deltas only.
+
+Fresh local verification in the Base worktree:
+
+- `packages/zk-credits-sidecar`: `npx vitest run src/base-sidecar.test.ts src/base-registered-trial.test.ts src/package-config.test.ts` — 10 passed.
+- `web`: `npx vitest run src/lib/base-recovery.test.ts src/app/api/pilot/recovery/route.test.ts` — 19 passed.
+- `web`: `E2E_PORT=3412 npm run test:e2e -- pilot-recovery.spec.ts` — 7 passed after granting the local test server loopback permission.
+- `web`: `npm run typecheck` — passed.
+- `packages/zk-credits-sidecar`: `npm run build` — passed.
+- `web`: `npm run build -- --webpack` — passed and includes `/api/pilot/recovery`.
+- `git diff --check` — passed.
+
+The synthetic recovery API check through authenticated Vercel CLI access
+returned HTTP 404 `bundle_not_found`, the expected result for its unfunded
+synthetic commitment. The operator's browser still reports that Preview
+protection redirects or blocks access. The command and tests did not use the
+operator capsule or run either live exchange; no slot was consumed, Preview
+remains unpromoted, and issue 26 remains open.
+
+## Fresh continuation verification (2026-09-24)
+
+- `packages/zk-credits-sidecar`: focused adapter, sidecar, and package tests —
+  10 passed; `src/base-sidecar-integration.test.ts` — 2 passed after granting
+  local loopback access to its mocked server.
+- `web`: recovery API and Base reader tests — 19 passed; recovery Playwright
+  suite — 7 passed after granting local test-server loopback access.
+- `web`: `npm run typecheck` and `npm run build -- --webpack` — passed; the
+  production build includes `/api/pilot/recovery`.
+- `packages/zk-credits-sidecar`: `npm run build` and
+  `node dist/zk-credits.js --help` — passed; help lists
+  `trial-registered-adapter`.
+- `git diff --check` — passed.
+
+The operator's browser result remains “Redirected or blocked by Preview
+protection.” The local Vercel link metadata names `zk-credits-web`; a fresh
+`vercel inspect --format=json` attempt returned no metadata, so the last
+authenticated deployment status remains the earlier `READY` Preview record.
+No operator recovery, exchange-time readiness snapshot, or live exchange was
+performed. No slot was consumed, Preview remains unpromoted, and issue 26
+remains open.

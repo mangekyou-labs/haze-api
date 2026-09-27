@@ -95,5 +95,166 @@ test('rejects a wrong password and a tampered capsule', async ({ page }) => {
   await page.locator('#credential-file').setInputFiles(tamperedPath);
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
-  await expect(page.locator('p[role="alert"]')).toContainText(/invalid|malformed/u);
+  await expect(page.locator('p[role="alert"]')).toContainText(/invalid|malformed/iu);
+});
+
+test('activates a recovered capsule from its existing funding bundle', async ({ page }) => {
+  const secret = generateSecret();
+  const capsule = await createRecoveryCapsule(secret, PASSWORD);
+  const path = writeFixture('capsule.json', {
+    format: 'zk-credits-credential',
+    version: 2,
+    kind: 'recovery-capsule',
+    capsule,
+  });
+  const credential = await createCredential(secret, FUNDED_TIER_ID, EXPIRY, DOMAIN);
+  let lookedUpCommitment = '';
+  await page.route('**/api/pilot/recovery**', async (route) => {
+    const requestUrl = new URL(route.request().url());
+    lookedUpCommitment = requestUrl.searchParams.get('commitment') ?? '';
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        commitment: credential.commitment,
+        tierId: FUNDED_TIER_ID,
+        expiry: EXPIRY,
+        deploymentDomain: DOMAIN,
+        network: 'eip155:84532',
+        contractAddress: '0x0000000000000000000000000000000000000001',
+        transactionHash: '0xfunded',
+      }),
+    });
+  });
+
+  await page.goto('/recover');
+  await page.locator('#credential-file').setInputFiles(path);
+  await page.fill('#recovery-password', PASSWORD);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+  const download = await downloadPromise;
+
+  expect(lookedUpCommitment).toBe(credential.commitment);
+  expect(download.suggestedFilename()).toMatch(/^zk-credits-credential-/u);
+  await expect(page.getByText('Credential restored locally.')).toBeVisible();
+});
+
+test('does not save or download a recovered credential with expired activation metadata', async ({ page }) => {
+  const secret = generateSecret();
+  const capsule = await createRecoveryCapsule(secret, PASSWORD);
+  const path = writeFixture('capsule-expired.json', {
+    format: 'zk-credits-credential',
+    version: 2,
+    kind: 'recovery-capsule',
+    capsule,
+  });
+  const credential = await createCredential(secret, FUNDED_TIER_ID, EXPIRY, DOMAIN);
+  await page.route('**/api/pilot/recovery**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        commitment: credential.commitment,
+        tierId: FUNDED_TIER_ID,
+        expiry: Math.floor(Date.now() / 1000) - 1,
+        deploymentDomain: DOMAIN,
+        network: 'eip155:84532',
+        contractAddress: '0x0000000000000000000000000000000000000001',
+        transactionHash: '0xfunded',
+      }),
+    });
+  });
+
+  let downloads = 0;
+  page.on('download', () => { downloads += 1; });
+  await page.goto('/recover');
+  await page.locator('#credential-file').setInputFiles(path);
+  await page.fill('#recovery-password', PASSWORD);
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+
+  await expect(page.locator('p[role="alert"]')).toContainText(/bundle has expired/iu);
+  expect(downloads).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('zk-credits:credential-metadata'))).toBeNull();
+});
+
+test('rejects a wrong capsule password and malformed capsule before lookup', async ({ page }) => {
+  const secret = generateSecret();
+  const capsule = await createRecoveryCapsule(secret, PASSWORD);
+  const wrongPasswordPath = writeFixture('capsule-wrong-password.json', {
+    format: 'zk-credits-credential',
+    version: 2,
+    kind: 'recovery-capsule',
+    capsule,
+  });
+  const malformedPath = writeFixture('capsule-malformed.json', {
+    format: 'zk-credits-credential',
+    version: 2,
+    kind: 'recovery-capsule',
+    capsule: { ...capsule, ciphertext: 'not-base64url!' },
+  });
+  let lookupRequests = 0;
+  await page.route('**/api/pilot/recovery**', async (route) => {
+    lookupRequests += 1;
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"bundle_not_found"}' });
+  });
+
+  await page.goto('/recover');
+  await page.locator('#credential-file').setInputFiles(wrongPasswordPath);
+  await page.fill('#recovery-password', 'wrong password value');
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+  await expect(page.locator('p[role="alert"]')).toContainText(/password or ciphertext is invalid/u);
+  expect(lookupRequests).toBe(0);
+
+  await page.locator('#credential-file').setInputFiles(malformedPath);
+  await page.fill('#recovery-password', PASSWORD);
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+  await expect(page.locator('p[role="alert"]')).toContainText(/invalid|malformed/iu);
+  expect(lookupRequests).toBe(0);
+});
+
+test('does not fund a capsule with no existing bundle and rejects mismatched lookup metadata', async ({ page }) => {
+  const secret = generateSecret();
+  const capsule = await createRecoveryCapsule(secret, PASSWORD);
+  const path = writeFixture('capsule-without-bundle.json', {
+    format: 'zk-credits-credential',
+    version: 2,
+    kind: 'recovery-capsule',
+    capsule,
+  });
+  let fundingRequests = 0;
+  await page.route('**/api/pilot/recovery**', async (route) => {
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'bundle_not_found' }) });
+  });
+  await page.route('**/api/pilot/funding', async (route) => {
+    fundingRequests += 1;
+    await route.fulfill({ status: 500, body: '{}' });
+  });
+
+  await page.goto('/recover');
+  await page.locator('#credential-file').setInputFiles(path);
+  await page.fill('#recovery-password', PASSWORD);
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+  await expect(page.locator('p[role="alert"]')).toContainText(/no funded credential bundle was found/iu);
+  expect(fundingRequests).toBe(0);
+
+  const wrongCommitment = await createCredential(generateSecret(), FUNDED_TIER_ID, EXPIRY, DOMAIN);
+  await page.unroute('**/api/pilot/recovery**');
+  await page.route('**/api/pilot/recovery**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        commitment: wrongCommitment.commitment,
+        tierId: FUNDED_TIER_ID,
+        expiry: EXPIRY,
+        deploymentDomain: DOMAIN,
+        network: 'eip155:84532',
+        contractAddress: '0x0000000000000000000000000000000000000001',
+        transactionHash: '0xfunded',
+      }),
+    });
+  });
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+  await expect(page.locator('p[role="alert"]')).toContainText(/commitment mismatch/iu);
+  expect(fundingRequests).toBe(0);
 });

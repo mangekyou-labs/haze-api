@@ -58,7 +58,7 @@ export class ProviderRequestError extends Error {
 }
 
 export interface HttpRequest {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   url: string;
   headers: Record<string, string>;
   body?: unknown;
@@ -355,6 +355,30 @@ function api(transport: HttpTransport, apiKey: string) {
     });
     return response.body as T;
   };
+}
+
+/** Applies the attribution code to a gateway and starts a deployment. */
+export async function configureRenderBuilderCode(options: {
+  transport: HttpTransport;
+  apiKey: string;
+  serviceId: string;
+  builderCode: string;
+}): Promise<{ deployId: string; deployStatus: string }> {
+  if (!/^[a-z0-9_]{1,32}$/u.test(options.builderCode)) throw new Error('BASE_BUILDER_CODE is invalid');
+  const call = api(options.transport, options.apiKey);
+  const serviceId = encodeURIComponent(options.serviceId);
+  await call<unknown>({
+    method: 'PUT',
+    url: `${RENDER_API_BASE}/services/${serviceId}/env-vars/BASE_BUILDER_CODE`,
+    body: { value: options.builderCode },
+  });
+  const deploy = await call<{ id?: string; status?: string }>({
+    method: 'POST',
+    url: `${RENDER_API_BASE}/services/${serviceId}/deploys`,
+    body: { clearCache: 'do_not_clear' },
+  });
+  if (!deploy.id || !deploy.status) throw new Error('Render did not return a Builder Code deployment checkpoint');
+  return { deployId: deploy.id, deployStatus: deploy.status };
 }
 
 export interface NeonAdapterOptions {

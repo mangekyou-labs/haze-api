@@ -41,6 +41,7 @@ import {
   ProviderTimeoutError,
 } from './providers.js';
 import { LaunchStateStore } from './state.js';
+import { METRIC_NAMES } from '../metrics.js';
 
 const directories: string[] = [];
 
@@ -68,6 +69,7 @@ const PERMISSIVE = { isIgnored: async () => true, isTracked: async () => false }
 const COMPLETE_ENV: Record<string, string> = {
   NPM_TOKEN: 'npm_abcdefghijklmnopqrstuvwx',
   BASE_RPC_URL: 'https://alchemy.example/v2/key',
+  BASE_BUILDER_CODE: 'bc_testcode',
   BASE_DEPLOYMENT_DOMAIN: '84532',
   BASE_USDC_ADDRESS: BASE_SEPOLIA_USDC_ADDRESS,
   BASE_DEPLOYER_KEYSTORE_ACCOUNT: 'pilot-deployer',
@@ -134,6 +136,8 @@ function providerStub(): (request: { method: string; url: string }) => unknown {
     }
     if (url.includes('api.render.com')) {
       if (url.includes('/owners')) return [{ owner: { id: 'tea-1', name: 'personal' } }];
+      if (method === 'PUT' && url.includes('/env-vars/BASE_BUILDER_CODE')) return {};
+      if (method === 'POST' && url.endsWith('/deploys')) return { id: 'dep_1', status: 'queued' };
       if (method === 'POST') {
         created.add('render');
         return { service: render };
@@ -305,6 +309,76 @@ describe('preflight', () => {
   });
 });
 
+describe('internal trial launcher modes', () => {
+  it('prints a passing JSON gate without preparing or writing launcher files', async () => {
+    const { directory, statePath, envPath } = await sandbox();
+    const now = Date.UTC(2026, 8, 27, 4, 0, 0);
+    const readyChecks = ['launchControl', 'database', 'baseRoot', 'baseRpc', 'verifierAssets', 'provider']
+      .map((name) => ({ name, ok: true }));
+    const metrics = Object.fromEntries(METRIC_NAMES.map((name) => [name, 0]));
+    const adminStatus = {
+      launchControl: { state: 'enabled' },
+      network: 'eip155:84532',
+      metrics,
+      claims: { reserved: 0, ready: 0, committed: 0, cancelled: 0 },
+      base: { currentRoot: 'secret-root', knownRootCount: 1, lastScannedBlock: '50000000', lagBlocks: '5' },
+      generatedAt: new Date(now).toISOString(),
+    };
+    const printed: string[] = [];
+    const result = await runLaunchCli(['--trial-gate'], {
+      cwd: directory,
+      repoRoot: directory,
+      envPath,
+      statePath,
+      now: () => now,
+      env: { ...COMPLETE_ENV, PUBLIC_GATEWAY_URL: 'https://gateway.example', BILLING_INTERNAL_TOKEN: 'private-admin-token' },
+      print: (line) => printed.push(line),
+      transport: () => ({
+        async send(request) {
+          return request.url.endsWith('/ready')
+            ? { status: 200, body: { ready: true, launchControl: 'enabled', checks: readyChecks, generatedAt: new Date(now).toISOString() } }
+            : { status: 200, body: adminStatus };
+        },
+      }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(printed).toHaveLength(1);
+    expect(JSON.parse(printed[0]!).result).toBe('pass');
+    expect(printed[0]).not.toContain('secret-root');
+    expect(printed[0]).not.toContain('private-admin-token');
+    await expect(stat(envPath)).rejects.toThrow(/ENOENT/u);
+    await expect(stat(statePath)).rejects.toThrow(/ENOENT/u);
+  });
+
+  it('refuses a targeted Render action when earlier checkpoints are incomplete', async () => {
+    const { directory, statePath, envPath } = await sandbox();
+    const printed: string[] = [];
+    let providerCalls = 0;
+    const result = await runLaunchCli(['--render-attribution'], {
+      cwd: directory,
+      repoRoot: directory,
+      envPath,
+      statePath,
+      env: COMPLETE_ENV,
+      print: (line) => printed.push(line),
+      transport: () => ({ async send() { providerCalls += 1; return { status: 200, body: {} }; } }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(printed.join('\n')).toMatch(/prerequisite release:preflight is not checkpointed as succeeded/u);
+    expect(providerCalls).toBe(0);
+    await expect(stat(envPath)).rejects.toThrow(/ENOENT/u);
+    await expect(stat(statePath)).rejects.toThrow(/ENOENT/u);
+  });
+
+  it('rejects ambiguous and combined gate modes', async () => {
+    const { envPath, statePath } = await sandbox();
+    const combined = await runLaunchCli(['--trial-gate', '--status'], { envPath, statePath, print: () => {} });
+    expect(combined.exitCode).toBe(2);
+  });
+});
+
 describe('the dependency-only commit', () => {
   it('pushes through the configured upstream instead of naming origin', async () => {
     const { context, commands } = await harness({
@@ -383,6 +457,8 @@ describe('the plan', () => {
     expect(index('release:preflight')).toBeLessThan(index('deploy:preflight'));
     expect(index('deploy:contracts')).toBeLessThan(index('hosting:neon'));
     expect(index('hosting:neon')).toBeLessThan(index('activation:rehearsal'));
+    expect(index('hosting:github-oauth')).toBeLessThan(index('hosting:render-attribution'));
+    expect(index('hosting:render-attribution')).toBeLessThan(index('controls:readiness'));
     expect(index('activation:rehearsal')).toBeLessThan(index('activation:slot-a'));
     expect(index('activation:slot-a')).toBeLessThan(index('activation:slot-b'));
     expect(index('activation:slot-b')).toBeLessThan(index('activation:slot-c'));
@@ -396,6 +472,22 @@ describe('the plan', () => {
       'release:publish-sidecar',
       'deploy:contracts',
       'deploy:approve-usdc',
+      'hosting:render-attribution',
+    ]));
+  });
+
+  it('configures the hosted Builder Code without recording or printing its value', async () => {
+    const { context, printed, requests } = await harness();
+    const plan = buildLaunchPlan(COMPLETE_ENV);
+    await plan.find((step) => step.name === 'hosting:render')!.execute(context);
+
+    const outcome = await plan.find((step) => step.name === 'hosting:render-attribution')!.execute(context);
+
+    expect(outcome).toMatchObject({ status: 'succeeded', detail: { deployId: 'dep_1', deployStatus: 'queued' } });
+    expect(printed.join('\n')).not.toContain(COMPLETE_ENV.BASE_BUILDER_CODE);
+    expect(requests).toEqual(expect.arrayContaining([
+      { method: 'PUT', url: expect.stringContaining('/env-vars/BASE_BUILDER_CODE') },
+      { method: 'POST', url: expect.stringMatching(/\/deploys$/u) },
     ]));
   });
 

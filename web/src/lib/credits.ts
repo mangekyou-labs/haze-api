@@ -12,8 +12,10 @@ import {
   createRecoveryCapsuleFile,
   decryptAnyCredentialExport,
   generateSecret,
+  verifyActivatedCredential,
   verifyRecoveryCapsule,
   wrapActivatedCredential,
+  type ActivatedCredentialMetadata,
   type ActivatedCredentialFile,
   type CreditCredential,
   type RecoveryCapsuleFile,
@@ -172,6 +174,57 @@ export async function importCredentialFile(
     payload: activated ?? (parsed as { encrypted?: unknown }).encrypted,
     savedAt: Date.now(),
   });
+  return { credential, activated };
+}
+
+/**
+ * Restores an activated export from a capsule and existing public funding
+ * metadata. The capsule/password remain local; only the derived commitment is
+ * sent to the same-origin lookup route. This path never requests funding.
+ */
+export async function restoreCapsuleFromFunding(
+  parsed: unknown,
+  password: string,
+): Promise<{ credential: CreditCredential; activated: ActivatedCredentialFile }> {
+  const capsuleFile = parsed as RecoveryCapsuleFile;
+  const recovered = await verifyRecoveryCapsule(capsuleFile, password);
+  const response = await fetch(`/api/pilot/recovery?commitment=${encodeURIComponent(recovered.commitment)}`, {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  if (response.status === 404) {
+    throw new Error('No funded credential bundle was found for this recovery capsule.');
+  }
+  if (response.status === 410) {
+    throw new Error('The funded credential bundle has expired.');
+  }
+  if (response.status === 409) {
+    throw new Error('The funded credential bundle is no longer active.');
+  }
+  if (response.status === 503) {
+    throw new Error('The funded credential is not confirmed yet. Please try again later.');
+  }
+  if (!response.ok) {
+    throw new Error('Could not look up the funded credential bundle. Please try again later.');
+  }
+  const activation = await response.json() as ActivatedCredentialMetadata;
+  if (activation.network !== PILOT_NETWORK) {
+    throw new Error('Funding metadata is for a different network.');
+  }
+  if (!Number.isSafeInteger(activation.expiry) || activation.expiry <= Math.floor(Date.now() / 1000)) {
+    throw new Error('The funded credential bundle has expired.');
+  }
+  const activated = wrapActivatedCredential(capsuleFile.capsule, activation);
+  const credential = await verifyActivatedCredential(activated, password);
+  saveLocalCredential({
+    version: 2,
+    tierId: credential.tierId,
+    expiry: credential.expiry,
+    deploymentDomain: credential.deploymentDomain,
+    payload: activated,
+    savedAt: Date.now(),
+  });
+  downloadActivatedCredential(activated);
   return { credential, activated };
 }
 

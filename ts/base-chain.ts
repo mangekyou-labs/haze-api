@@ -4,6 +4,7 @@
 import { baseSepolia } from 'viem/chains';
 import { createPublicClient, createWalletClient, decodeEventLog, http, toHex, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { Attribution } from 'ox/erc8021';
 
 /** Sponsor-side bond operations used by unpaid pilot funding. */
 export interface BaseBondSponsor {
@@ -38,9 +39,21 @@ function sponsorAccount() {
   return privateKeyToAccount(value as Hex);
 }
 
+function builderCodeDataSuffix(): Hex {
+  const value = process.env.BASE_BUILDER_CODE;
+  if (!value) throw new Error('BASE_BUILDER_CODE is not configured');
+  if (!/^[a-z0-9_]{1,32}$/u.test(value)) throw new Error('BASE_BUILDER_CODE is invalid');
+  return Attribution.toDataSuffix({ codes: [value] });
+}
+
 export function createBaseBondSponsor(): BaseBondSponsor {
   const account = sponsorAccount();
-  const client = createWalletClient({ account, chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
+  const client = createWalletClient({
+    account,
+    chain: baseSepolia,
+    transport: http(process.env.BASE_RPC_URL),
+    dataSuffix: builderCodeDataSuffix(),
+  });
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
   const address = contractAddress();
   return {

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const allowedRuntimeDependencySpecs = {
   '@zk-credits/shared': ['file:../zk-credits-shared', '0.1.0'],
   '@zk-credits/x402-zk-prepaid': ['file:../x402-zk-prepaid', '0.1.0'],
+  '@x402/core': ['^2.26.0'],
 } as const;
 
 describe('sidecar package distribution', () => {

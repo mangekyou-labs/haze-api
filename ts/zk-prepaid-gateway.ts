@@ -17,12 +17,16 @@ import {
   createZkPrepaidFacilitator,
   decodeHeader,
   encodeHeader,
+  ClaimCommitAmbiguousError,
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
   PUBLIC_SIGNAL_INDEX,
+  isClaimLifecycleConflict,
   requirementsEqual,
   type ClaimFence,
+  type ClaimRecord,
+  type ClaimLifecycle,
   type ClaimStore,
   type PaymentPayload,
   type PaymentRequirements,
@@ -128,6 +132,7 @@ interface ReservationContext {
   requirements: PaymentRequirements;
   nullifier: string;
   signalHash: string;
+  record: ClaimRecord;
   fence: ClaimFence;
 }
 
@@ -373,12 +378,6 @@ function jsonError(res: ExpressResponse, status: number, error: string): void {
   res.status(status).json({ error });
 }
 
-function sameFence(left: ClaimFence, right: ClaimFence): boolean {
-  return left.reservationId === right.reservationId
-    && left.generation === right.generation
-    && left.fencingToken === right.fencingToken;
-}
-
 const PILOT_ERROR_STATUS: Record<string, number> = {
   invalid_invite_code: 400,
   invalid_invite_request: 400,
@@ -407,50 +406,14 @@ function pilotError(res: ExpressResponse, error: unknown, fallback = 'pilot_requ
   jsonError(res, status, code);
 }
 
-function isClaimSemanticError(code: string): boolean {
-  return new Set([
-    'conflicting_signal',
-    'stale_fence',
-    'claim_cancelled',
-    'claim_not_dispatchable',
-    'dispatch_in_progress',
-    'dispatch_budget_exhausted',
-    'reservation_lease_expired',
-    'dispatch_not_started',
-    'claim_not_stageable',
-    'idempotency_conflict',
-    'commit_requires_ready',
-    'claim_not_cancellable',
-    'claim_already_ready',
-    'operator_auth_required',
-    'reservation_not_found',
-  ]).has(code);
-}
-
 async function claimCall<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
   } catch (error) {
     const code = claimStoreErrorCode(error);
-    if (isClaimSemanticError(code)) throw new GatewayError(code, 409);
+    if (error instanceof ClaimCommitAmbiguousError) throw new GatewayError('claim_commit_ambiguous', 503);
+    if (isClaimLifecycleConflict(code)) throw new GatewayError(code, 409);
     throw new GatewayError('claim_store_unavailable', 503);
-  }
-}
-
-async function cancelIfReserved(
-  claimStore: ClaimStore,
-  context: ReservationContext,
-  clock: () => number,
-  metrics: LaunchMetrics | undefined,
-): Promise<void> {
-  try {
-    const current = await claimStore.lookup(context.nullifier, context.signalHash, clock());
-    if (!current || current.state !== 'reserved' || !sameFence(claimFence(current), context.fence)) return;
-    await claimStore.cancel(context.fence, clock());
-    metrics?.increment('claim_cancelled');
-  } catch {
-    // Cancellation is best-effort. A ready/committed record is deliberately
-    // never cancelled, and a persistence outage must not use a stale fence.
   }
 }
 
@@ -509,6 +472,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     : { currentRoot: config.currentRoot, knownRoots: config.knownRoots };
   const proofVerifier = options.verifyProof ?? await loadGroth16Verifier(config, now, readRoots);
   const facilitator = createZkPrepaidFacilitator({ claimStore, verifyProof: proofVerifier, now, hashSignal: signalHash });
+  const claimLifecycle: ClaimLifecycle = facilitator.claimLifecycle;
   const pilotInvites = options.pilotInvites;
   const pilotFunding = options.pilotFunding;
   const inFlight = new Map<string, Promise<BufferedResponse>>();
@@ -638,9 +602,9 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       return;
     }
     try {
-      const record = await claimCall(() => claimStore.lookupByReservation(reservationId, now()));
+      const record = await claimCall(() => claimLifecycle.lookupByReservation(reservationId, now()));
       if (!record) { jsonError(res, 404, 'reservation_not_found'); return; }
-      const updated = await claimCall(() => claimStore.resetDispatchBudget(claimFence(record), operatorToken, now()));
+      const updated = await claimCall(() => claimLifecycle.resetDispatchBudget(record, operatorToken, now()));
       res.json({ success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId });
     } catch (error) {
       const mapped = operationError(error);
@@ -664,12 +628,18 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       if (!verified.isValid) { jsonError(res, 404, 'replay_not_found'); return; }
       const nullifier = payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.nullifier];
       if (!nullifier) { jsonError(res, 404, 'replay_not_found'); return; }
-      const record = await claimCall(() => claimStore.lookup(nullifier, signalHash(payment), now()));
-      if (!record || record.state !== 'committed' || !record.encryptedReplay) {
+      const record = await claimCall(() => claimLifecycle.lookup(nullifier, signalHash(payment), now()));
+      if (!record) {
         jsonError(res, 404, 'replay_not_found');
         return;
       }
-      res.json({ encryptedReplay: record.encryptedReplay });
+      const disposition = claimLifecycle.classify(record);
+      const encryptedReplay = record.encryptedReplay;
+      if (disposition.kind !== 'committed' || !disposition.replayAvailable || !encryptedReplay) {
+        jsonError(res, 404, 'replay_not_found');
+        return;
+      }
+      res.json({ encryptedReplay });
     } catch {
       jsonError(res, 404, 'replay_not_found');
     }
@@ -914,7 +884,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     const hash = signalHash(payment);
     let reservation: Awaited<ReturnType<ClaimStore['reserve']>>;
     try {
-      reservation = await claimStore.reserve(nullifier, hash, now());
+      reservation = await claimLifecycle.reserve(nullifier, hash, now());
     } catch (error) {
       const code = claimStoreErrorCode(error);
       if (code === 'conflicting_signal') {
@@ -940,18 +910,19 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
         }
         return;
       }
-      if (reservation.record.state === 'cancelled') {
-        if (reservation.record.dispatchCount >= 2) {
+      const disposition = claimLifecycle.classify(reservation.record);
+      if (disposition.kind === 'cancelled') {
+        if (!disposition.retryAllowed) {
           sendPaymentRequired(res, url, freshChallenge(), metrics, 'dispatch_budget_exhausted');
         } else {
           sendPaymentRequired(res, url, freshChallenge(), metrics, 'reservation_cancelled');
         }
         return;
       }
-      if (reservation.record.state === 'committed') {
+      if (disposition.kind === 'committed') {
         metrics?.increment('claim_replayed');
         res.setHeader(PAYMENT_RESPONSE_HEADER, encodeHeader(paymentResponse));
-        if (reservation.record.encryptedReplay) {
+        if (disposition.replayAvailable) {
           res.status(409).json({
             error: 'claim_already_committed',
             replay: true,
@@ -964,7 +935,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       }
       // A ready claim is the fenced ambiguous-commit state. It is never
       // expired or redispatched by an exact retry.
-      jsonError(res, 409, reservation.record.state === 'ready' ? 'claim_commit_ambiguous' : 'claim_in_progress');
+      jsonError(res, 409, disposition.kind === 'ambiguous_commit' ? 'claim_commit_ambiguous' : 'claim_in_progress');
       return;
     }
 
@@ -973,6 +944,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       requirements: candidateRequirements,
       nullifier,
       signalHash: hash,
+      record: reservation.record,
       fence: claimFence(reservation.record),
     };
     const operation = (async (): Promise<BufferedResponse> => {
@@ -984,8 +956,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
           throw new GatewayError('provider_not_configured', 503);
         }
 
-        const dispatchIdempotencyKey = `${context.nullifier}:${context.signalHash}:${context.fence.generation}:dispatch`;
-        await claimCall(() => claimStore.beginDispatch(context.fence, dispatchIdempotencyKey, now()));
+        const dispatchRecord = await claimCall(() => claimLifecycle.beginDispatch(context.record, now()));
 
         // Admission control. The conservative class ceiling is debited before
         // the request can leave the process, so an exhausted cap refuses the
@@ -1030,26 +1001,25 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
           throw new GatewayError('provider_replay_unavailable', 502);
         }
 
-        await claimCall(() => claimStore.stageReady(context.fence, encryptedReplay, now()));
+        const readyRecord = await claimCall(() => claimLifecycle.stageReady(dispatchRecord, encryptedReplay, now()));
         readyStaged = true;
-        const commitIdempotencyKey = `${context.nullifier}:${context.signalHash}:${context.fence.generation}:commit`;
-        try {
-          await claimCall(() => claimStore.commit(context.fence, commitIdempotencyKey, now()));
-          metrics?.increment('claim_committed');
-        } catch (error) {
-          // A timeout or connection break can leave a durable ready row. Keep
-          // its fence for reconciliation; never cancel or dispatch again.
-          if (error instanceof GatewayError && error.message === 'claim_store_unavailable') {
-            throw new GatewayError('claim_commit_ambiguous', 503);
-          }
-          throw error;
-        }
+        await claimCall(() => claimLifecycle.commit(readyRecord, now()));
+        metrics?.increment('claim_committed');
         metrics?.increment('dispatch_ok');
         return buffered;
       } catch (error) {
         if (error instanceof GatewayError && error.message === 'provider_timeout') metrics?.increment('dispatch_timeout');
         else if (dispatched) metrics?.increment('dispatch_error');
-        if (!readyStaged) await cancelIfReserved(claimStore, context, now, metrics);
+        if (!readyStaged) {
+          try {
+            if (await claimLifecycle.cancelIfReserved(context.nullifier, context.signalHash, context.fence)) {
+              metrics?.increment('claim_cancelled');
+            }
+          } catch {
+            // Cancellation is best-effort. A ready/committed record is deliberately
+            // never cancelled, and a persistence outage must not use a stale fence.
+          }
+        }
         throw error;
       } finally {
         // A dispatch that began always keeps its debit, including provider

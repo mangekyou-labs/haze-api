@@ -4,6 +4,8 @@
 #
 #   scripts/launch-pilot.sh --check      read-only preflight
 #   scripts/launch-pilot.sh --status     read-only local and remote reconciliation
+#   scripts/launch-pilot.sh --trial-gate read-only JSON entry gate for B22's internal trial
+#   scripts/launch-pilot.sh --render-attribution configure one Render setting, then stop
 #   scripts/launch-pilot.sh              start or resume from the last checkpoint
 #
 # The shell layer does three things and nothing else: it refuses an environment

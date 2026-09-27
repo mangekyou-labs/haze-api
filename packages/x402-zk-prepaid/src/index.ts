@@ -29,9 +29,24 @@ import type {
 import type { x402Client } from '@x402/core/client';
 import type { x402Facilitator } from '@x402/core/facilitator';
 import type { FacilitatorClient, x402ResourceServer } from '@x402/core/server';
+import type {
+  ClaimFence,
+  ClaimRecord,
+  ClaimReservation,
+  ClaimStore,
+} from './claim-types.js';
 import { lifecycleFailure, lifecycleStage, type ZkPrepaidLifecycleEvent, type ZkPrepaidLifecycleObserver } from './lifecycle.js';
+import {
+  CLAIM_MAX_DISPATCH_COUNT,
+  CLAIM_REPLAY_TTL_MS,
+  CLAIM_RESERVATION_LEASE_MS,
+  createClaimLifecycle,
+  isClaimLifecycleConflict,
+} from './claim-lifecycle.js';
 
 export * from './lifecycle.js';
+export * from './claim-lifecycle.js';
+export * from './claim-types.js';
 
 export const X402_VERSION = 2 as const;
 export const ZK_PREPAID_SCHEME = 'zk-prepaid' as const;
@@ -405,55 +420,6 @@ export function createZkPrepaidResourceServer(options: ZkPrepaidResourceServerOp
   };
 }
 
-export type ClaimState = 'reserved' | 'ready' | 'committed' | 'cancelled';
-
-export interface ClaimFence {
-  reservationId: string;
-  generation: number;
-  fencingToken: string;
-}
-
-export interface ClaimRecord extends ClaimFence {
-  nullifier: string;
-  signalHash: string;
-  state: ClaimState;
-  createdAt: number;
-  updatedAt: number;
-  leaseExpiresAt: number;
-  dispatchCount: number;
-  encryptedReplay?: string;
-  replayExpiresAt?: number;
-  dispatchIdempotencyKey?: string;
-  commitIdempotencyKey?: string;
-}
-
-export interface ClaimReservation {
-  kind: 'new' | 'existing';
-  record: ClaimRecord;
-}
-
-/**
- * Public spend-plane lifecycle. Every mutating operation carries the fence
- * returned by reserve; a stale worker can therefore never mutate a takeover.
- */
-export interface ClaimStore {
-  reserve(nullifier: string, signalHash: string, now?: number): Promise<ClaimReservation>;
-  beginDispatch(fence: ClaimFence, idempotencyKey: string, now?: number): Promise<ClaimRecord>;
-  stageReady(fence: ClaimFence, encryptedReplay: string, now?: number): Promise<ClaimRecord>;
-  commit(fence: ClaimFence, idempotencyKey: string, now?: number): Promise<ClaimRecord>;
-  cancel(fence: ClaimFence, now?: number): Promise<ClaimRecord>;
-  resetDispatchBudget(fence: ClaimFence, operatorToken: string, now?: number): Promise<ClaimRecord>;
-  lookup(nullifier: string, signalHash?: string, now?: number): Promise<ClaimRecord | undefined>;
-  lookupByReservation(reservationId: string, now?: number): Promise<ClaimRecord | undefined>;
-  /** Read-only compatibility alias; mutating callers must use a fence. */
-  get(nullifier: string, now?: number): Promise<ClaimRecord | undefined>;
-  expireReservations(before: number): Promise<number>;
-}
-
-const CLAIM_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
-const CLAIM_LEASE_MS = 5 * 60 * 1000;
-const MAX_DISPATCH_COUNT = 2;
-
 function cloneClaim(record: ClaimRecord): ClaimRecord {
   return { ...record };
 }
@@ -502,8 +468,8 @@ export class InMemoryClaimStore implements ClaimStore {
     if (current) {
       enforceReplayExpiry(current, now);
       if (current.signalHash !== signalHash) throw new Error('conflicting_signal');
-      const takeover = (current.state === 'cancelled' && current.dispatchCount < MAX_DISPATCH_COUNT)
-        || (current.state === 'reserved' && current.leaseExpiresAt <= now && current.dispatchCount < MAX_DISPATCH_COUNT);
+      const takeover = (current.state === 'cancelled' && current.dispatchCount < CLAIM_MAX_DISPATCH_COUNT)
+        || (current.state === 'reserved' && current.leaseExpiresAt <= now && current.dispatchCount < CLAIM_MAX_DISPATCH_COUNT);
       if (takeover) {
         const fence = newFence(current);
         const record: ClaimRecord = {
@@ -511,7 +477,7 @@ export class InMemoryClaimStore implements ClaimStore {
           ...fence,
           state: 'reserved',
           updatedAt: now,
-          leaseExpiresAt: now + CLAIM_LEASE_MS,
+          leaseExpiresAt: now + CLAIM_RESERVATION_LEASE_MS,
           encryptedReplay: undefined,
           replayExpiresAt: undefined,
           dispatchIdempotencyKey: undefined,
@@ -530,7 +496,7 @@ export class InMemoryClaimStore implements ClaimStore {
       state: 'reserved',
       createdAt: now,
       updatedAt: now,
-      leaseExpiresAt: now + CLAIM_LEASE_MS,
+      leaseExpiresAt: now + CLAIM_RESERVATION_LEASE_MS,
       dispatchCount: 0,
     };
     this.records.set(nullifier, record);
@@ -546,11 +512,11 @@ export class InMemoryClaimStore implements ClaimStore {
     if (record.leaseExpiresAt <= now) throw new Error('reservation_lease_expired');
     if (record.dispatchIdempotencyKey === idempotencyKey) return cloneClaim(record);
     if (record.dispatchIdempotencyKey) throw new Error('dispatch_in_progress');
-    if (record.dispatchCount >= MAX_DISPATCH_COUNT) throw new Error('dispatch_budget_exhausted');
+    if (record.dispatchCount >= CLAIM_MAX_DISPATCH_COUNT) throw new Error('dispatch_budget_exhausted');
     record.dispatchCount += 1;
     record.dispatchIdempotencyKey = idempotencyKey;
     record.updatedAt = now;
-    record.leaseExpiresAt = now + CLAIM_LEASE_MS;
+    record.leaseExpiresAt = now + CLAIM_RESERVATION_LEASE_MS;
     return cloneClaim(record);
   }
 
@@ -608,7 +574,7 @@ export class InMemoryClaimStore implements ClaimStore {
       encryptedReplay: undefined,
       replayExpiresAt: undefined,
       updatedAt: now,
-      leaseExpiresAt: now + CLAIM_LEASE_MS,
+      leaseExpiresAt: now + CLAIM_RESERVATION_LEASE_MS,
     };
     this.records.set(record.nullifier, reset);
     return cloneClaim(reset);
@@ -650,21 +616,6 @@ export interface ZkPrepaidFacilitatorOptions { claimStore?: ClaimStore; verifyPr
 function phaseOf(payment: PaymentPayload): 'before-handler' | 'after-handler' | 'cancel' | undefined { return (payment.payload as unknown as Record<PropertyKey, unknown>)[SETTLEMENT_PHASE] as 'before-handler' | 'after-handler' | 'cancel' | undefined; }
 
 const SAFE_SETTLEMENT_ERRORS = new Set([
-  'conflicting_signal',
-  'stale_fence',
-  'claim_cancelled',
-  'claim_not_dispatchable',
-  'dispatch_in_progress',
-  'dispatch_budget_exhausted',
-  'reservation_lease_expired',
-  'dispatch_not_started',
-  'claim_not_stageable',
-  'idempotency_conflict',
-  'commit_requires_ready',
-  'claim_not_cancellable',
-  'claim_already_ready',
-  'operator_auth_required',
-  'reservation_not_found',
   'claim_not_found_after_reservation',
   'invalid_public_signals',
   'verification_failed',
@@ -674,64 +625,117 @@ const SAFE_SETTLEMENT_ERRORS = new Set([
 
 function safeSettlementError(error: unknown, fallback = 'claim_store_unavailable'): string {
   const code = error instanceof Error ? error.message : '';
-  return SAFE_SETTLEMENT_ERRORS.has(code) ? code : fallback;
+  return isClaimLifecycleConflict(code) || SAFE_SETTLEMENT_ERRORS.has(code) ? code : fallback;
 }
 
 export function createZkPrepaidFacilitator(options: ZkPrepaidFacilitatorOptions = {}) {
-  const claimStore = options.claimStore ?? new InMemoryClaimStore(); const now = options.now ?? Date.now; const hashSignal = options.hashSignal ?? ((payment) => encodeHeader(payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.signal]));
-  const idempotencyKey = (record: ClaimRecord, phase: string): string => `${record.nullifier}:${record.signalHash}:${record.generation}:${phase}`;
-  const fenceOf = (record: ClaimRecord): ClaimFence => ({ reservationId: record.reservationId, generation: record.generation, fencingToken: record.fencingToken });
-  const verify = async (payment: PaymentPayload, requirements: PaymentRequirements, expectedSignal?: string): Promise<VerificationResponse> => { const suppliedSignal = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.signal]; if (typeof suppliedSignal !== 'string') return { isValid: false, invalidReason: 'invalid_public_signals' }; const structural = await validateZkPrepaidPayload(payment, requirements, expectedSignal ?? suppliedSignal); if (!structural.isValid) return structural; return options.verifyProof ? options.verifyProof(payment, requirements) : { isValid: true }; };
-  const failure = (network: Network, errorReason: string): SettlementResponse => ({ success: false, transaction: '', network, errorReason });
+  const claimStore = options.claimStore ?? new InMemoryClaimStore();
+  const now = options.now ?? Date.now;
+  const hashSignal = options.hashSignal ?? ((payment) => encodeHeader(payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.signal]));
+  const claimLifecycle = createClaimLifecycle(claimStore, { now });
+  const verify = async (
+    payment: PaymentPayload,
+    requirements: PaymentRequirements,
+    expectedSignal?: string,
+  ): Promise<VerificationResponse> => {
+    const suppliedSignal = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.signal];
+    if (typeof suppliedSignal !== 'string') return { isValid: false, invalidReason: 'invalid_public_signals' };
+    const structural = await validateZkPrepaidPayload(payment, requirements, expectedSignal ?? suppliedSignal);
+    if (!structural.isValid) return structural;
+    return options.verifyProof ? options.verifyProof(payment, requirements) : { isValid: true };
+  };
+  const failure = (network: Network, errorReason: string): SettlementResponse => ({
+    success: false,
+    transaction: '',
+    network,
+    errorReason,
+  });
+
   return {
-    supported(): SupportedResponse { return { kinds: [{ x402Version: X402_VERSION, scheme: ZK_PREPAID_SCHEME, network: BASE_SEPOLIA_NETWORK, extra: { assetTransferMethod: 'prepaid-claim', paymentFlow: 'escrow', requirementsVersion: 'zk-prepaid-v1' } }], extensions: [], signers: {} }; },
+    supported(): SupportedResponse {
+      return {
+        kinds: [{
+          x402Version: X402_VERSION,
+          scheme: ZK_PREPAID_SCHEME,
+          network: BASE_SEPOLIA_NETWORK,
+          extra: {
+            assetTransferMethod: 'prepaid-claim',
+            paymentFlow: 'escrow',
+            requirementsVersion: 'zk-prepaid-v1',
+          },
+        }],
+        extensions: [],
+        signers: {},
+      };
+    },
     verify,
     async settle(payment: PaymentPayload, requirements: PaymentRequirements, _context?: FacilitatorContext): Promise<SettlementResponse> {
-      const phase = phaseOf(payment) ?? 'before-handler'; const nullifier = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.nullifier]; if (typeof nullifier !== 'string') return failure(requirements.network, 'invalid_public_signals');
+      const phase = phaseOf(payment) ?? 'before-handler';
+      const nullifier = payment?.payload?.publicSignals?.[PUBLIC_SIGNAL_INDEX.nullifier];
+      if (typeof nullifier !== 'string') return failure(requirements.network, 'invalid_public_signals');
       const signal = hashSignal(payment);
-      if (phase === 'before-handler') { const checked = await verify(payment, requirements); if (!checked.isValid) return failure(requirements.network, checked.invalidReason ?? 'verification_failed'); try { const reservation = await claimStore.reserve(nullifier, signal, now()); if (reservation.record.state === 'cancelled') return failure(requirements.network, 'reservation_cancelled'); return { success: true, transaction: '', network: requirements.network, reservationId: reservation.record.reservationId }; } catch (error) { return failure(requirements.network, safeSettlementError(error)); } }
+      if (phase === 'before-handler') {
+        const checked = await verify(payment, requirements);
+        if (!checked.isValid) return failure(requirements.network, checked.invalidReason ?? 'verification_failed');
+        try {
+          const reservation = await claimLifecycle.reserve(nullifier, signal);
+          if (claimLifecycle.classify(reservation.record).kind === 'cancelled') {
+            return failure(requirements.network, 'reservation_cancelled');
+          }
+          return {
+            success: true,
+            transaction: '',
+            network: requirements.network,
+            reservationId: reservation.record.reservationId,
+          };
+        } catch (error) {
+          return failure(requirements.network, safeSettlementError(error));
+        }
+      }
+
       let record: ClaimRecord | undefined;
-      try { record = await claimStore.lookup(nullifier, signal, now()); }
-      catch (error) { return failure(requirements.network, safeSettlementError(error)); }
+      try {
+        record = await claimLifecycle.lookup(nullifier, signal);
+      } catch (error) {
+        return failure(requirements.network, safeSettlementError(error));
+      }
       if (!record) return failure(requirements.network, 'reservation_not_found');
       try {
-        if (phase === 'cancel') {
-          const updated = await claimStore.cancel(fenceOf(record), now());
-          return { success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId };
-        }
-        const dispatch = record.state === 'reserved'
-          ? await claimStore.beginDispatch(fenceOf(record), idempotencyKey(record, 'dispatch'), now())
-          : record;
-        const ready = dispatch.state === 'ready' || dispatch.state === 'committed'
-          ? dispatch
-          : await claimStore.stageReady(fenceOf(dispatch), '', now());
-        const updated = await claimStore.commit(fenceOf(ready), idempotencyKey(ready, 'commit'), now());
-        return { success: true, transaction: '', network: requirements.network, reservationId: updated.reservationId };
-      } catch (error) { return failure(requirements.network, safeSettlementError(error)); }
+        const updated = phase === 'cancel'
+          ? await claimLifecycle.cancel(record)
+          : await claimLifecycle.complete(record, '');
+        return {
+          success: true,
+          transaction: '',
+          network: requirements.network,
+          reservationId: updated.reservationId,
+        };
+      } catch (error) {
+        return failure(requirements.network, safeSettlementError(error));
+      }
     },
     async commit(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> {
       try {
-        const record = await claimStore.lookupByReservation(reservationId, now());
+        const record = await claimLifecycle.lookupByReservation(reservationId);
         if (!record) return failure(network, 'reservation_not_found');
-        const dispatch = record.state === 'reserved'
-          ? await claimStore.beginDispatch(fenceOf(record), idempotencyKey(record, 'dispatch'), now())
-          : record;
-        const ready = dispatch.state === 'ready' || dispatch.state === 'committed'
-          ? dispatch
-          : await claimStore.stageReady(fenceOf(dispatch), '', now());
-        const updated = await claimStore.commit(fenceOf(ready), idempotencyKey(ready, 'commit'), now());
+        const updated = await claimLifecycle.complete(record, '');
         return { success: true, transaction: '', network, reservationId: updated.reservationId };
-      } catch (error) { return failure(network, safeSettlementError(error)); }
+      } catch (error) {
+        return failure(network, safeSettlementError(error));
+      }
     },
     async cancel(reservationId: string, network: Network = BASE_SEPOLIA_NETWORK): Promise<SettlementResponse> {
       try {
-        const record = await claimStore.lookupByReservation(reservationId, now());
+        const record = await claimLifecycle.lookupByReservation(reservationId);
         if (!record) return failure(network, 'reservation_not_found');
-        const updated = await claimStore.cancel(fenceOf(record), now());
+        const updated = await claimLifecycle.cancel(record);
         return { success: true, transaction: '', network, reservationId: updated.reservationId };
-      } catch (error) { return failure(network, safeSettlementError(error)); }
+      } catch (error) {
+        return failure(network, safeSettlementError(error));
+      }
     },
     claimStore,
+    claimLifecycle,
   };
 }
 

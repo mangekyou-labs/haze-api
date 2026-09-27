@@ -179,8 +179,20 @@ zk-credits setup codex [--model <model>]
 zk-credits codex [codex arguments...]
 zk-credits status
 zk-credits serve [--port <port>]
+zk-credits trial-registered-adapter
 eval "$(zk-credits env)"
 ```
+
+`trial-registered-adapter` is a maintainer-only internal trial command. It
+requires the locally recovered credential and pinned proving bundle, prompts
+for the credential password and gateway admin token without echo when they are
+not already configured, and requires an explicit confirmation before sending
+one billable request. It checks gateway readiness, authenticated admin status,
+Base root agreement, Codex profile/sidecar status, and remaining local slot
+capacity, then reports only the exchange phases and aggregate counter deltas.
+Run it only after recovery is complete and with the same `ZK_CREDITS_HOME`
+used by the sidecar; it registers `zk-prepaid` directly through the official
+x402 client adapter and reuses the durable slot ledger.
 
 Codex SDK:
 

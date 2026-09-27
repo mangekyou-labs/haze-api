@@ -229,20 +229,35 @@ The launcher also completed the founder-side activation rehearsal without
 issuing an invite or opening a slot. Its child-process environment forwarding
 was tightened to pass only the database URL, hosted gateway URL, and billing
 token needed for that rehearsal; the focused launcher suite covers this
-boundary. The staging service remains non-runnable until the separate runtime
-credentials are explicitly authorized for injection. Slots A–C and the final
-verification/evidence checkpoint remain open.
+boundary. The staging Render service was not given runtime credentials. The
+completed isolated Postgres cap-exhaustion run is the staging control evidence;
+no additional request was sent through that service. The launcher records slot
+A as aborted with Ctrl+C and slots B and C as pending. No slot has a qualifying
+operator bundle, and no activation evidence was fabricated.
 
-The fresh non-credentialed final checks on the same date also passed for the
-hosted gateway: strict `/ready` returned `ready: true`, launch control was
-enabled, and all six checks were healthy. The adopted Vercel deployment's
-public landing page and onboarding entry rendered, and anonymous `/dashboard`
-redirected to `/sign-in`. Its `/api/auth/session` endpoint still returned
-`500` because the Vercel project has no production runtime variables; the
-attempt to inject the OAuth, NextAuth, gateway, and billing values was stopped
-at the explicit SaaS credential-authorization boundary. No Vercel secret was
-exported, and the pilot remains open until that authorization (and the real
-operator slots) is supplied.
+On 2026-09-23 the authorized GitHub OAuth, NextAuth, gateway, and billing
+runtime values were added to the `zk-credits-web` Vercel production
+environment. The configured names are `GITHUB_CLIENT_ID`,
+`GITHUB_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `GATEWAY_URL`, and
+`BILLING_INTERNAL_TOKEN`; values are intentionally omitted. Production was
+redeployed as `zk-credits-eo52ylymp-gadillacers-projects.vercel.app`
+(`dpl_BcvYR7PerjL4GqdPMy36ZKyZB1TG`) and aliased to
+`https://zk-credits-web.vercel.app`. `NEXTAUTH_URL` and the observed GitHub
+OAuth callback use that stable alias.
+
+Browser checks on the production alias confirmed the landing, sign-in, and
+public onboarding pages render; the GitHub login page opened without callback
+error; anonymous `/api/auth/session` returned HTTP 200 with `null`; and
+anonymous `/dashboard` redirected to `/sign-in`. The onboarding action also
+led to the protected dashboard. No account credentials were entered, so an
+authenticated session, signed-in dashboard, and personalized onboarding have
+not been verified. These checks do not qualify an operator activation.
+
+The unpaid pilot remains invite-only and experimental on Base Sepolia. Hosted
+readiness, fixed production spend caps, pause/resume, and the separate
+staging-database cap exhaustion evidence remain as recorded above. The launch
+remains open for a real slot A operator, then the serialized B and C
+activations, their qualifying bundles, and final evidence review.
 
 ## B11 verifier and adapter broadcast (executed 2026-09-21)
 

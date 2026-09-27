@@ -15,7 +15,10 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-
+  const githubAccountId = session.user.githubAccountId;
+  if (!githubAccountId || !/^\d+$/.test(githubAccountId)) {
+    return NextResponse.json({ error: 'github_account_unavailable' }, { status: 403 });
+  }
   let code: string;
   try {
     const body = await req.json() as Record<string, unknown>;
@@ -31,7 +34,7 @@ export async function POST(req: NextRequest) {
     const { status, data } = await callGateway({
       method: 'POST',
       path: '/v1/pilot/invites/redeem',
-      body: { code, githubAccountId: session.user.id },
+      body: { code, githubAccountId },
     });
     if (status !== 200) {
       return NextResponse.json({ error: typeof data.error === 'string' ? data.error : 'invite_redemption_failed' }, { status });

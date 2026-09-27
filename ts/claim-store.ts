@@ -10,16 +10,20 @@
 
 import type { Pool } from 'pg';
 import {
+  CLAIM_MAX_DISPATCH_COUNT,
+  CLAIM_REPLAY_TTL_MS,
+  CLAIM_RESERVATION_LEASE_MS,
   InMemoryClaimStore,
+  claimFence as sharedClaimFence,
   type ClaimFence,
   type ClaimRecord,
   type ClaimState,
   type ClaimStore,
 } from '@zk-credits/x402-zk-prepaid';
 
-export const RESERVATION_LEASE_MS = 5 * 60 * 1000;
-export const REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
-export const MAX_DISPATCH_COUNT = 2;
+export const RESERVATION_LEASE_MS = CLAIM_RESERVATION_LEASE_MS;
+export const REPLAY_TTL_MS = CLAIM_REPLAY_TTL_MS;
+export const MAX_DISPATCH_COUNT = CLAIM_MAX_DISPATCH_COUNT;
 
 const CLAIM_COLUMNS = `
   nullifier, signal_hash, state, reservation_id, generation,
@@ -322,11 +326,7 @@ export class LocalClaimStore extends InMemoryClaimStore {
 }
 
 export function claimFence(record: ClaimRecord): ClaimFence {
-  return {
-    reservationId: record.reservationId,
-    generation: record.generation,
-    fencingToken: record.fencingToken,
-  };
+  return sharedClaimFence(record);
 }
 
 export function claimStoreErrorCode(error: unknown): string {

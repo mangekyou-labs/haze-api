@@ -109,6 +109,18 @@ export interface BasePrepaidClient {
   committedSlots(): number[];
 }
 
+export interface BasePaymentContext {
+  url: string;
+  method: string;
+  body: unknown;
+  requirements: PaymentRequirements;
+}
+
+export interface BasePreparedPayment {
+  payment: PaymentPayload;
+  responsePrivateKey: string;
+}
+
 function field(value: string, label: string): string {
   if (!/^\d+$/u.test(value)) throw new Error(`Invalid ${label}`);
   const parsed = BigInt(value);
@@ -159,6 +171,77 @@ function requestBodyBytes(body: unknown): Uint8Array {
   throw new Error('The Base x402 sidecar requires the exact request-body bytes');
 }
 
+/** Creates the shared local proof factory used by both client transports. */
+export function createBasePaymentFactory(options: BasePrepaidClientOptions): (context: BasePaymentContext) => Promise<BasePreparedPayment> {
+  const secret = secretFromBase64Url(options.credential.secret);
+  return async ({ method, url, body, requirements }): Promise<BasePreparedPayment> => {
+    if (requirements.extra.deploymentDomain !== options.credential.deploymentDomain) {
+      throw new Error('Credential deployment domain does not match the gateway challenge');
+    }
+    const slotLedger = options.slotLedger;
+    if (!slotLedger) throw new Error('A durable slot ledger is required for the Base pilot');
+    const selectedSlot = slotLedger.allocateProvisional();
+    try {
+      const nonce = randomNonce();
+      const responseKeys = await responseKey();
+      const requestSignal = await deriveRequestSignal({
+        method,
+        url,
+        body: requestBodyBytes(body),
+        requirements,
+        nonce,
+        responseKey: responseKeys.publicKey,
+      });
+      const witness = assertWitness(await options.witnessProvider.witnessForCredential(options.credential));
+      const expiry = witness.expiry ?? options.credential.expiry;
+      if (!Number.isSafeInteger(expiry) || expiry <= 0) throw new Error('Invalid Base credential expiry');
+      const slotBlinding = await computeSlotBlinding(secret, selectedSlot, options.credential.deploymentDomain);
+      const nullifier = await computeNullifier(slotBlinding);
+      const share = await computeShare(secret, requestSignal.field, slotBlinding);
+      const timestamp = String(requirements.extra.issuedAt);
+      const expectedPublicSignals = [
+        witness.root,
+        timestamp,
+        options.credential.deploymentDomain,
+        requestSignal.field,
+        nullifier,
+        share,
+      ];
+      const proof = await options.prove({
+        secret: secretToField(secret),
+        tier_id: String(options.credential.tierId),
+        expiry: String(expiry),
+        slot: String(selectedSlot),
+        merkle_path_elements: witness.pathElements,
+        merkle_path_indices: witness.pathIndices.map(String),
+        root_in: witness.root,
+        timestamp_in: timestamp,
+        domain_in: options.credential.deploymentDomain,
+        request_signal_in: requestSignal.field,
+      }, { requirements, credential: options.credential, expectedPublicSignals });
+      if (
+        !Array.isArray(proof.publicSignals)
+        || proof.publicSignals.length !== expectedPublicSignals.length
+        || !proof.publicSignals.every((value, index) => value === expectedPublicSignals[index])
+      ) {
+        throw new Error('Proof public signals do not match the canonical statement');
+      }
+      await slotLedger.commit(selectedSlot);
+      const payment = buildPaymentPayload({
+        requirements,
+        proof: proof.proof,
+        publicSignals: [...proof.publicSignals],
+        nonce,
+        responseKey: responseKeys.publicKey,
+      });
+      return { payment, responsePrivateKey: responseKeys.privateKey };
+    } catch (error) {
+      slotLedger.release(selectedSlot);
+      throw error;
+    }
+  };
+}
+
 interface ReplayEnvelope {
   version: 1;
   algorithm: 'RSA-OAEP-256/AES-256-GCM';
@@ -205,7 +288,7 @@ function decryptReplay(envelopeValue: string, privateKey: string, paymentRespons
 
 /** Builds the reusable client adapter used by the loopback proxy. */
 export function createBasePrepaidClient(options: BasePrepaidClientOptions): BasePrepaidClient {
-  const secret = secretFromBase64Url(options.credential.secret);
+  const createPayment = createBasePaymentFactory(options);
   const fetcher = options.fetch ?? fetch;
   const replayKeys = new Map<string, { privateKey: string; expiresAt: number }>();
   const pendingPayments = new Map<string, PendingPayment>();
@@ -339,9 +422,6 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
     fetch: fetchWithReplay,
     ...(options.lifecycle ? { lifecycle: options.lifecycle } : {}),
     createPayload: async ({ method, url, body, requirements }): Promise<PaymentPayload> => {
-      if (requirements.extra.deploymentDomain !== options.credential.deploymentDomain) {
-        throw new Error('Credential deployment domain does not match the gateway challenge');
-      }
       prunePending();
       const key = requestKey(method, url, body, requirements);
       const cached = pendingPayments.get(key);
@@ -351,72 +431,15 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
       if (inFlight) return inFlight;
 
       const paymentPromise = (async (): Promise<PaymentPayload> => {
-        const slotLedger = options.slotLedger;
-        if (!slotLedger) throw new Error('A durable slot ledger is required for the Base pilot');
-        const selectedSlot = slotLedger.allocateProvisional();
-        try {
-          const nonce = randomNonce();
-          const responseKeys = await responseKey();
-          const requestSignal = await deriveRequestSignal({
-            method,
-            url,
-            body: requestBodyBytes(body),
-            requirements,
-            nonce,
-            responseKey: responseKeys.publicKey,
-          });
-          const witness = assertWitness(await options.witnessProvider.witnessForCredential(options.credential));
-          const expiry = witness.expiry ?? options.credential.expiry;
-          if (!Number.isSafeInteger(expiry) || expiry <= 0) throw new Error('Invalid Base credential expiry');
-          const slotBlinding = await computeSlotBlinding(secret, selectedSlot, options.credential.deploymentDomain);
-          const nullifier = await computeNullifier(slotBlinding);
-          const share = await computeShare(secret, requestSignal.field, slotBlinding);
-          const timestamp = String(requirements.extra.issuedAt);
-          const expectedPublicSignals = [
-            witness.root,
-            timestamp,
-            options.credential.deploymentDomain,
-            requestSignal.field,
-            nullifier,
-            share,
-          ];
-          const proof = await options.prove({
-            secret: secretToField(secret),
-            tier_id: String(options.credential.tierId),
-            expiry: String(expiry),
-            slot: String(selectedSlot),
-            merkle_path_elements: witness.pathElements,
-            merkle_path_indices: witness.pathIndices.map(String),
-            root_in: witness.root,
-            timestamp_in: timestamp,
-            domain_in: options.credential.deploymentDomain,
-            request_signal_in: requestSignal.field,
-          }, { requirements, credential: options.credential, expectedPublicSignals });
-          if (
-            !Array.isArray(proof.publicSignals)
-            || proof.publicSignals.length !== expectedPublicSignals.length
-            || !proof.publicSignals.every((value, index) => value === expectedPublicSignals[index])
-          ) {
-            throw new Error('Proof public signals do not match the canonical statement');
-          }
-          await slotLedger.commit(selectedSlot);
-          const payment = buildPaymentPayload({
-            requirements,
-            proof: proof.proof,
-            publicSignals: [...proof.publicSignals],
-            nonce,
-            responseKey: responseKeys.publicKey,
-          });
-          const expiresAt = Date.now() + REPLAY_TTL_MS;
-          replayKeys.set(nonce, { privateKey: responseKeys.privateKey, expiresAt });
-          pendingPayments.set(key, { payment, expiresAt });
-          pendingByNonce.set(nonce, key);
-          prunePending();
-          return payment;
-        } catch (error) {
-          slotLedger.release(selectedSlot);
-          throw error;
-        }
+        const prepared = await createPayment({ method, url, body, requirements });
+        const payment = prepared.payment;
+        const nonce = payment.payload.nonce;
+        const expiresAt = Date.now() + REPLAY_TTL_MS;
+        replayKeys.set(nonce, { privateKey: prepared.responsePrivateKey, expiresAt });
+        pendingPayments.set(key, { payment, expiresAt });
+        pendingByNonce.set(nonce, key);
+        prunePending();
+        return payment;
       })();
       paymentPromises.set(key, paymentPromise);
       try {
