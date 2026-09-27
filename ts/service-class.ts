@@ -34,7 +34,7 @@ export const MAX_REQUEST_BYTES = 256 * 1024;
  * `MAX_INPUT_TOKEN_UNITS` real tokens. This is deliberately stricter than
  * counting model tokens and never under-counts.
  */
-export const MAX_INPUT_TOKEN_UNITS = 16_000;
+export const MAX_INPUT_TOKEN_UNITS = 128_000;
 
 /** Maximum output tokens the class will ever request from the provider. */
 export const MAX_OUTPUT_TOKENS = 4_000;
@@ -48,11 +48,11 @@ export const MAX_COMPLETION_PRICE_PER_MILLION_USD = 1.8;
 
 /**
  * Conservative cost of one dispatch, in micro-USD, including the OpenRouter
- * platform fee. A class request at both ceilings lists $0.0216 of token cost,
- * or $0.022788 after the fee, beneath this cap. The gateway debits it before
+ * platform fee. A class request at both ceilings lists $0.1224 of token cost,
+ * or $0.129132 after the fee, beneath this cap. The gateway debits it before
  * dispatch and retains it once the request has left the process.
  */
-export const MAX_DISPATCH_COST_MICRO_USD = 25_000n;
+export const MAX_DISPATCH_COST_MICRO_USD = 130_000n;
 
 /** Chat Completions fields the class forwards unchanged. */
 const FORWARDED_FIELDS = new Set([
@@ -91,7 +91,7 @@ const MESSAGE_ROLES = new Set(['system', 'developer', 'user', 'assistant', 'tool
 
 /** Structural slack charged per message and per tool definition. */
 const MESSAGE_OVERHEAD_UNITS = 16;
-const TOOL_OVERHEAD_UNITS = 32;
+const TOOL_OVERHEAD_UNITS = 48;
 
 export interface NormalizedServiceClassRequest {
   model: typeof SERVICE_CLASS_MODEL;
@@ -145,8 +145,14 @@ function countToolCalls(calls: unknown, counter: UnitCounter): string | undefine
   if (!Array.isArray(calls)) return 'invalid_messages';
   for (const call of calls) {
     if (!isRecord(call) || call.type !== 'function' || !isRecord(call.function)) return 'invalid_messages';
+    if (Object.keys(call).some((key) => !['id', 'type', 'function'].includes(key))) return 'invalid_messages';
+    if (typeof call.id !== 'string') return 'invalid_messages';
+    if (Object.keys(call.function).some((key) => !['name', 'arguments'].includes(key))) return 'invalid_messages';
     if (typeof call.function.name !== 'string') return 'invalid_messages';
     if (call.function.arguments !== undefined && typeof call.function.arguments !== 'string') return 'invalid_messages';
+    counter.units += TOOL_OVERHEAD_UNITS;
+    counter.add(call.id);
+    counter.add('function');
     counter.add(call.function.name);
     counter.addJson(call.function.arguments ?? '');
   }
@@ -188,7 +194,9 @@ function countTools(tools: unknown, counter: UnitCounter): string | undefined {
   if (!Array.isArray(tools)) return 'invalid_tools';
   for (const tool of tools) {
     if (!isRecord(tool) || tool.type !== 'function' || !isRecord(tool.function)) return 'invalid_tools';
+    if (Object.keys(tool).some((key) => !['type', 'function'].includes(key))) return 'invalid_tools';
     const definition = tool.function;
+    if (Object.keys(definition).some((key) => !['name', 'description', 'parameters', 'strict'].includes(key))) return 'invalid_tools';
     if (typeof definition.name !== 'string' || definition.name.length === 0) return 'invalid_tools';
     counter.add(definition.name);
     counter.units += TOOL_OVERHEAD_UNITS;
@@ -197,6 +205,10 @@ function countTools(tools: unknown, counter: UnitCounter): string | undefined {
       counter.add(definition.description);
     }
     if (definition.parameters !== undefined) counter.addJson(definition.parameters);
+    if (definition.strict !== undefined) {
+      if (typeof definition.strict !== 'boolean') return 'invalid_tools';
+      counter.add(definition.strict ? 'true' : 'false');
+    }
   }
   return undefined;
 }

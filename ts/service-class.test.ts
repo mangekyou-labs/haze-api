@@ -36,12 +36,12 @@ function requestOf(value: unknown) {
 describe('service class limits', () => {
   it('matches the approved class ceilings', () => {
     expect(MAX_REQUEST_BYTES).toBe(256 * 1024);
-    expect(MAX_INPUT_TOKEN_UNITS).toBe(16_000);
+    expect(MAX_INPUT_TOKEN_UNITS).toBe(128_000);
     expect(MAX_OUTPUT_TOKENS).toBe(4_000);
     expect(MAX_PROMPT_PRICE_PER_MILLION_USD).toBe(0.9);
     expect(MAX_COMPLETION_PRICE_PER_MILLION_USD).toBe(1.8);
-    // $0.025 per dispatch, in micro-USD.
-    expect(MAX_DISPATCH_COST_MICRO_USD).toBe(25_000n);
+    // $0.130 per dispatch, in micro-USD.
+    expect(MAX_DISPATCH_COST_MICRO_USD).toBe(130_000n);
   });
 
   it('keeps the class ceiling beneath the dispatch debit', () => {
@@ -49,6 +49,7 @@ describe('service class limits', () => {
     const listed = (MAX_INPUT_TOKEN_UNITS / 1_000_000) * MAX_PROMPT_PRICE_PER_MILLION_USD
       + (MAX_OUTPUT_TOKENS / 1_000_000) * MAX_COMPLETION_PRICE_PER_MILLION_USD;
     const withFee = listed * 1.055;
+    expect(Math.ceil(withFee * 1_000_000)).toBe(129_132);
     expect(withFee).toBeLessThan(Number(MAX_DISPATCH_COST_MICRO_USD) / 1_000_000);
   });
 });
@@ -180,6 +181,16 @@ describe('conservative input counting', () => {
       messages: [{ role: 'user', content: 'hi' }],
       tools: [{ type: 'function', function: { name: 'read', description: big, parameters: {} } }],
     }))).toBe('input_too_large');
+  });
+
+  it('counts strict flags and tool-call identifiers toward the input budget', () => {
+    const base = requestOf(body({
+      messages: [{ role: 'assistant', content: null, tool_calls: [{
+        id: 'call-id', type: 'function', function: { name: 'read', arguments: '{}' },
+      }] }],
+      tools: [{ type: 'function', function: { name: 'read', strict: true, parameters: { type: 'object' } } }],
+    }));
+    expect(base.inputTokenUnits).toBeGreaterThanOrEqual(Buffer.byteLength('call-idtrue', 'utf8'));
   });
 
   it('rejects the body limit enforced by the JSON parser', () => {

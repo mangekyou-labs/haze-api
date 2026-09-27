@@ -16,13 +16,13 @@
     },
     {
       "file": "private_credit_spend.zkey",
-      "sha256": "3afb378d832d646a7d207b7eecbbd33cf3b041b99274cb074bbe314ac0b79291"
+      "sha256": "7cc83e6df3f0c805d8b49d4063ee56a93123ff19acd49d639ff263588ef7a144"
     },
     {
       "file": "verification_key_private_credit.json",
-      "sha256": "eb0068396ae6a859e95af001589936b6a1cbcdf18947dccdbade6af0099487c2"
+      "sha256": "4844820509c32722c0c867f028a713df8a1b6478ff7376a80861e7dcbc9c51fc"
     }
   ],
   "publicSignals": ["root", "timestamp", "domain", "requestSignal", "nullifier", "share"],
-  "provingMaterial": "Development-only Sepolia artifacts. Complete an external production ceremony before mainnet."
+  "provingMaterial": "Development-only Sepolia artifacts, with one local phase-2 contribution. Complete an external production ceremony before mainnet."
 }
