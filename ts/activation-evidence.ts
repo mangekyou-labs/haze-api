@@ -67,7 +67,7 @@ export const PINNED_ACTIVATION_VERSIONS = {
   shared: '0.1.0',
 } as const;
 
-export const PINNED_ARTIFACT_RELEASE = 'private-credit-spend-bn254-dev-sepolia-v1';
+export const PINNED_ARTIFACT_RELEASE = 'private-credit-spend-bn254-dev-sepolia-v2';
 
 /** Where each snapshot sits in the activation sequence. */
 export const COUNTER_SNAPSHOT_KEYS = ['beforeWarmup', 'afterWarmup', 'afterHotExchange'] as const;

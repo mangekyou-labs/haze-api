@@ -3,6 +3,7 @@
  * runtime has no Stripe checkout, order, refund, dispute, or wallet-link path. */
 
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createZkPrepaidGateway } from './zk-prepaid-gateway.js';
@@ -16,7 +17,7 @@ import {
 } from './base-event-sync.js';
 import { createBasePublicClient } from './base-chain.js';
 import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
-import { PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
+import { FundingPreBroadcastError, PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
 import { LaunchControl, PostgresLaunchControlStore, MemoryLaunchControlStore } from './launch-control.js';
 import { resolveSpendCaps } from './launch-environment.js';
 import { LaunchMetrics } from './metrics.js';
@@ -96,8 +97,18 @@ const pilotFunding = pool && baseContractAddress && /^0x[0-9a-fA-F]{40}$/u.test(
       deploymentDomain: process.env.BASE_DEPLOYMENT_DOMAIN ?? '84532',
       sponsor: {
         async fundCommitment(commitment: string) {
-          const sponsored = await createBaseBondSponsor().fundBundle(commitment, 0);
+          let sponsor;
+          try {
+            sponsor = createBaseBondSponsor();
+          } catch {
+            throw new FundingPreBroadcastError('sponsor_not_configured');
+          }
+          const sponsored = await sponsor.fundBundle(commitment, 0);
           return { transactionHash: sponsored.transaction, expiryAt: sponsored.expiryAt };
+        },
+        async reconcileCommitment(commitment: string) {
+          const found = await createBaseBondSponsor().reconcileBundle(commitment);
+          return found ? { transactionHash: found.transaction, expiryAt: found.expiryAt } : undefined;
         },
       },
     })
@@ -122,6 +133,87 @@ const launchControl = new LaunchControl({
 const metrics = new LaunchMetrics();
 const basePublicClient = process.env.BASE_RPC_URL ? createBasePublicClient() : undefined;
 const verifyingKeyPath = process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
+const V2_BOND_ABI = [
+  { type: 'function', name: 'spendVerifier', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'deploymentDomain', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+] as const;
+const V2_SPEND_VERIFIER_ABI = [
+  { type: 'function', name: 'verifier', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+] as const;
+
+async function readV2Compatibility(): Promise<Record<string, unknown>> {
+  const bondAddress = process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS?.trim() ?? '';
+  const deploymentBlock = process.env.BASE_DEPLOYMENT_BLOCK?.trim() ?? '';
+  const deploymentDomain = process.env.BASE_DEPLOYMENT_DOMAIN?.trim() || '84532';
+  const circuitId = process.env.ZK_PREPAID_CIRCUIT_ID?.trim() || 'private-credit-spend-bn254-dev';
+  const verifyingKeyId = process.env.ZK_PREPAID_VERIFYING_KEY_ID?.trim() || 'private-credit-spend-vk-dev';
+  let verificationKeySha256: string | null = null;
+  if (verifyingKeyPath) {
+    try {
+      verificationKeySha256 = createHash('sha256').update(await readFile(verifyingKeyPath)).digest('hex');
+    } catch {
+      verificationKeySha256 = null;
+    }
+  }
+
+  let chainId: number | null = null;
+  let bondSpendVerifierAddress: string | null = null;
+  let groth16VerifierAddress: string | null = null;
+  let onchainDeploymentDomain: string | null = null;
+  let bytecodePresent = false;
+  if (basePublicClient && /^0x[0-9a-fA-F]{40}$/u.test(bondAddress)) {
+    try {
+      chainId = await basePublicClient.getChainId();
+      const bond = bondAddress as `0x${string}`;
+      const [bondCode, spendVerifierValue, domainValue] = await Promise.all([
+        basePublicClient.getBytecode({ address: bond }),
+        basePublicClient.readContract({ address: bond, abi: V2_BOND_ABI, functionName: 'spendVerifier' }),
+        basePublicClient.readContract({ address: bond, abi: V2_BOND_ABI, functionName: 'deploymentDomain' }),
+      ]);
+      bondSpendVerifierAddress = spendVerifierValue.toLowerCase();
+      onchainDeploymentDomain = BigInt(domainValue).toString();
+      if (/^0x[0-9a-fA-F]{40}$/u.test(bondSpendVerifierAddress)) {
+        const spendVerifier = bondSpendVerifierAddress as `0x${string}`;
+        const [spendCode, verifierValue] = await Promise.all([
+          basePublicClient.getBytecode({ address: spendVerifier }),
+          basePublicClient.readContract({ address: spendVerifier, abi: V2_SPEND_VERIFIER_ABI, functionName: 'verifier' }),
+        ]);
+        groth16VerifierAddress = verifierValue.toLowerCase();
+        const verifierCode = /^0x[0-9a-fA-F]{40}$/u.test(groth16VerifierAddress)
+          ? await basePublicClient.getBytecode({ address: groth16VerifierAddress as `0x${string}` })
+          : undefined;
+        bytecodePresent = Boolean(bondCode && bondCode !== '0x' && spendCode && spendCode !== '0x' && verifierCode && verifierCode !== '0x');
+      }
+    } catch {
+      // Metadata stays incomplete; the trial gate rejects it without exposing RPC details.
+    }
+  }
+  const status = chainId === 84532
+    && /^\d+$/u.test(deploymentBlock)
+    && deploymentDomain === '84532'
+    && onchainDeploymentDomain === '84532'
+    && Boolean(verificationKeySha256)
+    && bytecodePresent
+    && Boolean(bondSpendVerifierAddress)
+    && Boolean(groth16VerifierAddress)
+    ? 'pass'
+    : 'failed';
+  return {
+    status,
+    network: 'eip155:84532',
+    chainId,
+    circuitId,
+    verifyingKeyId,
+    verificationKeySha256,
+    bondAddress: /^0x[0-9a-fA-F]{40}$/u.test(bondAddress) ? bondAddress.toLowerCase() : null,
+    deploymentBlock: /^\d+$/u.test(deploymentBlock) ? deploymentBlock : null,
+    deploymentDomain: /^\d+$/u.test(deploymentDomain) ? deploymentDomain : null,
+    onchainDeploymentDomain,
+    bondSpendVerifierAddress,
+    groth16VerifierAddress,
+    bytecodePresent,
+  };
+}
 
 const claimStore = createClaimStore(pool);
 const { app } = await createZkPrepaidGateway({
@@ -142,6 +234,7 @@ const { app } = await createZkPrepaidGateway({
     verifierAssets: verifyingKeyPath
       ? async () => { JSON.parse(await readFile(verifyingKeyPath, 'utf8')); }
       : undefined,
+    v2Compatibility: readV2Compatibility,
   },
   rootSnapshot: () => baseEventSync
     ? baseEventSync.snapshot()

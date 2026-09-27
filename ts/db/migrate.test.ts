@@ -169,6 +169,13 @@ describe('migrations (offline, static)', () => {
     expect(invites).toMatch(/expires_at\s+TIMESTAMPTZ NOT NULL/i);
   });
 
+  it('funding reconciliation migration preserves uncertain broadcasts as unknown', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0016_funding_attempt_unknown.sql'), 'utf8');
+    expect(sql).toMatch(/ALTER TABLE pilot_provisioning\.funding_capabilities/i);
+    expect(sql).toMatch(/DROP CONSTRAINT IF EXISTS funding_capabilities_state_check/i);
+    expect(sql).toMatch(/state IN \('issued', 'funding', 'unknown', 'funded', 'failed'\)/i);
+  });
+
   it('activation window migration holds no operator identity or spend-plane join', () => {
     const sql = readFileSync(join(MIGRATIONS_DIR, '0017_activation_windows.sql'), 'utf8');
     const ddl = sql.replace(/--[^\n]*/gu, '');

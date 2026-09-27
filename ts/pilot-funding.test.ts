@@ -7,13 +7,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { MemoryFundingCapabilityStore, PilotFundingService, hashFundingToken } from './pilot-funding.js';
+import { FundingPreBroadcastError, MemoryFundingCapabilityStore, PilotFundingService, hashFundingToken, type PilotFundingSponsor } from './pilot-funding.js';
 
 const NOW = 1_800_000_000_000;
 const COMMITMENT = '8687213900595150509063186631634067671233157784124627437219499552928422827997';
 const OTHER_COMMITMENT = '12992319314469106065811618978512789981623859879058485908347559722389823331150';
 
-function service(options: { now?: () => number; sponsor?: { fundCommitment(commitment: string): Promise<{ transactionHash: string; expiryAt?: number }> } } = {}) {
+function service(options: { now?: () => number; sponsor?: PilotFundingSponsor } = {}) {
   const store = new MemoryFundingCapabilityStore();
   const calls: string[] = [];
   const sponsor = options.sponsor ?? {
@@ -108,7 +108,7 @@ describe('pilot funding capabilities', () => {
       contractAddress: '0x0000000000000000000000000000000000000001',
       sponsor: {
         async fundCommitment() {
-          if (fail) throw new Error('sponsor_unavailable');
+          if (fail) throw new FundingPreBroadcastError('sponsor_unavailable');
           return { transactionHash: '0xrecovered' };
         },
       },
@@ -124,6 +124,89 @@ describe('pilot funding capabilities', () => {
     const recovered = await funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT });
     expect(recovered.transactionHash).toBe('0xrecovered');
     expect((await store.findByTokenHash(hashFundingToken(capability.fundingToken)))!.state).toBe('funded');
+  });
+
+  it('holds an uncertain broadcast and reconciles only a confirmed chain result', async () => {
+    let clock = NOW;
+    let confirmed = false;
+    let broadcasts = 0;
+    const expiryAt = NOW + 10_000;
+    const { store, funding } = service({
+      now: () => clock,
+      sponsor: {
+        async fundCommitment() { broadcasts++; throw new Error('receipt_timeout'); },
+        async reconcileCommitment() { return confirmed ? { transactionHash: '0xconfirmed', expiryAt } : undefined; },
+      },
+    });
+    const capability = await funding.issueCapability();
+    await expect(funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT })).rejects.toThrow('funding_unavailable');
+    expect((await store.findByTokenHash(hashFundingToken(capability.fundingToken)))?.state).toBe('unknown');
+
+    clock += 30 * 60 * 1000 + 1;
+    await expect(funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT })).rejects.toThrow('funding_reconciliation_pending');
+    expect(broadcasts).toBe(1);
+
+    confirmed = true;
+    const result = await funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT });
+    expect(result).toMatchObject({ transactionHash: '0xconfirmed', expiry: Math.floor(expiryAt / 1000) });
+    expect(broadcasts).toBe(1);
+  });
+
+  it('fences stale failure updates after confirmed recovery', async () => {
+    const { store, funding } = service();
+    const capability = await funding.issueCapability();
+    const tokenHash = hashFundingToken(capability.fundingToken);
+    const claimed = await store.claim({ tokenHash, commitment: COMMITMENT, at: NOW });
+    expect(claimed.claimed).toBe(true);
+    await store.markUnknown({ capabilityId: claimed.record!.capabilityId, commitment: COMMITMENT, attemptStartedAt: NOW, reason: 'receipt_timeout' });
+    await store.complete({ capabilityId: claimed.record!.capabilityId, commitment: COMMITMENT, transactionHash: '0xconfirmed', bundleExpiry: NOW + 1000, at: NOW + 1 });
+    await expect(store.fail({ capabilityId: claimed.record!.capabilityId, commitment: COMMITMENT, attemptStartedAt: NOW, reason: 'stale_failure' })).rejects.toThrow('funding_state_conflict');
+    expect((await store.findByTokenHash(tokenHash))?.state).toBe('funded');
+  });
+
+  it('holds a broadcast when persisting its successful result fails', async () => {
+    class UnavailableStore extends MemoryFundingCapabilityStore {
+      override async complete(input: Parameters<MemoryFundingCapabilityStore['complete']>[0]) {
+        if (this.failComplete) throw new Error('database_unavailable');
+        return super.complete(input);
+      }
+      failComplete = true;
+    }
+    const store = new UnavailableStore();
+    let broadcasts = 0;
+    const funding = new PilotFundingService({
+      store,
+      now: () => NOW,
+      contractAddress: '0x0000000000000000000000000000000000000001',
+      sponsor: {
+        async fundCommitment() { broadcasts++; return { transactionHash: '0xsent', expiryAt: NOW + 1000 }; },
+        async reconcileCommitment() { return { transactionHash: '0xsent', expiryAt: NOW + 1000 }; },
+      },
+    });
+    const capability = await funding.issueCapability();
+    await expect(funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT })).rejects.toThrow('funding_unavailable');
+    expect((await store.findByTokenHash(hashFundingToken(capability.fundingToken)))?.state).toBe('unknown');
+    store.failComplete = false;
+    expect((await funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT })).transactionHash).toBe('0xsent');
+    expect(broadcasts).toBe(1);
+  });
+
+  it('does not broadcast again after an active attempt outlives its lease', async () => {
+    let clock = NOW;
+    let broadcasts = 0;
+    const { store, funding } = service({
+      now: () => clock,
+      sponsor: {
+        async fundCommitment() { broadcasts++; return { transactionHash: '0xunexpected' }; },
+        async reconcileCommitment() { return undefined; },
+      },
+    });
+    const capability = await funding.issueCapability();
+    const claimed = await store.claim({ tokenHash: hashFundingToken(capability.fundingToken), commitment: COMMITMENT, at: NOW });
+    expect(claimed.claimed).toBe(true);
+    clock += 121_000;
+    await expect(funding.fund({ fundingToken: capability.fundingToken, commitment: COMMITMENT })).rejects.toThrow('funding_reconciliation_pending');
+    expect(broadcasts).toBe(0);
   });
 
   it('rejects unknown tokens, expired capabilities, and invalid commitments', async () => {

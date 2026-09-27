@@ -151,6 +151,31 @@ class AmbiguousCommitStore extends LocalClaimStore {
 }
 
 describe('Base zk-prepaid gateway', () => {
+  it('checks whether a credential root is gateway-known without returning the root value', async () => {
+    const gateway = await createZkPrepaidGateway({
+      ...gatewayOptions(),
+      internalServiceToken: 'root-check-token',
+      rootSnapshot: () => ({ currentRoot: '1', knownRoots: ['1', '2'] }),
+    });
+    const found = await request(gateway.app)
+      .post('/v1/admin/root-known')
+      .set('authorization', 'Bearer root-check-token')
+      .send({ root: '0x1' });
+    const missing = await request(gateway.app)
+      .post('/v1/admin/root-known')
+      .set('authorization', 'Bearer root-check-token')
+      .send({ root: '3' });
+    const unauthorized = await request(gateway.app)
+      .post('/v1/admin/root-known')
+      .send({ root: '1' });
+
+    expect(found.status).toBe(200);
+    expect(found.body).toEqual({ known: true });
+    expect(missing.body).toEqual({ known: false });
+    expect(unauthorized.status).toBe(401);
+    expect(JSON.stringify(found.body)).not.toContain('0x1');
+  });
+
   it('constructs the Base Sepolia requirements and a fenced isolated claim store', async () => {
     const gateway = await createZkPrepaidGateway(gatewayOptions());
     expect(gateway.requirements).toMatchObject({ scheme: 'zk-prepaid', network: 'eip155:84532', amount: '1' });

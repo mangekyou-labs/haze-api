@@ -24,8 +24,6 @@ import {
   PUBLIC_SIGNAL_INDEX,
   isClaimLifecycleConflict,
   requirementsEqual,
-  type ClaimFence,
-  type ClaimRecord,
   type ClaimLifecycle,
   type ClaimStore,
   type PaymentPayload,
@@ -35,14 +33,8 @@ import {
 } from '@zk-credits/x402-zk-prepaid';
 import { deriveRequestSignal } from '@zk-credits/shared';
 import { OpenRouterAdapter, type ProviderAdapter } from './providerAdapter.js';
+import { claimStoreErrorCode, LocalClaimStore } from './claim-store.js';
 import {
-  encryptResponseReplay,
-  MAX_ENCRYPTED_REPLAY_BYTES,
-  MAX_REPLAY_BYTES,
-} from './response-replay.js';
-import { claimFence, claimStoreErrorCode, LocalClaimStore } from './claim-store.js';
-import {
-  MAX_DISPATCH_COST_MICRO_USD,
   MAX_REQUEST_BYTES,
   normalizeServiceClassRequest,
   PROVIDER_TIMEOUT_MS,
@@ -56,6 +48,7 @@ import type { LaunchMetrics } from './metrics.js';
 import { checkReadiness } from './readiness.js';
 import type { PilotInviteService } from './pilot-invites.js';
 import type { PilotFundingService } from './pilot-funding.js';
+import { createClaimCompletion, ClaimCompletionError, type BufferedResponse } from './claim-completion.js';
 
 const ISSUED_AT_MAX_AGE_SECONDS = 300;
 const ISSUED_AT_MAX_FUTURE_SKEW_SECONDS = 5;
@@ -116,24 +109,11 @@ export interface ZkPrepaidGatewayOptions {
     baseHead?: () => Promise<bigint>;
     verifierAssets?: () => Promise<void>;
     maxRootLagBlocks?: bigint;
+    /** Public, non-secret deployment pins and their on-chain linkage. */
+    v2Compatibility?: () => Promise<Record<string, unknown>>;
   };
   /** Durable, unlinked count of claims per state. */
   claimCounts?: () => Promise<Record<string, number>>;
-}
-
-interface BufferedResponse {
-  status: number;
-  contentType: string;
-  body: Uint8Array;
-}
-
-interface ReservationContext {
-  payment: PaymentPayload;
-  requirements: PaymentRequirements;
-  nullifier: string;
-  signalHash: string;
-  record: ClaimRecord;
-  fence: ClaimFence;
 }
 
 interface RequestWithRawBody extends Request {
@@ -315,44 +295,6 @@ function issuedAtFresh(requirements: PaymentRequirements, clock: () => number): 
   return issuedAtInWindow(BigInt(requirements.extra.issuedAt), currentSeconds(clock));
 }
 
-async function bufferResponse(response: globalThis.Response): Promise<BufferedResponse> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new GatewayError('provider_empty_response', 502);
-
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > MAX_REPLAY_BYTES) throw new GatewayError('provider_response_too_large', 502);
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  if (total === 0) throw new GatewayError('provider_empty_response', 502);
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  const contentType = response.headers.get('content-type') ?? 'application/json; charset=utf-8';
-  const normalizedContentType = contentType.split(';', 1)[0]!.trim().toLowerCase();
-  if (normalizedContentType === 'application/json' || normalizedContentType.endsWith('+json')) {
-    try {
-      const parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-      if (!isRecord(parsed)) throw new Error('provider_response_shape');
-    } catch {
-      throw new GatewayError('provider_response_malformed', 502);
-    }
-  }
-  return { status: response.status, contentType, body };
-}
-
 function sendBuffered(res: ExpressResponse, result: BufferedResponse, paymentResponse?: SettlementResponse): void {
   if (res.destroyed) return;
   if (paymentResponse) res.setHeader(PAYMENT_RESPONSE_HEADER, encodeHeader(paymentResponse));
@@ -389,6 +331,7 @@ const PILOT_ERROR_STATUS: Record<string, number> = {
   invite_already_redeemed: 409,
   funding_commitment_conflict: 409,
   funding_in_progress: 409,
+  funding_reconciliation_pending: 409,
   invite_expired: 410,
   invite_revoked: 410,
   funding_capability_expired: 410,
@@ -417,16 +360,6 @@ async function claimCall<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new GatewayError('provider_timeout', 502)), timeoutMs);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); },
-    );
-  });
-}
-
 function settlementPhaseInjected(body: unknown): boolean {
   if (!isRecord(body)) return false;
   return ['phase', 'settlementPhase', 'settlement_phase', 'settlement-phase']
@@ -438,7 +371,7 @@ function serviceAuthorized(req: Request, token: string | undefined): boolean {
 }
 
 function operationError(error: unknown): { status: number; code: string } {
-  if (error instanceof GatewayError) return { status: error.status, code: error.message };
+  if (error instanceof GatewayError || error instanceof ClaimCompletionError) return { status: error.status, code: error.message };
   return { status: 502, code: 'provider_request_failed' };
 }
 
@@ -475,7 +408,16 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   const claimLifecycle: ClaimLifecycle = facilitator.claimLifecycle;
   const pilotInvites = options.pilotInvites;
   const pilotFunding = options.pilotFunding;
-  const inFlight = new Map<string, Promise<BufferedResponse>>();
+  const claimCompletion = createClaimCompletion({
+    lifecycle: claimLifecycle,
+    provider,
+    providerConfigured,
+    providerAuth: config.openRouterApiKey ?? '',
+    providerTimeoutMs,
+    now,
+    launchControl,
+    metrics,
+  });
   const app = express();
 
   app.disable('x-powered-by');
@@ -510,7 +452,16 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
         rootSnapshot: () => readRoots(),
         providerConfigured,
       });
-      res.status(report.ready ? 200 : 503).json(report);
+      let v2Compatibility: Record<string, unknown> | undefined;
+      try {
+        v2Compatibility = await options.readiness?.v2Compatibility?.();
+      } catch {
+        v2Compatibility = { status: 'failed' };
+      }
+      res.status(report.ready ? 200 : 503).json({
+        ...report,
+        ...(v2Compatibility ? { v2Compatibility } : {}),
+      });
     } catch {
       res.status(503).json({ ready: false, launchControl: 'unknown', checks: [], generatedAt: new Date(now()).toISOString() });
     }
@@ -741,6 +692,25 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     }
   });
 
+  /** Checks a public Merkle root against the gateway's current known-root set without returning roots. */
+  app.post('/v1/admin/root-known', async (req, res) => {
+    if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    const body = isRecord(req.body) ? req.body : {};
+    const requestedRoot = normalizeField(typeof body.root === 'string' ? body.root : undefined);
+    if (!requestedRoot) { jsonError(res, 400, 'invalid_root'); return; }
+    try {
+      const roots = await readRoots();
+      const knownRoots = new Set(
+        [...(roots.knownRoots ?? []), roots.currentRoot]
+          .map((root) => normalizeField(root))
+          .filter((root): root is string => root !== null),
+      );
+      res.json({ known: knownRoots.has(requestedRoot) });
+    } catch {
+      jsonError(res, 503, 'root_index_unavailable');
+    }
+  });
+
   app.post('/v1/admin/pause', async (req, res) => {
     if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
     if (!launchControl) { jsonError(res, 503, 'launch_control_unavailable'); return; }
@@ -882,163 +852,23 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
 
     const nullifier = payment.payload.publicSignals[PUBLIC_SIGNAL_INDEX.nullifier]!;
     const hash = signalHash(payment);
-    let reservation: Awaited<ReturnType<ClaimStore['reserve']>>;
-    try {
-      reservation = await claimLifecycle.reserve(nullifier, hash, now());
-    } catch (error) {
-      const code = claimStoreErrorCode(error);
-      if (code === 'conflicting_signal') {
-        metrics?.increment('claim_conflict');
-        sendPaymentRequired(res, url, freshChallenge(), metrics, 'conflicting_signal');
-        return;
-      }
-      jsonError(res, 503, 'claim_store_unavailable');
-      return;
-    }
-    metrics?.increment(reservation.kind === 'existing' ? 'reservation_existing' : 'reservation_new');
-
-    const key = `${nullifier}:${hash}`;
     const paymentResponse: SettlementResponse = { success: true, transaction: '', network: candidateRequirements.network };
-    if (reservation.kind === 'existing') {
-      const active = inFlight.get(key);
-      if (active) {
-        try {
-          sendBuffered(res, await active, paymentResponse);
-        } catch (error) {
-          const mapped = operationError(error);
-          jsonError(res, mapped.status, mapped.code);
-        }
-        return;
-      }
-      const disposition = claimLifecycle.classify(reservation.record);
-      if (disposition.kind === 'cancelled') {
-        if (!disposition.retryAllowed) {
-          sendPaymentRequired(res, url, freshChallenge(), metrics, 'dispatch_budget_exhausted');
-        } else {
-          sendPaymentRequired(res, url, freshChallenge(), metrics, 'reservation_cancelled');
-        }
-        return;
-      }
-      if (disposition.kind === 'committed') {
-        metrics?.increment('claim_replayed');
+    try {
+      const result = await claimCompletion.complete({ payment, nullifier, signalHash: hash, request: normalized.request });
+      if (result.kind === 'response') {
+        sendBuffered(res, result.response, paymentResponse);
+      } else if (result.kind === 'payment_required') {
+        sendPaymentRequired(res, url, freshChallenge(), metrics, result.reason);
+      } else if (result.kind === 'committed') {
         res.setHeader(PAYMENT_RESPONSE_HEADER, encodeHeader(paymentResponse));
-        if (disposition.replayAvailable) {
-          res.status(409).json({
-            error: 'claim_already_committed',
-            replay: true,
-            encryptedReplay: reservation.record.encryptedReplay,
-          });
+        if (result.encryptedReplay) {
+          res.status(409).json({ error: 'claim_already_committed', replay: true, encryptedReplay: result.encryptedReplay });
         } else {
           res.status(409).json({ error: 'claim_already_committed', replay: false });
         }
-        return;
+      } else {
+        jsonError(res, 409, result.code);
       }
-      // A ready claim is the fenced ambiguous-commit state. It is never
-      // expired or redispatched by an exact retry.
-      jsonError(res, 409, disposition.kind === 'ambiguous_commit' ? 'claim_commit_ambiguous' : 'claim_in_progress');
-      return;
-    }
-
-    const context: ReservationContext = {
-      payment,
-      requirements: candidateRequirements,
-      nullifier,
-      signalHash: hash,
-      record: reservation.record,
-      fence: claimFence(reservation.record),
-    };
-    const operation = (async (): Promise<BufferedResponse> => {
-      let readyStaged = false;
-      let dispatched = false;
-      let debitId: string | undefined;
-      try {
-        if (!providerConfigured) {
-          throw new GatewayError('provider_not_configured', 503);
-        }
-
-        const dispatchRecord = await claimCall(() => claimLifecycle.beginDispatch(context.record, now()));
-
-        // Admission control. The conservative class ceiling is debited before
-        // the request can leave the process, so an exhausted cap refuses the
-        // dispatch, cancels the reservation below, and consumes no credit.
-        if (launchControl) {
-          let admission;
-          try {
-            admission = await launchControl.beginDispatch(MAX_DISPATCH_COST_MICRO_USD);
-          } catch {
-            throw new GatewayError('launch_control_unavailable', 503);
-          }
-          if (admission.kind === 'paused') throw new GatewayError('pilot_paused', 503);
-          if (admission.kind === 'cap_exhausted') {
-            metrics?.increment(admission.window === 'utc_day' ? 'cap_exhausted_utc_day' : 'cap_exhausted_rolling_30d');
-            throw new GatewayError('provider_spend_cap_exhausted', 503);
-          }
-          debitId = admission.debitId;
-        }
-
-        // `dispatched` flips only once a dispatch promise exists. A synchronous
-        // throw while building the request is still a pre-dispatch failure and
-        // releases the debit; anything after this point may be on the wire and
-        // keeps it.
-        let upstream: globalThis.Response;
-        try {
-          const inFlightRequest = provider.forwardRequest(normalized.request, config.openRouterApiKey ?? '', 'chat.completions');
-          dispatched = true;
-          upstream = await withTimeout(inFlightRequest, providerTimeoutMs);
-        } catch (error) {
-          throw error instanceof GatewayError ? error : new GatewayError('provider_request_failed', 502);
-        }
-        if (upstream.status < 200 || upstream.status >= 300) {
-          throw new GatewayError('provider_non_2xx', 502);
-        }
-        const buffered = await bufferResponse(upstream);
-        const encryptedReplay = encryptResponseReplay(context.payment.payload.responseKey, buffered.body, {
-          contentType: buffered.contentType,
-          status: buffered.status,
-          now: now(),
-        });
-        if (!encryptedReplay || Buffer.byteLength(encryptedReplay, 'utf8') > MAX_ENCRYPTED_REPLAY_BYTES) {
-          throw new GatewayError('provider_replay_unavailable', 502);
-        }
-
-        const readyRecord = await claimCall(() => claimLifecycle.stageReady(dispatchRecord, encryptedReplay, now()));
-        readyStaged = true;
-        await claimCall(() => claimLifecycle.commit(readyRecord, now()));
-        metrics?.increment('claim_committed');
-        metrics?.increment('dispatch_ok');
-        return buffered;
-      } catch (error) {
-        if (error instanceof GatewayError && error.message === 'provider_timeout') metrics?.increment('dispatch_timeout');
-        else if (dispatched) metrics?.increment('dispatch_error');
-        if (!readyStaged) {
-          try {
-            if (await claimLifecycle.cancelIfReserved(context.nullifier, context.signalHash, context.fence)) {
-              metrics?.increment('claim_cancelled');
-            }
-          } catch {
-            // Cancellation is best-effort. A ready/committed record is deliberately
-            // never cancelled, and a persistence outage must not use a stale fence.
-          }
-        }
-        throw error;
-      } finally {
-        // A dispatch that began always keeps its debit, including provider
-        // errors and timeouts. Only a failure before the network call releases
-        // it. A settlement failure leaves the row held, which still counts
-        // against the caps, so accounting never under-reports.
-        if (debitId && launchControl) {
-          try {
-            if (dispatched) await launchControl.retain(debitId);
-            else await launchControl.release(debitId);
-          } catch {
-            // Fail closed: the held debit keeps counting toward the cap.
-          }
-        }
-      }
-    })();
-    inFlight.set(key, operation);
-    try {
-      sendBuffered(res, await operation, paymentResponse);
     } catch (error) {
       const mapped = operationError(error);
       if (res.headersSent || res.destroyed) {
@@ -1046,8 +876,6 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       } else {
         jsonError(res, mapped.status, mapped.code);
       }
-    } finally {
-      if (inFlight.get(key) === operation) inFlight.delete(key);
     }
   };
 

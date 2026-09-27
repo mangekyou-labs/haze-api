@@ -18,7 +18,15 @@ export const DEFAULT_BUNDLE_DURATION_SECONDS = 30 * 24 * 60 * 60;
 export const DEFAULT_BASE_SEPOLIA_NETWORK = 'eip155:84532';
 const FUNDING_ATTEMPT_LEASE_MS = 2 * 60 * 1000;
 
-export type FundingCapabilityState = 'issued' | 'funding' | 'funded' | 'failed';
+export type FundingCapabilityState = 'issued' | 'funding' | 'unknown' | 'funded' | 'failed';
+
+/** Only a sponsor that knows no transaction was broadcast may permit a retry. */
+export class FundingPreBroadcastError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FundingPreBroadcastError';
+  }
+}
 
 export interface FundingCapabilityRecord {
   capabilityId: string;
@@ -44,14 +52,17 @@ export interface FundingCapabilityStore {
   insert(record: FundingCapabilityRecord): Promise<void>;
   findByTokenHash(tokenHash: string): Promise<FundingCapabilityRecord | undefined>;
   findByCommitment(commitment: string): Promise<FundingCapabilityRecord | undefined>;
-  /** Atomically binds the first commitment and leases the attempt to one caller. */
-  claim(input: { tokenHash: string; commitment: string; at: number; leaseMs: number }): Promise<FundingClaim>;
+  /** Atomically binds the first commitment and starts its only active broadcast. */
+  claim(input: { tokenHash: string; commitment: string; at: number }): Promise<FundingClaim>;
   complete(input: { capabilityId: string; commitment: string; transactionHash: string; bundleExpiry: number; at: number }): Promise<FundingCapabilityRecord>;
-  fail(input: { capabilityId: string; commitment: string; reason: string }): Promise<FundingCapabilityRecord>;
+  fail(input: { capabilityId: string; commitment: string; attemptStartedAt: number; reason: string }): Promise<FundingCapabilityRecord>;
+  markUnknown(input: { capabilityId: string; commitment: string; attemptStartedAt: number; reason: string }): Promise<FundingCapabilityRecord>;
 }
 
 export interface PilotFundingSponsor {
   fundCommitment(commitment: string): Promise<{ transactionHash: string; expiryAt?: number }>;
+  /** Finds only a confirmed success for this commitment; absence is inconclusive. */
+  reconcileCommitment?(commitment: string): Promise<{ transactionHash: string; expiryAt: number } | undefined>;
 }
 
 export interface PilotFundingResult {
@@ -123,13 +134,13 @@ export class MemoryFundingCapabilityStore implements FundingCapabilityStore {
     return undefined;
   }
 
-  async claim(input: { tokenHash: string; commitment: string; at: number; leaseMs: number }): Promise<FundingClaim> {
+  async claim(input: { tokenHash: string; commitment: string; at: number }): Promise<FundingClaim> {
     const record = await this.findByTokenHash(input.tokenHash);
     if (!record) return { claimed: false, record: undefined };
     if (record.expiresAt <= input.at) return { claimed: false, record };
     if (record.state === 'funded') return { claimed: false, record };
     if (record.commitment !== null && record.commitment !== input.commitment) return { claimed: false, record };
-    if (record.state === 'funding' && record.attemptStartedAt !== null && record.attemptStartedAt + input.leaseMs > input.at) {
+    if (record.state === 'unknown' || record.state === 'funding') {
       return { claimed: false, record };
     }
     const next: FundingCapabilityRecord = {
@@ -146,7 +157,7 @@ export class MemoryFundingCapabilityStore implements FundingCapabilityStore {
 
   async complete(input: { capabilityId: string; commitment: string; transactionHash: string; bundleExpiry: number; at: number }): Promise<FundingCapabilityRecord> {
     const record = this.capabilities.get(input.capabilityId);
-    if (!record) throw new Error('capability_not_found');
+    if (!record || record.commitment !== input.commitment || !['funding', 'unknown'].includes(record.state)) throw new Error('funding_state_conflict');
     const next: FundingCapabilityRecord = {
       ...record,
       state: 'funded',
@@ -160,15 +171,23 @@ export class MemoryFundingCapabilityStore implements FundingCapabilityStore {
     return { ...next };
   }
 
-  async fail(input: { capabilityId: string; commitment: string; reason: string }): Promise<FundingCapabilityRecord> {
+  async fail(input: { capabilityId: string; commitment: string; attemptStartedAt: number; reason: string }): Promise<FundingCapabilityRecord> {
     const record = this.capabilities.get(input.capabilityId);
-    if (!record) throw new Error('capability_not_found');
+    if (!record || record.state !== 'funding' || record.commitment !== input.commitment || record.attemptStartedAt !== input.attemptStartedAt) throw new Error('funding_state_conflict');
     const next: FundingCapabilityRecord = {
       ...record,
       state: 'failed',
       commitment: input.commitment,
       failureReason: input.reason,
     };
+    this.capabilities.set(input.capabilityId, next);
+    return { ...next };
+  }
+
+  async markUnknown(input: { capabilityId: string; commitment: string; attemptStartedAt: number; reason: string }): Promise<FundingCapabilityRecord> {
+    const record = this.capabilities.get(input.capabilityId);
+    if (!record || record.state !== 'funding' || record.commitment !== input.commitment || record.attemptStartedAt !== input.attemptStartedAt) throw new Error('funding_state_conflict');
+    const next: FundingCapabilityRecord = { ...record, state: 'unknown', failureReason: input.reason };
     this.capabilities.set(input.capabilityId, next);
     return { ...next };
   }
@@ -226,7 +245,7 @@ export class PostgresFundingCapabilityStore implements FundingCapabilityStore {
     return result.rows[0] ? toRecord(result.rows[0]) : undefined;
   }
 
-  async claim(input: { tokenHash: string; commitment: string; at: number; leaseMs: number }): Promise<FundingClaim> {
+  async claim(input: { tokenHash: string; commitment: string; at: number }): Promise<FundingClaim> {
     const result = await this.pool.query(
       `UPDATE pilot_provisioning.funding_capabilities
        SET state = 'funding',
@@ -236,12 +255,10 @@ export class PostgresFundingCapabilityStore implements FundingCapabilityStore {
            failure_reason = NULL
        WHERE token_hash = $1
          AND expires_at > to_timestamp($3 / 1000.0)
-         AND state <> 'funded'
+         AND state IN ('issued', 'failed')
          AND (commitment IS NULL OR commitment = $2)
-         AND (state <> 'funding' OR attempt_started_at IS NULL
-              OR attempt_started_at <= to_timestamp(($3 - $4) / 1000.0))
        RETURNING ${CAPABILITY_COLUMNS}`,
-      [input.tokenHash, input.commitment, input.at, input.leaseMs],
+      [input.tokenHash, input.commitment, input.at],
     );
     if (result.rows[0]) return { claimed: true, record: toRecord(result.rows[0]) };
     const record = await this.findByTokenHash(input.tokenHash);
@@ -257,23 +274,35 @@ export class PostgresFundingCapabilityStore implements FundingCapabilityStore {
            bundle_expiry = to_timestamp($4 / 1000.0),
            funded_at = to_timestamp($5 / 1000.0),
            failure_reason = NULL
-       WHERE capability_id = $1
+       WHERE capability_id = $1 AND commitment = $2 AND state IN ('funding', 'unknown')
        RETURNING ${CAPABILITY_COLUMNS}`,
       [input.capabilityId, input.commitment, input.transactionHash, input.bundleExpiry, input.at],
     );
-    if (!result.rows[0]) throw new Error('capability_not_found');
+    if (!result.rows[0]) throw new Error('funding_state_conflict');
     return toRecord(result.rows[0]);
   }
 
-  async fail(input: { capabilityId: string; commitment: string; reason: string }): Promise<FundingCapabilityRecord> {
+  async fail(input: { capabilityId: string; commitment: string; attemptStartedAt: number; reason: string }): Promise<FundingCapabilityRecord> {
     const result = await this.pool.query(
       `UPDATE pilot_provisioning.funding_capabilities
        SET state = 'failed', commitment = $2, failure_reason = $3
-       WHERE capability_id = $1
+       WHERE capability_id = $1 AND commitment = $2 AND state = 'funding' AND attempt_started_at = to_timestamp($4 / 1000.0)
        RETURNING ${CAPABILITY_COLUMNS}`,
-      [input.capabilityId, input.commitment, input.reason],
+      [input.capabilityId, input.commitment, input.reason, input.attemptStartedAt],
     );
-    if (!result.rows[0]) throw new Error('capability_not_found');
+    if (!result.rows[0]) throw new Error('funding_state_conflict');
+    return toRecord(result.rows[0]);
+  }
+
+  async markUnknown(input: { capabilityId: string; commitment: string; attemptStartedAt: number; reason: string }): Promise<FundingCapabilityRecord> {
+    const result = await this.pool.query(
+      `UPDATE pilot_provisioning.funding_capabilities
+       SET state = 'unknown', failure_reason = $3
+       WHERE capability_id = $1 AND commitment = $2 AND state = 'funding' AND attempt_started_at = to_timestamp($4 / 1000.0)
+       RETURNING ${CAPABILITY_COLUMNS}`,
+      [input.capabilityId, input.commitment, input.reason, input.attemptStartedAt],
+    );
+    if (!result.rows[0]) throw new Error('funding_state_conflict');
     return toRecord(result.rows[0]);
   }
 }
@@ -366,12 +395,27 @@ export class PilotFundingService {
 
   private async runAttempt(tokenHash: string, commitment: string): Promise<PilotFundingResult> {
     const now = this.now();
-    const claim = await this.store.claim({ tokenHash, commitment, at: now, leaseMs: FUNDING_ATTEMPT_LEASE_MS });
+    const claim = await this.store.claim({ tokenHash, commitment, at: now });
     const record = claim.record;
     if (!record) throw new Error('invalid_funding_token');
     if (record.commitment !== null && record.commitment !== commitment) throw new Error('funding_commitment_conflict');
-    if (record.expiresAt <= now) throw new Error('funding_capability_expired');
     if (record.state === 'funded') return this.resultOf(record);
+    if (!claim.claimed && (record.state === 'unknown' || (record.state === 'funding' && record.attemptStartedAt !== null && record.attemptStartedAt + FUNDING_ATTEMPT_LEASE_MS <= now))) {
+      let confirmed;
+      try {
+        confirmed = await this.sponsor.reconcileCommitment?.(commitment);
+      } catch {
+        throw new Error('funding_reconciliation_pending');
+      }
+      if (!confirmed) throw new Error('funding_reconciliation_pending');
+      try {
+        const funded = await this.store.complete({ capabilityId: record.capabilityId, commitment, transactionHash: confirmed.transactionHash, bundleExpiry: confirmed.expiryAt, at: this.now() });
+        return this.resultOf(funded);
+      } catch {
+        throw new Error('funding_unavailable');
+      }
+    }
+    if (record.expiresAt <= now) throw new Error('funding_capability_expired');
     if (!claim.claimed) throw new Error('funding_in_progress');
 
     try {
@@ -387,7 +431,15 @@ export class PilotFundingService {
       return this.resultOf(funded);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'funding_sponsor_failed';
-      await this.store.fail({ capabilityId: record.capabilityId, commitment, reason });
+      try {
+        if (error instanceof FundingPreBroadcastError) {
+          await this.store.fail({ capabilityId: record.capabilityId, commitment, attemptStartedAt: record.attemptStartedAt!, reason });
+        } else {
+          await this.store.markUnknown({ capabilityId: record.capabilityId, commitment, attemptStartedAt: record.attemptStartedAt!, reason });
+        }
+      } catch {
+        // A stale or unavailable store cannot make a possibly broadcast attempt retryable.
+      }
       throw new Error('funding_unavailable');
     }
   }

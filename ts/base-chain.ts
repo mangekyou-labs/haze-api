@@ -9,6 +9,7 @@ import { Attribution } from 'ox/erc8021';
 /** Sponsor-side bond operations used by unpaid pilot funding. */
 export interface BaseBondSponsor {
   fundBundle(commitment: string, tierId: number): Promise<{ transaction: string; expiryAt?: number }>;
+  reconcileBundle(commitment: string): Promise<{ transaction: string; expiryAt: number } | undefined>;
   releaseBond(commitment: string): Promise<{ transaction: string }>;
 }
 
@@ -57,15 +58,43 @@ export function createBaseBondSponsor(): BaseBondSponsor {
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
   const address = contractAddress();
   return {
+    async reconcileBundle(commitment: string) {
+      const latest = await publicClient.getBlockNumber();
+      const confirmations = BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
+      if (latest <= confirmations) return undefined;
+      const target = latest - confirmations;
+      const deployment = process.env.BASE_DEPLOYMENT_BLOCK && /^\d+$/u.test(process.env.BASE_DEPLOYMENT_BLOCK)
+        ? BigInt(process.env.BASE_DEPLOYMENT_BLOCK) : 0n;
+      const wanted = toHex(BigInt(commitment), { size: 32 }).toLowerCase();
+      for (let fromBlock = deployment; fromBlock <= target; fromBlock += 2_000n) {
+        const toBlock = fromBlock + 1_999n < target ? fromBlock + 1_999n : target;
+        const logs = await publicClient.getContractEvents({
+          address,
+          abi: PRIVATE_CREDIT_BOND_ABI,
+          eventName: 'BundleFunded',
+          args: { commitment: wanted as Hex },
+          fromBlock,
+          toBlock,
+        });
+        for (const log of logs) {
+          if (log.args.commitment?.toLowerCase() === wanted && log.args.expiry !== undefined && log.transactionHash) {
+            return { transaction: log.transactionHash, expiryAt: Number(log.args.expiry) * 1000 };
+          }
+        }
+      }
+      return undefined;
+    },
     async fundBundle(commitment: string, tierId: number) {
       const hash = await client.writeContract({ address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'fundBundle', args: [toHex(BigInt(commitment), { size: 32 }), tierId] });
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: Number(process.env.BASE_CONFIRMATIONS ?? '3') });
       if (receipt.status !== 'success') throw new Error('base_funding_transaction_failed');
       for (const log of receipt.logs) {
+        if (log.address.toLowerCase() !== address.toLowerCase()) continue;
         try {
           const decoded = decodeEventLog({ abi: PRIVATE_CREDIT_BOND_ABI, data: log.data, topics: log.topics, eventName: 'BundleFunded' });
           if (decoded.eventName === 'BundleFunded') {
-            const args = decoded.args as { expiry?: bigint };
+            const args = decoded.args as { commitment?: Hex; expiry?: bigint };
+            if (args.commitment?.toLowerCase() !== toHex(BigInt(commitment), { size: 32 }).toLowerCase()) continue;
             if (args.expiry === undefined) throw new Error('base_funding_expiry_missing');
             return { transaction: hash, expiryAt: Number(args.expiry) * 1000 };
           }

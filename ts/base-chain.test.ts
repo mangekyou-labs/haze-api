@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   createPublicClient: vi.fn(),
   writeContract: vi.fn(),
   waitForTransactionReceipt: vi.fn(),
+  getBlockNumber: vi.fn(),
+  getContractEvents: vi.fn(),
 }));
 
 vi.mock('viem', async (importOriginal) => {
@@ -29,7 +31,11 @@ describe('Base bond sponsor attribution', () => {
     process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS = '0x1111111111111111111111111111111111111111';
     process.env.BASE_BUILDER_CODE = BUILDER_CODE;
     mocks.createWalletClient.mockReturnValue({ writeContract: mocks.writeContract });
-    mocks.createPublicClient.mockReturnValue({ waitForTransactionReceipt: mocks.waitForTransactionReceipt });
+    mocks.createPublicClient.mockReturnValue({
+      waitForTransactionReceipt: mocks.waitForTransactionReceipt,
+      getBlockNumber: mocks.getBlockNumber,
+      getContractEvents: mocks.getContractEvents,
+    });
     mocks.writeContract.mockResolvedValue(TRANSACTION);
     mocks.waitForTransactionReceipt.mockResolvedValue({ status: 'success', logs: [] });
   });
@@ -55,6 +61,7 @@ describe('Base bond sponsor attribution', () => {
       'fundBundle',
       'releaseBond',
     ]);
+    expect(mocks.waitForTransactionReceipt).toHaveBeenCalledWith({ hash: TRANSACTION, confirmations: 3 });
   });
 
   it('fails closed when no Builder Code is configured', () => {
@@ -62,5 +69,16 @@ describe('Base bond sponsor attribution', () => {
 
     expect(() => createBaseBondSponsor()).toThrow('BASE_BUILDER_CODE is not configured');
     expect(mocks.createWalletClient).not.toHaveBeenCalled();
+  });
+
+  it('reconciles only events inside the three-confirmation window', async () => {
+    mocks.getBlockNumber.mockResolvedValue(10n);
+    mocks.getContractEvents.mockResolvedValue([{
+      args: { commitment: `0x${'0'.repeat(63)}1`, expiry: 1_800_000_000n },
+      transactionHash: TRANSACTION,
+    }]);
+    const result = await createBaseBondSponsor().reconcileBundle('1');
+    expect(result).toEqual({ transaction: TRANSACTION, expiryAt: 1_800_000_000_000 });
+    expect(mocks.getContractEvents).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: 0n, toBlock: 7n }));
   });
 });
