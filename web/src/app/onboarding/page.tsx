@@ -15,7 +15,6 @@ export default function OnboardingPage() {
   const [mnemonic, setMnemonic] = useState<string[]>([]);
   const [commitment, setCommitment] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmWords, setConfirmWords] = useState<string[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [confirmInputs, setConfirmInputs] = useState<string[]>([]);
 
@@ -80,7 +79,7 @@ export default function OnboardingPage() {
       dbReq.onerror = () => {
         setError('Failed to save to browser storage.');
       };
-    } catch (e) {
+    } catch {
       setError('Failed to save key material.');
     }
   };
@@ -110,6 +109,7 @@ export default function OnboardingPage() {
           <button
             onClick={handleGenerate}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            data-testid="generate-secret-key"
           >
             Generate Key
           </button>
@@ -137,8 +137,9 @@ export default function OnboardingPage() {
           <button
             onClick={() => setStep('confirm')}
             className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            data-testid="mnemonic-acknowledge"
           >
-            I've Written It Down
+            I&apos;ve Written It Down
           </button>
         </div>
       )}
@@ -177,6 +178,7 @@ export default function OnboardingPage() {
               onClick={handleVerify}
               disabled={confirmInputs.some((v) => !v)}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              data-testid="confirm-mnemonic"
             >
               Confirm & Continue
             </button>
@@ -196,6 +198,7 @@ export default function OnboardingPage() {
           <button
             onClick={handleFinish}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            data-testid="onboarding-done"
           >
             Go to Dashboard
           </button>

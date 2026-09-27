@@ -1,0 +1,11 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - heading "ZK API Credits" [level=1] [ref=e4]
+      - paragraph [ref=e5]: Anonymous API credits for coding agents
+      - button "Sign in with GitHub" [ref=e7]
+      - paragraph [ref=e8]:
+        - text: Lost access?
+        - link "Recover from mnemonic" [ref=e9] [cursor=pointer]:
+          - /url: /recover
+  - alert [ref=e10]

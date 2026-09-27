@@ -1,0 +1,122 @@
+- generic [ref=f12e4]:
+  - generic [ref=f12e5]:
+    - banner [ref=f12e6]:
+      - generic [ref=f12e8]:
+        - generic "Back to":
+          - generic:
+            - generic:
+              - generic: Back
+              - generic:
+                - generic:
+                  - heading [level=1]
+        - generic [ref=f12e20]: Sandbox
+    - generic [ref=f12e23]:
+      - generic [ref=f12e25]:
+        - heading "Pay" [level=2] [ref=f12e26]
+        - generic [ref=f12e29]:
+          - generic [ref=f12e30]: Choose currency
+          - group "Choose currency" [ref=f12e31]:
+            - generic [ref=f12e32]:
+              - generic [ref=f12e34]:
+                - button "VN ₫135,568" [disabled] [ref=f12e36] [cursor=pointer]:
+                  - generic [ref=f12e38]:
+                    - img "VN" [ref=f12e39]
+                    - generic [ref=f12e40]: ₫135,568
+                - button "US $5.00" [disabled] [ref=f12e42] [cursor=pointer]:
+                  - generic [ref=f12e44]:
+                    - img "US" [ref=f12e45]
+                    - generic [ref=f12e46]: $5.00
+              - generic [ref=f12e47]: 1 USD = 27,113.6000 VND
+      - list [ref=f12e51]:
+        - listitem [ref=f12e52]:
+          - generic [ref=f12e54]:
+            - generic [ref=f12e55]: $5 Credits
+            - generic [ref=f12e59]: ZK-API Credits — $5 Credits
+            - generic [ref=f12e64]: ₫135,568
+  - generic [ref=f12e68]:
+    - main [ref=f12e69]:
+      - generic [ref=f12e72]:
+        - generic [ref=f12e73]:
+          - iframe [ref=f12e79]:
+            - generic [ref=f16e6]:
+              - iframe [ref=f16e11]:
+                - button "Apple Pay" [ref=f26e5] [cursor=pointer]:
+                  - img [ref=f26e7]:
+                    - img "Apple Logo" [ref=f26e8]
+              - button "Pay securely with Link" [ref=f16e14] [cursor=pointer]:
+                - generic [ref=f16e15]: Pay with
+          - paragraph [ref=f12e81]: Or
+        - heading "Contact information" [level=2] [ref=f12e82]
+      - generic [ref=f12e86]:
+        - generic [ref=f12e87]:
+          - generic [ref=f12e89]:
+            - generic [ref=f12e90]: Email
+            - textbox "Email" [disabled] [ref=f12e99]:
+              - /placeholder: email@example.com
+              - text: kylernguyeen@gmail.com
+          - heading "Payment method" [level=2] [ref=f12e101]
+        - generic [ref=f12e102]:
+          - list [ref=f12e103]:
+            - listitem [ref=f12e108]:
+              - generic [ref=f12e109]:
+                - generic [ref=f12e110]: Card
+                - generic [ref=f12e129]:
+                  - generic [ref=f12e131]:
+                    - generic [ref=f12e132]: Card information
+                    - group [ref=f12e135]:
+                      - generic [ref=f12e136]:
+                        - generic [ref=f12e138]:
+                          - textbox "Card number" [disabled] [ref=f12e141]:
+                            - /placeholder: 1234 1234 1234 1234
+                            - text: 4242 4242 4242 4242
+                          - generic:
+                            - list "Accepted card types":
+                              - listitem: Visa
+                              - listitem: Mastercard
+                              - listitem: American Express
+                              - listitem: JCB
+                              - listitem: Discover
+                              - listitem: Diners Club
+                          - generic:
+                            - img "Visa"
+                        - generic [ref=f12e142]: Current card brand is Visa.
+                        - textbox "Expiration" [disabled] [ref=f12e147]:
+                          - /placeholder: MM / YY
+                          - text: 12 / 28
+                        - generic [ref=f12e149]:
+                          - textbox "Credit or debit card CVC/CVV" [disabled] [ref=f12e152]:
+                            - /placeholder: CVC
+                            - text: "123"
+                          - generic:
+                            - generic:
+                              - img "Credit or debit card CVC/CVV"
+                        - generic [ref=f12e153]: 3-digit code on back of card
+                  - group [ref=f12e238]:
+                    - generic [ref=f12e160]:
+                      - generic [ref=f12e162]:
+                        - generic [ref=f12e163]: Cardholder name
+                        - textbox [disabled] [ref=f12e239]:
+                          - /placeholder: Full name on card
+                          - text: Kyler Nguyen
+                      - generic [ref=f12e174]:
+                        - generic [ref=f12e175]: Country or region
+                        - combobox [disabled] [ref=f12e240]
+          - generic [ref=f12e197]:
+            - checkbox "Save my information for faster checkout" [disabled] [ref=f12e199]
+            - generic [ref=f12e200]:
+              - generic [ref=f12e201]: Save my information for faster checkout
+              - generic [ref=f12e204]: Pay securely on this site and everywhere Link is accepted.
+        - button "Processing" [disabled] [ref=f12e241]
+      - generic [ref=f12e225]:
+        - checkbox "I am an AI agent acting on behalf of someone else" [ref=f12e226]
+        - text: I am an AI agent acting on behalf of someone else
+    - contentinfo [ref=f12e228]:
+      - link [ref=f12e230] [cursor=pointer]:
+        - /url: https://stripe.com
+        - generic [ref=f12e231]:
+          - text: Powered by
+          - img "Stripe" [ref=f12e233]
+      - link "Terms" [ref=f12e236] [cursor=pointer]:
+        - /url: https://stripe.com/legal/end-users
+      - link "Privacy" [ref=f12e237] [cursor=pointer]:
+        - /url: https://stripe.com/privacy

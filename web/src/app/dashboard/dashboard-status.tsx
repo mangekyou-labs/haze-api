@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface StatusData {
   commitment: string;
@@ -17,11 +17,7 @@ export function DashboardStatus() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadStatus();
-  }, []);
-
-  async function loadStatus() {
+  const loadStatus = useCallback(async () => {
     try {
       const dbReq = indexedDB.open('zk-credits-crypto', 1);
       dbReq.onupgradeneeded = () => dbReq.result.createObjectStore('keys');
@@ -53,10 +49,14 @@ export function DashboardStatus() {
       dbReq.onerror = () => {
         setLoading(false);
       };
-    } catch (e) {
+    } catch {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => void loadStatus());
+  }, [loadStatus]);
 
   if (loading) {
     return (

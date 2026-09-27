@@ -8,6 +8,15 @@ import fs from 'fs';
 import path from 'path';
 import { OpenRouterAdapter, MockProviderAdapter, registerAdapter, getAdapter } from './providerAdapter.js';
 import { MerkleTree } from './merkle.js';
+import { rpc as SorobanRpc } from '@stellar/stellar-sdk';
+import { SlashWatcher } from './slashWatcher.js';
+import {
+  EvaluationError,
+} from './evaluation.js';
+import { createEvaluationStore } from './evaluation-store-factory.js';
+import { captureGatewayException, initGatewaySentry } from './observability.js';
+
+initGatewaySentry();
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -17,6 +26,12 @@ const apiKeys = new Map<string, { commitment: string; label: string }>();
 const nullifierCache = new Set<string>();
 const callCounts = new Map<string, number>();
 const merkleTree = new MerkleTree();
+const depositReceipts = new Map<string, Record<string, unknown>>();
+const depositInFlight = new Map<string, Promise<Record<string, unknown>>>();
+// Evaluation data is isolated from the anonymous API stores. A configured
+// deployment database selects the durable adapter; local tests use memory.
+const evaluationSelection = createEvaluationStore();
+export const evaluationStore = evaluationSelection.store;
 
 // ─── Config ──────────────────────────────────────────────────────
 
@@ -28,7 +43,7 @@ const EPOCH_QUOTA = Number(process.env.DEFAULT_EPOCH_QUOTA ?? '100');
 let verificationKey: object;
 
 function loadVerificationKey(): object {
-  const circuitsDir = process.env.CIRCUITS_DIR || path.resolve(import.meta.dirname!, '..', '..', 'circuits');
+  const circuitsDir = process.env.CIRCUITS_DIR || path.resolve(__dirname, '..', 'circuits');
   const vkPath = path.join(circuitsDir, 'verification_key_rln.json');
   if (!fs.existsSync(vkPath)) {
     console.error('FATAL: Verification key not found at', vkPath);
@@ -65,11 +80,60 @@ async function verifyZkProof(
   return snarkjs.groth16.verify(verificationKey, pubSignals, proof);
 }
 
+export function getNullifierFromPublicSignals(pubSignals: string[]): string {
+  // rln_nullifier outputs [root, nullifier, share_x, share_y, epoch].
+  return pubSignals[1];
+}
+
 // ─── Express app ─────────────────────────────────────────────────
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+function requireGatewaySecret(req: Request, res: Response): boolean {
+  const gatewaySecret = process.env.GATEWAY_SECRET || '';
+  if (!gatewaySecret) {
+    res.status(500).json({ error: 'server_misconfigured' });
+    return false;
+  }
+  if (req.headers.authorization !== `Bearer ${gatewaySecret}`) {
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+function evaluationParticipantId(req: Request, res: Response): string | null {
+  const participantId = req.headers['x-evaluation-participant-id'];
+  if (typeof participantId !== 'string' || !participantId) {
+    res.status(400).json({ error: 'missing_participant_id' });
+    return null;
+  }
+  return participantId;
+}
+
+function evaluationErrorResponse(res: Response, error: unknown): void {
+  if (!(error instanceof EvaluationError)) {
+    captureGatewayException(error, { component: 'evaluation' });
+    console.error('Evaluation request failed');
+    res.status(500).json({ error: 'internal_error' });
+    return;
+  }
+  const status = error.code === 'rate_limited'
+    ? 429
+    : error.code === 'challenge_expired'
+      ? 410
+      : error.code === 'not_enrolled' || error.code === 'challenge_not_found'
+        ? 404
+        : error.code === 'wallet_already_used' || error.code === 'deposit_already_used'
+          || error.code === 'checkout_already_used'
+          ? 409
+          : error.code === 'wallet_proof_invalid'
+            ? 422
+            : 400;
+  res.status(status).json({ error: error.code });
+}
 
 // ─── Provider adapter setup ──────────────────────────────────────
 
@@ -90,7 +154,160 @@ app.get('/health', (_req: Request, res: Response) => {
     version: '0.1.0',
     network: 'stellar:testnet',
     proofVerification: 'enabled',
+    evaluationPersistence: evaluationSelection.persistence,
   });
+});
+
+// ─── Consent-based Level 4 evaluation API (internal gateway variants) ───
+
+app.post('/v1/evaluation/enroll', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    const result = await evaluationStore.enroll(participantId, req.body?.consentVersion);
+    res.json(result);
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.get('/v1/evaluation/status', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    res.json(await evaluationStore.getStatus(participantId));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.post('/v1/evaluation/challenge', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    res.json(await evaluationStore.createChallenge(participantId));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.post('/v1/evaluation/wallet-proof', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      res.status(400).json({ error: 'invalid_fields' });
+      return;
+    }
+    const { challengeId, address, signature, network, message } = body as Record<string, unknown>;
+    if (typeof challengeId !== 'string' || challengeId.length === 0 || challengeId.length > 256
+      || typeof address !== 'string' || address.length > 64
+      || typeof signature !== 'string' || signature.length > 128
+      || typeof network !== 'string' || network.length === 0 || network.length > 32
+      || (message !== undefined && (typeof message !== 'string' || message.length > 2_048))) {
+      res.status(400).json({ error: 'invalid_fields' });
+      return;
+    }
+    res.json(await evaluationStore.verifyWallet(participantId, {
+      challengeId,
+      address,
+      signature,
+      network,
+      ...(message !== undefined ? { message } : {}),
+    }));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.post('/v1/evaluation/feedback', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    res.json(await evaluationStore.submitFeedback(participantId, req.body ?? {}));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+// Called only after Stripe/webhook processing has confirmed the on-chain
+// transaction. It links evidence by participant HMAC and never receives a
+// commitment, prompt, proof, or API request body.
+app.post('/v1/evaluation/deposit', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    const { transactionHash, newRoot, confirmedAt } = req.body ?? {};
+    if (!transactionHash) {
+      res.status(400).json({ error: 'missing_transaction_hash' });
+      return;
+    }
+    res.json(await evaluationStore.linkDeposit(participantId, transactionHash, {
+      newRoot,
+      confirmedAt: typeof confirmedAt === 'number' ? confirmedAt : undefined,
+    }));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.post('/v1/evaluation/checkout', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    const { checkoutSessionId, amountCents, eventId } = req.body ?? {};
+    res.json(await evaluationStore.recordCheckout(participantId, {
+      checkoutSessionId,
+      amountCents,
+      eventId,
+    }));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.get('/v1/evaluation/checkout', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  const checkoutSessionId = req.query.sessionId;
+  if (typeof checkoutSessionId !== 'string' || !checkoutSessionId) {
+    res.status(400).json({ error: 'missing_checkout_session' });
+    return;
+  }
+  try {
+    res.json(await evaluationStore.getCheckout(participantId, checkoutSessionId));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
+});
+
+app.post('/v1/evaluation/checkout/status', async (req: Request, res: Response) => {
+  if (!requireGatewaySecret(req, res)) return;
+  const participantId = evaluationParticipantId(req, res);
+  if (!participantId) return;
+  try {
+    const { checkoutSessionId, status, transactionHash, newRoot } = req.body ?? {};
+    if (!checkoutSessionId || !status) {
+      res.status(400).json({ error: 'missing_fields' });
+      return;
+    }
+    res.json(await evaluationStore.markCheckout(participantId, checkoutSessionId, {
+      status,
+      transactionHash,
+      newRoot,
+    }));
+  } catch (error) {
+    evaluationErrorResponse(res, error);
+  }
 });
 
 // ─── POST /v1/chat/completions (OpenAI-compatible) ──────────────
@@ -122,7 +339,8 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     try {
       zkProof = parseProofHeader(proofHeader);
     } catch (err: any) {
-      res.status(400).json({ error: 'invalid_proof_header', message: err.message });
+      captureGatewayException(err, { component: 'proof-header' });
+      res.status(400).json({ error: 'invalid_proof_header' });
       return;
     }
 
@@ -131,8 +349,9 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     try {
       valid = await verifyZkProof(zkProof.proof, zkProof.pubSignals);
     } catch (err: any) {
-      console.error('Proof verification error:', err);
-      res.status(403).json({ error: 'proof_verification_failed', message: err.message });
+      captureGatewayException(err, { component: 'proof-verification' });
+      console.error('Proof verification failed');
+      res.status(403).json({ error: 'proof_verification_failed' });
       return;
     }
 
@@ -141,8 +360,7 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
       return;
     }
 
-    // pubSignals layout: [epoch, root, nullifier, share_x, share_y]
-    const nullifier = zkProof.pubSignals[2];
+    const nullifier = getNullifierFromPublicSignals(zkProof.pubSignals);
 
     if (nullifierCache.has(nullifier)) {
       res.status(403).json({ error: 'nullifier_spent', message: 'This nullifier has already been used' });
@@ -163,7 +381,8 @@ app.post('/v1/chat/completions', async (req: Request, res: Response) => {
     const upstreamBody = await upstream.json();
     res.status(upstream.status).json(upstreamBody);
   } catch (err) {
-    console.error('/v1/chat/completions error:', err);
+    captureGatewayException(err, { component: 'chat-completions' });
+    console.error('/v1/chat/completions failed');
     res.status(500).json({ error: 'internal_error' });
   }
 });
@@ -179,7 +398,8 @@ app.post('/v1/slash', (req: Request, res: Response) => {
     }
     res.json({ slashed: false, note: 'Slash submission endpoint — E2E in milestone 9' });
   } catch (err) {
-    console.error('/v1/slash error:', err);
+    captureGatewayException(err, { component: 'slash' });
+    console.error('/v1/slash failed');
     res.status(500).json({ error: 'internal_error' });
   }
 });
@@ -210,7 +430,8 @@ app.post('/v1/api-keys', (req: Request, res: Response) => {
     apiKeys.set(key, { commitment, label: label || 'default' });
     res.json({ apiKey: key, baseUrl: `${req.protocol}://${req.get('host')}/v1` });
   } catch (err) {
-    console.error('/v1/api-keys error:', err);
+    captureGatewayException(err, { component: 'api-keys' });
+    console.error('/v1/api-keys failed');
     res.status(500).json({ error: 'internal_error' });
   }
 });
@@ -219,7 +440,7 @@ app.post('/v1/api-keys', (req: Request, res: Response) => {
 
 app.get('/v1/status/:commitment', (req: Request, res: Response) => {
   try {
-    const { commitment } = req.params;
+    const commitment = req.params.commitment as string;
     if (!commitment) {
       res.status(400).json({ error: 'missing_commitment' });
       return;
@@ -234,17 +455,34 @@ app.get('/v1/status/:commitment', (req: Request, res: Response) => {
       }
     }
 
-    res.json({
+    const respond = (deposit: { amount: string; slashed: boolean; withdrawn: boolean } | null) => res.json({
       commitment,
       callsThisEpoch: userCalls,
       epochQuota: EPOCH_QUOTA,
       remainingCalls: Math.max(0, EPOCH_QUOTA - userCalls),
       activeKeys: userKeys.length,
-      balanceUsdc: '0',
-      depositStatus: null,
+      balanceUsdc: deposit?.amount ?? '0',
+      depositStatus: deposit
+        ? { slashed: deposit.slashed, withdrawn: deposit.withdrawn }
+        : null,
     });
+
+    if (!process.env.ZK_CONTRACT_ID || !process.env.GATEWAY_ADDRESS) {
+      respond(null);
+      return;
+    }
+
+    import('./contract.js')
+      .then(({ getDeposit }) => getDeposit(commitment))
+      .then(respond)
+      .catch((err: unknown) => {
+        captureGatewayException(err, { component: 'status-onchain' });
+        console.warn('Unable to read on-chain deposit');
+        respond(null);
+      });
   } catch (err) {
-    console.error('/v1/status error:', err);
+    captureGatewayException(err, { component: 'status' });
+    console.error('/v1/status failed');
     res.status(500).json({ error: 'internal_error' });
   }
 });
@@ -265,10 +503,11 @@ app.get('/v1/contract-status', async (_req: Request, res: Response) => {
       network: 'stellar:testnet',
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'unknown';
-    res.json({
+    captureGatewayException(err, { component: 'contract-status' });
+    console.error('/v1/contract-status unavailable');
+    res.status(503).json({
       contractId: process.env.ZK_CONTRACT_ID || 'not configured',
-      error: message,
+      error: 'contract_unavailable',
       network: 'stellar:testnet',
     });
   }
@@ -289,10 +528,31 @@ app.post('/v1/deposits', async (req: Request, res: Response) => {
       return;
     }
 
-    const { commitment, amount } = req.body;
+    const { commitment, amount, participantId, checkoutSessionId } = req.body;
     if (!commitment || !amount) {
       res.status(400).json({ error: 'missing_fields', required: ['commitment', 'amount'] });
       return;
+    }
+
+    const idempotencyKey = req.headers['idempotency-key']
+      || (typeof checkoutSessionId === 'string' ? checkoutSessionId : undefined);
+    if (typeof idempotencyKey === 'string' && idempotencyKey.length > 0) {
+      const previous = depositReceipts.get(idempotencyKey);
+      if (previous) {
+        res.json({ ...previous, idempotent: true });
+        return;
+      }
+    }
+
+    const normalizedIdempotencyKey = typeof idempotencyKey === 'string' && idempotencyKey.length > 0
+      ? idempotencyKey
+      : null;
+    if (normalizedIdempotencyKey) {
+      const inFlight = depositInFlight.get(normalizedIdempotencyKey);
+      if (inFlight) {
+        res.json({ ...(await inFlight), idempotent: true });
+        return;
+      }
     }
 
     const gatewaySecretKey = process.env.GATEWAY_SECRET_KEY;
@@ -301,37 +561,113 @@ app.post('/v1/deposits', async (req: Request, res: Response) => {
       return;
     }
 
-    // Insert commitment into off-chain Merkle tree
-    const commitmentBigInt = BigInt(commitment);
-    const newRoot = await merkleTree.insert(commitmentBigInt);
+    const processDeposit = async (): Promise<Record<string, unknown>> => {
+      // A durable confirmed checkout receipt is the cross-instance idempotency
+      // anchor. The in-memory receipt below handles the common warm-process path.
+      if (typeof participantId === 'string' && typeof checkoutSessionId === 'string' && checkoutSessionId) {
+        try {
+          const checkout = await evaluationStore.getCheckout(participantId, checkoutSessionId);
+          if (checkout.processingStatus === 'confirmed' && checkout.transactionHash) {
+            return {
+              deposited: true,
+              txHash: checkout.transactionHash,
+              commitment,
+              amount: amount.toString(),
+              newRoot: checkout.newRoot,
+              leafIndex: -1,
+            };
+          }
+        } catch (error) {
+          if (!(error instanceof EvaluationError) || error.code !== 'checkout_not_found') throw error;
+        }
+      }
 
-    // Submit on-chain deposit
-    const contractModule = await import('./contract.js');
-    const txHash = await contractModule.deposit(
-      gatewaySecretKey,
-      commitment,
-      newRoot.toString(),
-      amount.toString(),
-    );
+      // Insert commitment into off-chain Merkle tree
+      const commitmentBigInt = BigInt(commitment);
+      const newRoot = await merkleTree.insert(commitmentBigInt);
 
-    res.json({
-      deposited: true,
-      txHash,
-      commitment,
-      amount: amount.toString(),
-      newRoot: newRoot.toString(),
-      leafIndex: merkleTree.getLeafCount() - 1,
-    });
+      // Submit on-chain deposit
+      const contractModule = await import('./contract.js');
+      const txHash = await contractModule.deposit(
+        gatewaySecretKey,
+        commitment,
+        newRoot.toString(),
+        amount.toString(),
+      );
+
+      if (typeof participantId === 'string') {
+        await evaluationStore.linkDeposit(participantId, txHash, { newRoot: newRoot.toString() });
+        if (typeof checkoutSessionId === 'string' && checkoutSessionId) {
+          await evaluationStore.markCheckout(participantId, checkoutSessionId, {
+            status: 'confirmed',
+            transactionHash: txHash,
+            newRoot: newRoot.toString(),
+          });
+        }
+      }
+
+      const responseBody = {
+        deposited: true,
+        txHash,
+        commitment,
+        amount: amount.toString(),
+        newRoot: newRoot.toString(),
+        leafIndex: merkleTree.getLeafCount() - 1,
+      };
+      if (normalizedIdempotencyKey) depositReceipts.set(normalizedIdempotencyKey, responseBody);
+      return responseBody;
+    };
+
+    if (normalizedIdempotencyKey) {
+      const pending = processDeposit();
+      depositInFlight.set(normalizedIdempotencyKey, pending);
+      try {
+        res.json(await pending);
+      } finally {
+        if (depositInFlight.get(normalizedIdempotencyKey) === pending) {
+          depositInFlight.delete(normalizedIdempotencyKey);
+        }
+      }
+      return;
+    }
+
+    res.json(await processDeposit());
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'unknown';
-    console.error('/v1/deposits error:', message);
-    res.status(500).json({ error: 'deposit_failed', message });
+    captureGatewayException(err, { component: 'deposits' });
+    console.error('/v1/deposits failed');
+    res.status(500).json({ error: 'deposit_failed' });
   }
 });
 
 // ─── Start ───────────────────────────────────────────────────────
 
 if (require.main === module) {
+  if (process.env.SLASH_WATCHER_ENABLED === 'true' && process.env.ZK_CONTRACT_ID) {
+    const rpcServer = new SorobanRpc.Server(
+      process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
+      { allowHttp: true },
+    );
+    const watcher = new SlashWatcher({
+      contractId: process.env.ZK_CONTRACT_ID,
+      startLedger: Number(process.env.SLASH_WATCHER_START_LEDGER || '1'),
+      eventSource: rpcServer,
+      onCollision: (collision) => {
+        captureGatewayException(new Error('Nullifier collision detected'), { component: 'slash-watcher' });
+        console.error('Nullifier collision detected; slash proof required');
+      },
+    });
+    const poll = async () => {
+      try {
+        await watcher.pollOnce();
+      } catch (err) {
+        captureGatewayException(err, { component: 'slash-watcher' });
+        console.error('Slash watcher poll failed');
+      }
+      setTimeout(poll, Number(process.env.SLASH_WATCHER_INTERVAL_MS || '5000'));
+    };
+    void poll();
+  }
+
   app.listen(PORT, () => {
     console.log(`ZK-API Credits Gateway running on port ${PORT}`);
     console.log(`OpenRouter: ${OPENROUTER_API_KEY ? 'configured' : 'not configured'}`);

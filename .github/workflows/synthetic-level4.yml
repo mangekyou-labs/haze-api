@@ -1,0 +1,26 @@
+name: Level 4 synthetic monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Probe live services
+        env:
+          FRONTEND_URL: ${{ vars.LEVEL4_FRONTEND_URL }}
+          GATEWAY_URL: ${{ vars.LEVEL4_GATEWAY_URL }}
+          FEE_SPONSOR_URL: ${{ vars.LEVEL4_FEE_SPONSOR_URL }}
+          REQUIRE_FEE_SPONSOR: 'true'
+        run: node scripts/synthetic-monitor.mjs

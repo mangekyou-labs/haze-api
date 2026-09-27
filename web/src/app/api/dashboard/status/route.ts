@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     }
     const data = await res.json();
     return NextResponse.json(data);
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: 'gateway_unreachable' }, { status: 502 });
   }
 }

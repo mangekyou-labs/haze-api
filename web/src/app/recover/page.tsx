@@ -93,6 +93,7 @@ export default function RecoverPage() {
           <button
             onClick={() => router.push('/dashboard')}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+            data-testid="recovery-dashboard"
           >
             Go to Dashboard
           </button>
@@ -108,6 +109,7 @@ export default function RecoverPage() {
               onChange={(e) => setMnemonic(e.target.value)}
               className="w-full p-3 border rounded-lg font-mono text-sm h-32 resize-none"
               placeholder="word1 word2 word3 ... word24"
+              data-testid="recovery-phrase"
               autoComplete="off"
               spellCheck={false}
             />
@@ -117,6 +119,7 @@ export default function RecoverPage() {
             onClick={handleRecover}
             disabled={loading || !mnemonic.trim()}
             className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+            data-testid="recover-key"
           >
             {loading ? 'Recovering...' : 'Recover Key'}
           </button>

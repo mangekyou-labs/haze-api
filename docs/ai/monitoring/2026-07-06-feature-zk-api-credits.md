@@ -6,6 +6,11 @@ description: Monitoring strategy, metrics, alerts, and incident response for the
 
 # Monitoring & Observability
 
+> **M6 reconciliation (2026-09-11):** Earlier sections describe the original
+> console/error-page baseline. Level 4 adds Sentry configuration with a strict
+> scrubber, opt-in PostHog events, and a scheduled/manual synthetic monitor;
+> live alert screenshots and a green production run remain release evidence.
+
 ## Key Metrics
 
 ### Performance Metrics
@@ -38,19 +43,26 @@ description: Monitoring strategy, metrics, alerts, and incident response for the
 
 ## Monitoring Tools
 
-### MVP (Current)
+### MVP baseline (historical)
 
 - **Gateway:** Console logs (stdout)
 - **Web App:** Next.js error pages
 - **Contract:** Stellar Explorer (testnet)
 - **Circuit proofs:** snarkjs CLI verification
 
-### Production (Future)
+### Level 4 implementation
 
-- **APM:** Sentry or Datadog
-- **Metrics:** Prometheus + Grafana
-- **Logs:** Structured JSON → ELK or Loki
-- **Uptime:** BetterUptime or Pingdom
+- **APM:** Sentry on web, gateway, and fee sponsor; `sendDefaultPii`, replay,
+  local-variable capture, and sensitive request data are disabled/scrubbed.
+- **Product analytics:** PostHog starts opted out; only coarse lifecycle,
+  duration, breakpoint, release, status, outcome, and fixed survey fields are
+  allow-listed after explicit consent.
+- **Synthetic uptime:** `.github/workflows/synthetic-level4.yml` runs on a
+  schedule and manually, checking frontend, gateway health, contract status,
+  and the configured fee-sponsor health endpoint with a 90-second timeout and
+  bounded retries.
+- **Free Render behavior:** cold starts are surfaced as “waking service” UI
+  states with retry controls; no uptime SLA is claimed.
 
 ## Logging Strategy
 
@@ -72,8 +84,11 @@ description: Monitoring strategy, metrics, alerts, and incident response for the
 
 ### Sensitive Data Handling
 
-- **Never log:** `secret_k`, API keys, Stripe secrets
-- **OK to log:** Commitments, nullifiers, proof hashes, request metadata
+- **Never log or send to analytics:** prompts, request bodies, `secret_k`, API
+  keys, Stripe secrets, mnemonics, proofs, signatures, full wallet addresses,
+  GitHub identity, cookies, authorization data, or commitments.
+- **OK to aggregate:** coarse status, duration, release, breakpoint, and fixed
+  feedback fields after explicit opt-in.
 - **Redact:** User email (first3 chars + `***`)
 
 ## Alerts & Notifications
@@ -153,3 +168,16 @@ curl http://localhost:3001/v1/contract-status
 curl -s http://localhost:3000 | head -5
 # Expected: HTML response (landing page)
 ```
+
+### Synthetic monitor
+
+```bash
+FRONTEND_URL=https://<web> \
+GATEWAY_URL=https://<gateway> \
+FEE_SPONSOR_URL=https://<fee-sponsor> \
+REQUIRE_FEE_SPONSOR=true \
+node scripts/synthetic-monitor.mjs
+```
+
+The command emits endpoint labels, status, duration, and retry outcome only;
+it never prints credentials or response bodies.

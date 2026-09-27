@@ -1,0 +1,512 @@
+import {
+  EvaluationError,
+  type Challenge,
+  type CheckoutProcessingStatus,
+  type CheckoutReceipt,
+  type EnrollmentStatus,
+  type EvaluationStatus,
+  type FeedbackInput,
+  type MemoryEvaluationStore,
+  type RestrictedEvaluationRecord,
+  type ValidatedFeedback,
+  type WalletProof,
+  type WalletVerificationResult,
+  CHALLENGE_TTL_MS,
+  RETENTION_MS,
+  redactWalletAddress,
+  validateFeedback,
+  verifyWalletProof,
+} from './evaluation.js';
+
+export interface SqlResult<Row extends Record<string, unknown> = Record<string, unknown>> {
+  rows: Row[];
+  rowCount?: number | null;
+}
+
+export interface SqlPool {
+  query<Row extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<SqlResult<Row>>;
+}
+
+interface ParticipantRow extends Record<string, unknown> {
+  participant_id: string;
+  public_code: string;
+  consent_version: string;
+  enrolled_at: Date | string;
+  retention_deadline: Date | string;
+  wallet_address: string | null;
+  wallet_signature: string | null;
+  wallet_verified_at: Date | string | null;
+  deposit_tx_hash: string | null;
+  deposit_explorer_url: string | null;
+  deposit_new_root: string | null;
+  deposit_confirmed_at: Date | string | null;
+  ease_rating: number | null;
+  task_completed: boolean | null;
+  would_use_again: boolean | null;
+  most_valuable_aspect: string | null;
+  biggest_friction: string | null;
+  quote_consent: boolean | null;
+  feedback_submitted_at: Date | string | null;
+  anonymized_at: Date | string | null;
+}
+
+interface ChallengeRow extends Record<string, unknown> {
+  challenge_id: string;
+  participant_id: string;
+  message: string;
+  created_at: Date | string;
+  expires_at: Date | string;
+  used_at: Date | string | null;
+}
+
+interface CheckoutRow extends Record<string, unknown> {
+  checkout_session_id: string;
+  participant_id: string;
+  amount_cents: number;
+  processing_status: CheckoutProcessingStatus;
+  event_id: string | null;
+  deposit_tx_hash: string | null;
+  deposit_new_root: string | null;
+  received_at: Date | string;
+  processed_at: Date | string | null;
+}
+
+function millis(value: Date | string | null): number | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.getTime() : new Date(value).getTime();
+}
+
+function requiredMillis(value: Date | string): number {
+  const result = millis(value);
+  if (result === null || Number.isNaN(result)) throw new Error('Invalid timestamp from evaluation database');
+  return result;
+}
+
+function feedbackFromRow(row: ParticipantRow): ValidatedFeedback | null {
+  if (row.feedback_submitted_at === null) return null;
+  if (row.ease_rating === null
+    || row.task_completed === null
+    || row.would_use_again === null
+    || row.most_valuable_aspect === null
+    || row.biggest_friction === null
+    || row.quote_consent === null) {
+    throw new Error('Incomplete feedback row in evaluation database');
+  }
+  return {
+    easeRating: row.ease_rating,
+    taskCompleted: row.task_completed,
+    wouldUseAgain: row.would_use_again,
+    mostValuableAspect: row.most_valuable_aspect,
+    biggestFriction: row.biggest_friction,
+    quoteConsent: row.quote_consent,
+    submittedAt: requiredMillis(row.feedback_submitted_at),
+  };
+}
+
+function rowToRestricted(row: ParticipantRow): RestrictedEvaluationRecord {
+  return {
+    participantId: row.participant_id,
+    participantCode: row.public_code,
+    consentVersion: row.consent_version,
+    enrolledAtMs: requiredMillis(row.enrolled_at),
+    retentionDeadlineMs: requiredMillis(row.retention_deadline),
+    walletAddress: row.wallet_address,
+    walletSignature: row.wallet_signature,
+    walletVerifiedAtMs: millis(row.wallet_verified_at),
+    depositTransactionHash: row.deposit_tx_hash,
+    depositExplorerUrl: row.deposit_explorer_url,
+    depositNewRoot: row.deposit_new_root,
+    depositConfirmedAtMs: millis(row.deposit_confirmed_at),
+    feedback: feedbackFromRow(row),
+    anonymizedAtMs: millis(row.anonymized_at),
+  };
+}
+
+function rowToEnrollment(row: ParticipantRow): EnrollmentStatus {
+  return {
+    participantCode: row.public_code,
+    consentVersion: row.consent_version,
+    enrolledAt: new Date(requiredMillis(row.enrolled_at)).toISOString(),
+    retentionDeadline: new Date(requiredMillis(row.retention_deadline)).toISOString(),
+  };
+}
+
+function rowToStatus(row: ParticipantRow): EvaluationStatus {
+  const restricted = rowToRestricted(row);
+  return {
+    participantCode: restricted.participantCode,
+    consentVersion: restricted.consentVersion,
+    enrolledAt: new Date(restricted.enrolledAtMs).toISOString(),
+    retentionDeadline: new Date(restricted.retentionDeadlineMs).toISOString(),
+    wallet: {
+      verified: restricted.walletVerifiedAtMs !== null,
+      addressRedacted: restricted.walletAddress ? redactWalletAddress(restricted.walletAddress) : null,
+    },
+    deposit: {
+      confirmed: restricted.depositConfirmedAtMs !== null,
+      transactionHash: restricted.depositTransactionHash,
+      explorerUrl: restricted.depositExplorerUrl,
+      newRoot: restricted.depositNewRoot,
+    },
+    feedbackSubmitted: restricted.feedback !== null,
+    complete: restricted.walletVerifiedAtMs !== null
+      && restricted.depositConfirmedAtMs !== null
+      && restricted.feedback !== null,
+  };
+}
+
+function rowToCheckout(row: CheckoutRow): CheckoutReceipt {
+  return {
+    checkoutSessionId: row.checkout_session_id,
+    amountCents: row.amount_cents,
+    processingStatus: row.processing_status,
+    transactionHash: row.deposit_tx_hash,
+    newRoot: row.deposit_new_root,
+    receivedAt: new Date(requiredMillis(row.received_at)).toISOString(),
+    processedAt: row.processed_at === null ? null : new Date(requiredMillis(row.processed_at)).toISOString(),
+  };
+}
+
+function participantIdIsValid(participantId: string): boolean {
+  return /^[a-f0-9]{64}$/.test(participantId);
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === '23505';
+}
+
+/**
+ * PostgreSQL adapter for the isolated evaluation schema. The dependency is
+ * structural so tests can use a transaction-safe fake and the gateway can
+ * inject a normal `pg` Pool without coupling evaluation records to gateway
+ * storage code.
+ */
+export class PostgresEvaluationStore {
+  constructor(
+    private readonly pool: SqlPool,
+    private readonly options: { now?: () => number; id?: () => string } = {},
+  ) {}
+
+  private currentTime(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+
+  private challengeId(): string {
+    if (!this.options.id) {
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+    }
+    return this.options.id();
+  }
+
+  private async participant(participantId: string): Promise<ParticipantRow> {
+    if (!participantIdIsValid(participantId)) {
+      throw new EvaluationError('invalid_subject', 'Participant identifier must be a SHA-256 HMAC');
+    }
+    const result = await this.pool.query<ParticipantRow>(
+      'SELECT * FROM evaluation.participants WHERE participant_id = $1',
+      [participantId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new EvaluationError('not_enrolled', 'Participant is not enrolled');
+    return row;
+  }
+
+  async enroll(participantId: string, consentVersion: string): Promise<EnrollmentStatus> {
+    if (!participantIdIsValid(participantId)) {
+      throw new EvaluationError('invalid_subject', 'Participant identifier must be a SHA-256 HMAC');
+    }
+    if (typeof consentVersion !== 'string' || !consentVersion || consentVersion.length > 128) {
+      throw new EvaluationError('invalid_consent_version', 'A consent version is required');
+    }
+    const enrolledAt = new Date(this.currentTime());
+    const retentionDeadline = new Date(enrolledAt.getTime() + RETENTION_MS);
+    await this.pool.query(
+      `INSERT INTO evaluation.participants
+        (participant_id, public_code, consent_version, enrolled_at, retention_deadline)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (participant_id) DO NOTHING`,
+      [participantId, `L4-${participantId.slice(0, 12)}`, consentVersion, enrolledAt, retentionDeadline],
+    );
+    const row = await this.participant(participantId);
+    if (row.consent_version !== consentVersion) {
+      throw new EvaluationError('already_enrolled', 'Participant is already enrolled');
+    }
+    return rowToEnrollment(row);
+  }
+
+  async createChallenge(participantId: string): Promise<Challenge> {
+    const participant = await this.participant(participantId);
+    const now = new Date(this.currentTime());
+    const recent = await this.pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM evaluation.wallet_challenges
+        WHERE participant_id = $1 AND created_at >= $2`,
+      [participantId, new Date(now.getTime() - 15 * 60 * 1000)],
+    );
+    if (Number(recent.rows[0]?.count ?? 0) >= 5) {
+      throw new EvaluationError('rate_limited', 'Too many wallet challenges');
+    }
+
+    const id = this.challengeId();
+    const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS);
+    const message = [
+      'Stellar Launch wallet verification',
+      `Participant: ${participant.public_code}`,
+      `Challenge: ${id}`,
+      'Network: stellar:testnet',
+      `Expires: ${expiresAt.toISOString()}`,
+    ].join('\n');
+    await this.pool.query(
+      `INSERT INTO evaluation.wallet_challenges
+        (challenge_id, participant_id, message, created_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, participantId, message, now, expiresAt],
+    );
+    return { id, message, expiresAt: expiresAt.toISOString() };
+  }
+
+  async verifyWallet(
+    participantId: string,
+    proof: Omit<WalletProof, 'message'> & { challengeId: string; message?: string },
+  ): Promise<WalletVerificationResult> {
+    if (!proof || typeof proof !== 'object' || typeof proof.challengeId !== 'string'
+      || proof.challengeId.length === 0 || proof.challengeId.length > 256) {
+      throw new EvaluationError('wallet_proof_invalid', 'Wallet proof could not be verified');
+    }
+    const participant = await this.participant(participantId);
+    const challengeResult = await this.pool.query<ChallengeRow>(
+      'SELECT * FROM evaluation.wallet_challenges WHERE challenge_id = $1 AND participant_id = $2',
+      [proof.challengeId, participantId],
+    );
+    const challenge = challengeResult.rows[0];
+    if (!challenge) throw new EvaluationError('challenge_not_found', 'Wallet challenge was not found');
+    if (challenge.used_at !== null) throw new EvaluationError('challenge_replayed', 'Wallet challenge has already been used');
+    if (this.currentTime() >= requiredMillis(challenge.expires_at)) {
+      throw new EvaluationError('challenge_expired', 'Wallet challenge has expired');
+    }
+    if ((proof.message !== undefined && proof.message !== challenge.message)
+      || !verifyWalletProof({ ...proof, message: challenge.message })) {
+      throw new EvaluationError('wallet_proof_invalid', 'Wallet proof could not be verified');
+    }
+
+    const owner = await this.pool.query<{ participant_id: string }>(
+      'SELECT participant_id FROM evaluation.participants WHERE wallet_address = $1',
+      [proof.address],
+    );
+    if (owner.rows[0] && owner.rows[0].participant_id !== participantId) {
+      throw new EvaluationError('wallet_already_used', 'Wallet is already enrolled');
+    }
+    if (participant.wallet_address && participant.wallet_address !== proof.address) {
+      throw new EvaluationError('wallet_already_used', 'Participant already has a different wallet');
+    }
+    const verifiedAt = new Date(this.currentTime());
+    const challengeUpdate = await this.pool.query(
+      `UPDATE evaluation.wallet_challenges
+          SET used_at = $1
+        WHERE challenge_id = $2 AND participant_id = $3 AND used_at IS NULL`,
+      [verifiedAt, proof.challengeId, participantId],
+    );
+    if (challengeUpdate.rowCount !== 1) {
+      throw new EvaluationError('challenge_replayed', 'Wallet challenge has already been used');
+    }
+    try {
+      await this.pool.query(
+        `UPDATE evaluation.participants
+            SET wallet_address = $1, wallet_signature = $2, wallet_verified_at = $3, updated_at = $3
+          WHERE participant_id = $4`,
+        [proof.address, proof.signature, verifiedAt, participantId],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new EvaluationError('wallet_already_used', 'Wallet is already enrolled');
+      }
+      throw error;
+    }
+    return {
+      verified: true,
+      addressRedacted: redactWalletAddress(proof.address),
+      verifiedAt: verifiedAt.toISOString(),
+    };
+  }
+
+  async linkDeposit(
+    participantId: string,
+    transactionHash: string,
+    options: { newRoot?: string; confirmedAt?: number } = {},
+  ): Promise<EvaluationStatus> {
+    const participant = await this.participant(participantId);
+    if (!participant.wallet_address) throw new EvaluationError('wallet_not_verified', 'Wallet verification is required first');
+    if (typeof transactionHash !== 'string' || !/^[a-f0-9]{64}$/i.test(transactionHash)) {
+      throw new EvaluationError('invalid_transaction_hash', 'A Stellar transaction hash is required');
+    }
+    const normalized = transactionHash.toLowerCase();
+    const owner = await this.pool.query<{ participant_id: string }>(
+      'SELECT participant_id FROM evaluation.participants WHERE deposit_tx_hash = $1',
+      [normalized],
+    );
+    if (owner.rows[0] && owner.rows[0].participant_id !== participantId) {
+      throw new EvaluationError('deposit_already_used', 'Deposit transaction is already linked');
+    }
+    if (participant.deposit_tx_hash && participant.deposit_tx_hash !== normalized) {
+      throw new EvaluationError('deposit_already_used', 'Participant already has a deposit linked');
+    }
+    const confirmedAt = new Date(options.confirmedAt ?? this.currentTime());
+    try {
+      await this.pool.query(
+        `UPDATE evaluation.participants
+            SET deposit_tx_hash = $1, deposit_explorer_url = $2, deposit_new_root = $3,
+                deposit_confirmed_at = $4, updated_at = $4
+          WHERE participant_id = $5`,
+        [normalized, `https://stellar.expert/explorer/testnet/tx/${normalized}`, options.newRoot ?? null, confirmedAt, participantId],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new EvaluationError('deposit_already_used', 'Deposit transaction is already linked');
+      }
+      throw error;
+    }
+    return this.getStatus(participantId);
+  }
+
+  async submitFeedback(participantId: string, input: Partial<FeedbackInput>): Promise<EvaluationStatus> {
+    const participant = await this.participant(participantId);
+    if (!participant.wallet_address || !participant.deposit_tx_hash) {
+      throw new EvaluationError('feedback_not_ready', 'Wallet verification and deposit are required first');
+    }
+    const validated = validateFeedback(input);
+    if (!validated.ok) throw new EvaluationError(validated.code, 'Feedback fields are invalid');
+    const submittedAt = new Date(this.currentTime());
+    await this.pool.query(
+      `UPDATE evaluation.participants
+          SET ease_rating = $1, task_completed = $2, would_use_again = $3,
+              most_valuable_aspect = $4, biggest_friction = $5, quote_consent = $6,
+              feedback_submitted_at = $7, updated_at = $7
+        WHERE participant_id = $8`,
+      [validated.value.easeRating, validated.value.taskCompleted, validated.value.wouldUseAgain,
+        validated.value.mostValuableAspect, validated.value.biggestFriction,
+        validated.value.quoteConsent, submittedAt, participantId],
+    );
+    return this.getStatus(participantId);
+  }
+
+  async recordCheckout(
+    participantId: string,
+    input: { checkoutSessionId: string; amountCents: number; eventId?: string },
+  ): Promise<CheckoutReceipt> {
+    await this.participant(participantId);
+    if (!input.checkoutSessionId || input.checkoutSessionId.length > 255
+      || !Number.isInteger(input.amountCents) || input.amountCents < 0) {
+      throw new EvaluationError('checkout_invalid', 'Checkout receipt fields are invalid');
+    }
+    const existing = await this.pool.query<CheckoutRow>(
+      'SELECT * FROM evaluation.checkout_receipts WHERE checkout_session_id = $1',
+      [input.checkoutSessionId],
+    );
+    if (existing.rows[0]) {
+      if (existing.rows[0].participant_id !== participantId) {
+        throw new EvaluationError('checkout_already_used', 'Checkout session is already linked');
+      }
+      return rowToCheckout(existing.rows[0]);
+    }
+    try {
+      await this.pool.query(
+        `INSERT INTO evaluation.checkout_receipts
+          (checkout_session_id, participant_id, amount_cents, event_id)
+         VALUES ($1, $2, $3, $4)`,
+        [input.checkoutSessionId, participantId, input.amountCents, input.eventId ?? null],
+      );
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      const raced = await this.pool.query<CheckoutRow>(
+        'SELECT * FROM evaluation.checkout_receipts WHERE checkout_session_id = $1',
+        [input.checkoutSessionId],
+      );
+      if (raced.rows[0]?.participant_id !== participantId) {
+        throw new EvaluationError('checkout_already_used', 'Checkout session is already linked');
+      }
+      if (raced.rows[0]) return rowToCheckout(raced.rows[0]);
+      throw new EvaluationError('checkout_invalid', 'Checkout receipt could not be recorded');
+    }
+    const created = await this.pool.query<CheckoutRow>(
+      'SELECT * FROM evaluation.checkout_receipts WHERE checkout_session_id = $1',
+      [input.checkoutSessionId],
+    );
+    return rowToCheckout(created.rows[0]);
+  }
+
+  async markCheckout(
+    participantId: string,
+    checkoutSessionId: string,
+    input: { status: CheckoutProcessingStatus; transactionHash?: string; newRoot?: string },
+  ): Promise<CheckoutReceipt> {
+    if (input.transactionHash
+      && (typeof input.transactionHash !== 'string' || !/^[a-f0-9]{64}$/i.test(input.transactionHash))) {
+      throw new EvaluationError('invalid_transaction_hash', 'A Stellar transaction hash is required');
+    }
+    if (input.status !== 'pending' && input.status !== 'processing'
+      && input.status !== 'confirmed' && input.status !== 'failed') {
+      throw new EvaluationError('checkout_invalid', 'Checkout status is invalid');
+    }
+    const current = await this.pool.query<CheckoutRow>(
+      `SELECT * FROM evaluation.checkout_receipts
+        WHERE checkout_session_id = $1 AND participant_id = $2`,
+      [checkoutSessionId, participantId],
+    );
+    if (!current.rows[0]) throw new EvaluationError('checkout_not_found', 'Checkout receipt was not found');
+    if (current.rows[0].processing_status === 'confirmed') return rowToCheckout(current.rows[0]);
+    const processedAt = input.status === 'pending' || input.status === 'processing' ? null : new Date(this.currentTime());
+    await this.pool.query(
+      `UPDATE evaluation.checkout_receipts
+          SET processing_status = $1, deposit_tx_hash = COALESCE($2, deposit_tx_hash),
+              deposit_new_root = COALESCE($3, deposit_new_root), processed_at = $4, updated_at = $4
+        WHERE checkout_session_id = $5 AND participant_id = $6`,
+      [input.status, input.transactionHash?.toLowerCase() ?? null, input.newRoot ?? null, processedAt,
+        checkoutSessionId, participantId],
+    );
+    const updated = await this.pool.query<CheckoutRow>(
+      'SELECT * FROM evaluation.checkout_receipts WHERE checkout_session_id = $1 AND participant_id = $2',
+      [checkoutSessionId, participantId],
+    );
+    return rowToCheckout(updated.rows[0]);
+  }
+
+  async getCheckout(participantId: string, checkoutSessionId: string): Promise<CheckoutReceipt> {
+    const result = await this.pool.query<CheckoutRow>(
+      'SELECT * FROM evaluation.checkout_receipts WHERE checkout_session_id = $1 AND participant_id = $2',
+      [checkoutSessionId, participantId],
+    );
+    if (!result.rows[0]) throw new EvaluationError('checkout_not_found', 'Checkout receipt was not found');
+    return rowToCheckout(result.rows[0]);
+  }
+
+  async getStatus(participantId: string): Promise<EvaluationStatus> {
+    return rowToStatus(await this.participant(participantId));
+  }
+
+  async listRestrictedRecords(): Promise<RestrictedEvaluationRecord[]> {
+    const result = await this.pool.query<ParticipantRow>(
+      'SELECT * FROM evaluation.participants ORDER BY enrolled_at ASC',
+    );
+    return result.rows.map(rowToRestricted);
+  }
+
+  async purgeExpired(at = this.currentTime()): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE evaluation.participants
+          SET wallet_address = NULL, wallet_signature = NULL, anonymized_at = $1, updated_at = $1
+        WHERE retention_deadline <= $1 AND anonymized_at IS NULL`,
+      [new Date(at)],
+    );
+    return result.rowCount ?? 0;
+  }
+}
+
+// Keep this import in the module's dependency graph for adapters that use the
+// same interface as the memory store without forcing a runtime pg dependency.
+export type EvaluationStoreLike = Pick<MemoryEvaluationStore, 'enroll' | 'createChallenge' | 'verifyWallet' | 'linkDeposit' | 'submitFeedback' | 'recordCheckout' | 'markCheckout' | 'getCheckout' | 'getStatus' | 'listRestrictedRecords' | 'purgeExpired'>;

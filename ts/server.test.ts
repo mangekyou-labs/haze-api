@@ -1,6 +1,19 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { app, apiKeys, nullifierCache, callCounts } from './server.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'node:path';
+import { app, apiKeys, nullifierCache, callCounts, getNullifierFromPublicSignals } from './server.js';
+import { getDeposit } from './contract.js';
 import request from 'supertest';
+
+// snarkjs does not publish TypeScript declarations in this version.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const snarkjs = require('snarkjs') as {
+  groth16: {
+    fullProve: (input: object, wasmPath: string, zkeyPath: string) => Promise<{
+      proof: object;
+      publicSignals: string[];
+    }>;
+  };
+};
 
 vi.mock('./contract.js', () => ({
   deposit: vi.fn().mockResolvedValue('mock-tx-hash-abc123'),
@@ -17,7 +30,18 @@ beforeEach(() => {
   process.env.GATEWAY_SECRET = 'test-secret';
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.ZK_CONTRACT_ID;
+  delete process.env.GATEWAY_ADDRESS;
+});
+
 describe('gateway server', () => {
+  it('reads the nullifier from the RLN public-signal slot', () => {
+    expect(getNullifierFromPublicSignals(['root', 'nullifier', 'share-x', 'share-y', 'epoch']))
+      .toBe('nullifier');
+  });
+
   describe('GET /health', () => {
     it('returns ok status', async () => {
       const res = await request(app).get('/health');
@@ -162,6 +186,42 @@ describe('gateway server', () => {
       // Verification should still fail gracefully
       expect(chatRes.status).toBe(403);
     });
+
+    it.skipIf(
+      process.env.RUN_OPENROUTER_E2E !== '1' || !process.env.OPENROUTER_API_KEY,
+    )('forwards a valid proof-backed request to OpenRouter', async () => {
+      const keyRes = await request(app)
+        .post('/v1/api-keys')
+        .set('Authorization', 'Bearer test-secret')
+        .send({ commitment: 'openrouter-e2e', label: 'openrouter-e2e' });
+      const key = keyRes.body.apiKey;
+      const circuitsDir = path.resolve(process.cwd(), '..', 'circuits');
+      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+        {
+          secret_k: '42',
+          signal_value: '123',
+          epoch: '100',
+          merkle_path_elements: ['0', '0', '0'],
+          merkle_path_indices: ['0', '0', '0'],
+        },
+        path.join(circuitsDir, 'rln_nullifier.wasm'),
+        path.join(circuitsDir, 'rln_nullifier_final.zkey'),
+      );
+      const proofHeader = Buffer.from(JSON.stringify({ proof, pubSignals: publicSignals })).toString('base64');
+
+      const chatRes = await request(app)
+        .post('/v1/chat/completions')
+        .set('Authorization', `Bearer ${key}`)
+        .set('X-ZK-Proof', proofHeader)
+        .send({
+          model: process.env.OPENROUTER_TEST_MODEL || 'openai/gpt-4o-mini',
+          messages: [{ role: 'user', content: 'Reply with exactly: gateway-ok' }],
+          max_tokens: 8,
+        });
+
+      expect(chatRes.status).toBe(200);
+      expect(chatRes.body.choices?.[0]?.message?.content).toBeTruthy();
+    });
   });
 
   describe('POST /v1/slash', () => {
@@ -198,6 +258,24 @@ describe('gateway server', () => {
       expect(res.status).toBe(200);
       expect(res.body.activeKeys).toBe(1);
       expect(res.body.commitment).toBe('0xstatus-test');
+    });
+
+    it('reports the on-chain deposit balance when contract access is configured', async () => {
+      process.env.ZK_CONTRACT_ID = 'Cconfigured';
+      process.env.GATEWAY_ADDRESS = 'Gconfigured';
+      vi.mocked(getDeposit).mockResolvedValue({
+        amount: '5000000',
+        depositor: 'Gdepositor',
+        slashed: false,
+        withdrawn: false,
+      });
+
+      const res = await request(app).get('/v1/status/0xonchain');
+
+      expect(res.status).toBe(200);
+      expect(res.body.balanceUsdc).toBe('5000000');
+      expect(res.body.depositStatus).toEqual({ slashed: false, withdrawn: false });
+      expect(getDeposit).toHaveBeenCalledWith('0xonchain');
     });
   });
 

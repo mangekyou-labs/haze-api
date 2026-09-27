@@ -6,6 +6,12 @@ description: Deployment process, infrastructure, and release procedures for the 
 
 # Deployment Strategy
 
+> **M6 reconciliation (2026-09-11):** This is the historical M1–M5
+> deployment record. Level 4 remains Stellar testnet + Stripe test mode and
+> adds an isolated evaluation database, monitoring configuration, and a
+> synthetic workflow. See [`docs/ai/deployment/2026-09-11-stellar-launch-level4.md`](../../ai/deployment/2026-09-11-stellar-launch-level4.md)
+> for the current runbook; stale package/test counts below are not release evidence.
+
 ## Infrastructure
 
 ### Components
@@ -16,6 +22,8 @@ description: Deployment process, infrastructure, and release procedures for the 
 | Web App | Next.js 16 | Vercel / Local |
 | Contract | Soroban (Stellar testnet) | Decentralized |
 | Circuits | Circom WASM + zkey | Static files (CDN / public/) |
+| Evaluation records | PostgreSQL `evaluation` schema | Restricted application database |
+| Error monitoring | Sentry (PII/replay disabled and scrubbed) | Vercel, gateway, fee sponsor |
 
 ### Environment Separation
 
@@ -31,8 +39,8 @@ description: Deployment process, infrastructure, and release procedures for the 
 ```bash
 cd ts
 npm install
-npm run build    # TypeScript → JavaScript
-npm test         # vitest (46 tests)
+npm run typecheck
+npm test
 ```
 
 **Web App:**
@@ -43,11 +51,20 @@ npm run build    # Next.js production build
 npm run lint     # ESLint
 ```
 
+Deploy and inspect the web app with the Vercel CLI:
+```bash
+cd web
+vercel deploy
+vercel ls
+vercel inspect <deployment-url-or-id>
+vercel logs <deployment-url-or-id>
+```
+
 **Contract:**
 ```bash
 cd zk-credits-contract
 RUSTUP_TOOLCHAIN=1.94 stellar contract build
-cargo test       # Rust unit tests (15 tests)
+cargo test       # Current contract test suite; record fresh output
 ```
 
 **Circuits:**
@@ -81,12 +98,14 @@ GATEWAY_SECRET=dev-secret
 PORT=3001
 ```
 
-### Production
+### Testnet deployment
 
 ```env
-STELLAR_NETWORK=pubnet
-STELLAR_RPC_URL=https://soroban-mainnet.stellar.org
+STELLAR_NETWORK=testnet
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 GATEWAY_SECRET=<strong-random-secret>
+EVALUATION_HMAC_SECRET=<separate-strong-random-secret>
+DATABASE_URL=<restricted-postgres-url>
 PORT=3001
 ```
 
@@ -100,18 +119,25 @@ PORT=3001
 | `GITHUB_CLIENT_SECRET` | `.env` (web) | GitHub settings |
 | `OPENROUTER_API_KEY` | `.env` (gateway) | OpenRouter dashboard |
 | `NEXTAUTH_SECRET` | `.env` (web) | On compromise |
+| `EVALUATION_HMAC_SECRET` | Gateway/web runtime secrets | On compromise, with identity migration plan |
+| `DATABASE_URL` | Gateway migration/runtime secret | Provider rotation |
+| `SENTRY_DSN` | Web/gateway/fee-sponsor runtime | Provider rotation |
+| `NEXT_PUBLIC_POSTHOG_KEY` | Web public runtime config | PostHog project rotation |
 | Stellar secret keys | `stellar keys` | Hardware wallet for mainnet |
 
 ## Deployment Steps
 
 ### Pre-deployment Checklist
 
-- [ ] All tests pass (gateway: 46, contract: 15)
+- [ ] Fresh gateway typecheck/tests and contract tests pass
 - [ ] Web app builds clean (`npm run build`)
 - [ ] Contract compiled and tested
 - [ ] Environment variables configured
 - [ ] Circuit files (WASM, zkey) in `web/public/circuits/`
 - [ ] Verification key JSON available for gateway
+- [ ] Evaluation migration applied and `EVALUATION_HMAC_SECRET` configured
+- [ ] PostHog remains opted out until a participant explicitly enables it
+- [ ] Sentry test event and synthetic cold/warm checks are green
 
 ### Deployment Execution
 
@@ -129,6 +155,7 @@ PORT=3001
 - [ ] API key generation works
 - [ ] Stripe checkout creates session
 - [ ] E2E test passes: `node scripts/e2e-test.js`
+- [ ] Ten distinct consented participants have valid proofs, unique confirmed deposits, and feedback
 
 ### Rollback Procedure
 
@@ -138,10 +165,15 @@ PORT=3001
 
 ## Database Migrations
 
-No traditional database. State lives in:
+M6 adds a narrow Postgres persistence boundary. State lives in:
 - **On-chain:** Deposits, nullifiers, root history (Soroban contract)
 - **In-memory:** API keys, nullifier cache, call counts (gateway restart clears)
 - **Browser:** secret_k, commitment (IndexedDB, per-user)
+- **Restricted evaluation schema:** consent, raw wallet proof, checkout/deposit
+  receipt, feedback, and retention metadata only; no private API/ZK joins.
+
+Apply migrations with `cd ts && npm run db:migrate`. The migration runner is
+idempotent and records filenames in `public.schema_migrations`.
 
 ## Cost Estimates (Testnet)
 

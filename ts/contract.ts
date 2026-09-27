@@ -159,16 +159,18 @@ export async function deposit(
   }
 
   // Wait for confirmation
-  let txResult = result;
+  let txResult: SorobanRpc.Api.GetTransactionResponse;
   let retries = 0;
-  while (txResult.status === 'PENDING' || txResult.status === 'NOT_FOUND') {
+  while (true) {
     if (retries > 20) throw new Error('Transaction confirmation timed out');
     await new Promise((r) => setTimeout(r, 2000));
     txResult = await server.getTransaction(result.hash);
     retries++;
+    if (txResult.status === 'NOT_FOUND') continue;
+    break;
   }
 
-  if (txResult.status !== 'SUCCESS') {
+  if (txResult.status === 'FAILED') {
     throw new Error(`Transaction failed: ${txResult.status}`);
   }
 

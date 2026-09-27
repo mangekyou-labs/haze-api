@@ -8,6 +8,8 @@ export default defineConfig({
     env: {
       TEST_MODE: 'true',
       CIRCUITS_DIR: circuitsDir,
+      EVALUATION_STORE: 'memory',
     },
+    fileParallelism: false,
   },
 });

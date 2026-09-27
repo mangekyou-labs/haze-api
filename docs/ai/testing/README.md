@@ -6,6 +6,9 @@ description: Define testing approach, test cases, and quality assurance
 
 # Testing Strategy
 
+> The dated M1–M5 report is historical. Current Level 4 results and open live
+> gates are in [`2026-09-11-stellar-launch-level4.md`](2026-09-11-stellar-launch-level4.md).
+
 ## Test Coverage Goals
 **What level of testing do we aim for?**
 
@@ -42,6 +45,6 @@ description: Define testing approach, test cases, and quality assurance
 ## Test Reporting & Coverage
 **How do we verify and communicate test results?**
 
-- Contract: `cargo test` (22 tests passed)
-- Gateway: `npm test` (61 tests passed)
+- Contract: run `cargo test` as part of the release gate; historical counts are not current evidence.
+- Gateway: run `cd ts && npm run typecheck && npm test`; the 2026-09-11 run passed 82 tests with 2 external skips.
 - Circuits: `node scripts/test.js` (3 circuits verified)

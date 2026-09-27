@@ -1,6 +1,10 @@
 {
   "dependencies": {
     "@stellar/stellar-sdk": "^16.0.1",
-    "snarkjs": "^0.7.6"
+    "snarkjs": "^0.7.6",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.12.0"
   }
 }

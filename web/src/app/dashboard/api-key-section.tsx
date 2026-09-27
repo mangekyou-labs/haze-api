@@ -38,7 +38,7 @@ async function writeToStore(key: string, value: string): Promise<void> {
   });
 }
 
-export function ApiKeySection({ userId }: { userId: string }) {
+export function ApiKeySection() {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<string | null>(null);
   const [existingCommitment, setExistingCommitment] = useState<string | null>(null);
@@ -143,7 +143,7 @@ export function ApiKeySection({ userId }: { userId: string }) {
       )}
 
       {apiKey ? (
-        <div className="space-y-3">
+        <div className="space-y-3" data-testid="api-key-display">
           <div className="p-3 bg-gray-50 border rounded font-mono text-sm break-all">
             {apiKey}
           </div>
@@ -169,6 +169,7 @@ export function ApiKeySection({ userId }: { userId: string }) {
           onClick={generateKey}
           disabled={loading}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          data-testid="generate-api-key"
         >
           {loading ? 'Generating...' : existingCommitment ? 'Generate New API Key' : 'Generate API Key'}
         </button>

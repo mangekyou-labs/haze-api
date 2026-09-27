@@ -1,110 +1,85 @@
-// @ts-nocheck
-// Stellar client — Soroban RPC for reading contract state
-// NOTE: This file is a stub for M8 E2E integration. The XDR construction
-// needs to be updated for @stellar/stellar-sdk v16 API changes.
+// Stellar client — Soroban RPC reads for dashboard contract state.
 
-import { xdr, scValToNative } from '@stellar/stellar-sdk';
+import {
+  Contract,
+  Networks,
+  TransactionBuilder,
+  nativeToScVal,
+  rpc,
+  scValToNative,
+  xdr,
+} from '@stellar/stellar-sdk';
 
 const RPC_URL = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
+const NETWORK_PASSPHRASE =
+  process.env.STELLAR_NETWORK_PASSPHRASE || Networks.TESTNET;
 const PRICE_PER_CALL = 1000n;
 
-function commitmentToBytes(hex: string): number[] {
-  const padded = hex.padStart(64, '0');
-  const bytes: number[] = [];
-  for (let i = 0; i < padded.length; i += 2) {
-    bytes.push(parseInt(padded.slice(i, i + 2), 16));
+function getSourceAddress(): string {
+  return process.env.GATEWAY_ADDRESS || process.env.STELLAR_SOURCE_ADDRESS || '';
+}
+
+function commitmentToBigInt(value: string): bigint {
+  if (/^0x/i.test(value) || /^[0-9]+$/.test(value)) return BigInt(value);
+  return BigInt(`0x${value}`);
+}
+
+type DepositStatus = {
+  amount: bigint;
+  slashed: boolean;
+  withdrawn: boolean;
+};
+
+function parseDepositResult(retval: xdr.ScVal): DepositStatus | null {
+  try {
+    const deposit = scValToNative(retval) as Record<string, unknown> | null;
+    if (!deposit || typeof deposit !== 'object') return null;
+
+    const amount = deposit.amount;
+    if (
+      amount !== undefined &&
+      typeof amount !== 'string' &&
+      typeof amount !== 'number' &&
+      typeof amount !== 'bigint'
+    ) {
+      return null;
+    }
+
+    return {
+      amount: BigInt(amount ?? 0),
+      slashed: Boolean(deposit.slashed),
+      withdrawn: Boolean(deposit.withdrawn),
+    };
+  } catch {
+    return null;
   }
-  if (bytes.length !== 32) {
-    throw new Error(`Commitment must be 32 bytes, got ${bytes.length}`);
-  }
-  return bytes;
 }
 
 export async function getDepositStatus(
   contractId: string,
   commitmentHex: string,
-): Promise<{ amount: bigint; slashed: boolean; withdrawn: boolean } | null> {
-  const commitmentBytes = commitmentToBytes(commitmentHex);
+): Promise<DepositStatus | null> {
+  const sourceAddress = getSourceAddress();
+  if (!sourceAddress) return null;
 
-  const body = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'simulateTransaction',
-    params: {
-      transaction: '',
-    },
-  };
+  const server = new rpc.Server(RPC_URL, { allowHttp: true });
+  const source = await server.getAccount(sourceAddress);
+  const contract = new Contract(contractId);
+  const commitment = nativeToScVal(commitmentToBigInt(commitmentHex), { type: 'u256' });
+  const transaction = new TransactionBuilder(source, {
+    fee: '100',
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call('get_deposit', commitment))
+    .setTimeout(30)
+    .build();
 
-  const xdrStr = buildSimulationTxXdr(contractId, commitmentBytes);
-  body.params.transaction = xdrStr;
-
-  const res = await fetch(RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json();
-
-  if (data.error || !data.result) {
+  const simulation = await server.simulateTransaction(transaction);
+  if (rpc.Api.isSimulationError(simulation) || !simulation.result?.retval) {
     return null;
   }
 
-  return parseDepositResult(data.result);
-}
-
-function buildSimulationTxXdr(contractId: string, commitmentBytes: number[]): string {
-  const commitmentVal = new xdr.ScVal.scvBytes(Buffer.from(commitmentBytes));
-  const contractIdBytes = Buffer.from(contractId, 'hex');
-
-  const hostFn = xdr.HostFunction.hostFunctionTypeInvokeContract(
-    new xdr.InvokeContractArgs({
-      contractAddress: xdr.ScAddress.scAddressTypeContract(contractIdBytes),
-      functionName: 'get_deposit',
-      args: [commitmentVal],
-    }),
-  );
-
-  const tx = new xdr.TransactionEnvelope.envelopeTypeTx(
-    new xdr.TransactionV1Envelope({
-      tx: new xdr.Transaction({
-        sourceAccount: xdr.MuxedAccount.med25519(Buffer.alloc(32)),
-        fee: 100,
-        seqNum: xdr.SequenceNumber.fromString('0'),
-        cond: xdr.Preconditions.precondNone(),
-        memo: xdr.Memo.memoNone(),
-        operations: [
-          new xdr.Operation({
-            body: xdr.OperationBody.invokeHostFunction(hostFn),
-          }),
-        ],
-        ext: new xdr.TransactionExt(0, Buffer.alloc(0)),
-      }),
-      signatures: [],
-    }),
-  );
-
-  return tx.toXDR('base64');
-}
-
-function parseDepositResult(
-  result: Record<string, unknown>,
-): { amount: bigint; slashed: boolean; withdrawn: boolean } | null {
-  try {
-    const retval = (result as Record<string, unknown>).retval as Record<string, unknown>;
-    if (!retval) return null;
-
-    const deposit = scValToNative(retval as xdr.ScVal) as Record<string, unknown>;
-    if (!deposit || (deposit as Record<string, unknown>)._type === 'void') return null;
-
-    return {
-      amount: BigInt((deposit as Record<string, unknown>).amount ?? 0),
-      slashed: Boolean((deposit as Record<string, unknown>).slashed),
-      withdrawn: Boolean((deposit as Record<string, unknown>).withdrawn),
-    };
-  } catch {
-    return null;
-  }
+  return parseDepositResult(simulation.result.retval);
 }
 
 export function calculateRemainingCalls(

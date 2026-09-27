@@ -1,4 +1,61 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { max-width: 100%; overflow-x: hidden; }
 body { font-family: system-ui, -apple-system, sans-serif; color: #111; background: #fff; }
 a { color: inherit; text-decoration: none; }
-code { font-family: 'Geist Mono', monospace; }
+code { font-family: 'Geist Mono', monospace; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+
+[data-testid="api-key-display"] { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+[data-testid="api-key-display"] .font-mono { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+
+.purchase-panel { margin-top: 0; }
+.purchase-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+.purchase-tier { min-width: 0; padding: 1rem; border: 1px solid #dbe3ec; border-radius: 12px; text-align: center; background: #fff; }
+.purchase-tier-button { display: block; width: 100%; min-height: 2.75rem; position: relative; z-index: 1; }
+
+.evaluation-card {
+  border: 1px solid #dbe3ec;
+  border-radius: 16px;
+  padding: 1.25rem;
+  background: linear-gradient(145deg, #f8fbff 0%, #ffffff 64%);
+  box-shadow: 0 12px 28px rgba(23, 54, 86, 0.06);
+}
+.evaluation-loading { min-height: 29rem; background: linear-gradient(90deg, #f2f5f8 25%, #fafcff 37%, #f2f5f8 63%); background-size: 400% 100%; animation: evaluation-shimmer 1.5s ease infinite; }
+.evaluation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.evaluation-heading h2 { font-size: 1.2rem; font-weight: 700; color: #102a43; }
+.eyebrow { margin-bottom: .35rem; color: #47718f; text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; font-weight: 700; }
+.evaluation-copy { margin-top: .75rem; color: #52606d; font-size: .875rem; line-height: 1.55; max-width: 62ch; }
+.participant-code { padding: .35rem .55rem; border: 1px solid #b9d5e8; border-radius: 999px; color: #245b7a; background: #eef8ff; font: 600 .75rem/1 'Geist Mono', monospace; }
+.evaluation-alert { margin-top: 1rem; padding: .7rem .8rem; border-radius: 10px; font-size: .85rem; line-height: 1.4; }
+.evaluation-alert-error { color: #8a2c2c; border: 1px solid #f1c3c3; background: #fff5f5; }
+.evaluation-alert-success { color: #1d5c43; border: 1px solid #bfe3d0; background: #f2fbf6; }
+.evaluation-consent-box { display: grid; gap: 1rem; margin-top: 1.2rem; padding: 1rem; border: 1px dashed #aac9dc; border-radius: 12px; background: #f6fbff; }
+.evaluation-checkbox { display: flex; align-items: flex-start; gap: .6rem; color: #334e68; font-size: .875rem; line-height: 1.45; }
+.evaluation-checkbox input, .evaluation-analytics input { width: 1.1rem; height: 1.1rem; flex: 0 0 auto; accent-color: #236a92; }
+.evaluation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-top: 1.2rem; }
+.evaluation-step { display: flex; gap: .65rem; min-width: 0; padding: .9rem; border: 1px solid #dbe3ec; border-radius: 12px; background: #fff; }
+.evaluation-step h3, .evaluation-feedback h3 { color: #173f5f; font-size: .9rem; font-weight: 700; }
+.evaluation-step p { margin-top: .35rem; color: #627d98; font-size: .78rem; line-height: 1.45; }
+.step-number { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; flex: 0 0 auto; color: #fff; background: #2e749c; font-weight: 700; font-size: .75rem; }
+.evaluation-button { min-height: 2.6rem; margin-top: .75rem; padding: .6rem .85rem; border: 1px solid #b8c9d6; border-radius: 9px; color: #173f5f; background: #fff; font-size: .82rem; font-weight: 650; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.evaluation-button:hover:not(:disabled) { border-color: #2e749c; background: #f0f8fc; }
+.evaluation-button:active:not(:disabled) { transform: translateY(1px); }
+.evaluation-button:disabled { cursor: not-allowed; opacity: .55; }
+.evaluation-button-primary { border-color: #245f83; color: #fff; background: #245f83; }
+.evaluation-button-primary:hover:not(:disabled) { color: #fff; background: #1c4d6b; }
+.evaluation-link { display: block; margin-top: .7rem; color: #17658b; font-size: .78rem; text-decoration: underline; text-underline-offset: 2px; }
+.evaluation-help { color: #8a5b13 !important; }
+.evaluation-feedback { display: grid; gap: .85rem; margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid #dbe3ec; }
+.evaluation-feedback label:not(.evaluation-checkbox) { display: grid; gap: .35rem; color: #334e68; font-size: .82rem; font-weight: 600; }
+.evaluation-feedback textarea { min-height: 4.5rem; width: 100%; resize: vertical; padding: .65rem; border: 1px solid #bcccdc; border-radius: 8px; font: inherit; font-size: .85rem; color: #102a43; background: #fff; }
+.evaluation-feedback textarea:focus, .evaluation-button:focus-visible, .evaluation-checkbox input:focus-visible, .rating-option:focus-within { outline: 3px solid rgba(46, 116, 156, .25); outline-offset: 2px; }
+.evaluation-feedback fieldset { border: 0; }
+.evaluation-feedback legend { margin-bottom: .45rem; color: #334e68; font-size: .82rem; font-weight: 600; }
+.rating-row { display: flex; flex-wrap: wrap; gap: .45rem; }
+.rating-option { display: grid; place-items: center; min-width: 2.6rem; min-height: 2.6rem; border: 1px solid #bcccdc; border-radius: 8px; color: #486581; font-weight: 700; cursor: pointer; }
+.rating-option input { position: absolute; opacity: 0; pointer-events: none; }
+.rating-option.selected { border-color: #2e749c; color: #fff; background: #2e749c; }
+.evaluation-retention, .evaluation-analytics { display: flex; gap: .55rem; align-items: flex-start; margin-top: 1rem; color: #829ab1; font-size: .72rem; line-height: 1.4; }
+@keyframes evaluation-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+@media (max-width: 760px) { .evaluation-grid { grid-template-columns: 1fr; } .evaluation-card { padding: 1rem; } }
+@media (max-width: 760px) { .purchase-grid { grid-template-columns: 1fr; } .purchase-tier-button { min-height: 2.75rem; } }
+@media (prefers-reduced-motion: reduce) { .evaluation-loading { animation: none; } .evaluation-button { transition: none; } }

@@ -1,0 +1,1 @@
+{"ready":false,"launchControl":"paused","checks":[{"name":"launchControl","ok":false,"detail":"paused"},{"name":"database","ok":true,"detail":"reachable"},{"name":"baseRoot","ok":false,"detail":"not_synchronized"},{"name":"verifierAssets","ok":true,"detail":"loaded"},{"name":"provider","ok":true,"detail":"configured"}],"generatedAt":"2026-09-21T04:43:53.299Z"}

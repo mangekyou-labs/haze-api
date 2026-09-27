@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(ls -la circuits/build/private-credit/ 2>/dev/null; echo \"---\"; ls circuits/*.r1cs circuits/*.wasm circuits/*.sym 2>/dev/null)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}
