@@ -106,4 +106,32 @@ describe('Base contract event synchronization', () => {
     expect(state.currentRoot).toBe('2');
     expect(state.knownRoots).toEqual(['2']);
   });
+
+  it('indexes the constructor root when a persisted current root has no known-root list', async () => {
+    const blockHash = '0x4444444444444444444444444444444444444444444444444444444444444444' as Hex;
+    const client = {
+      async getBlockNumber() { return 10n; },
+      async getBlock() { return { hash: blockHash }; },
+      async getLogs() { return []; },
+    };
+    const store = new MemoryBaseEventStore({
+      contractAddress: CONTRACT,
+      currentRoot: '2',
+      knownRoots: [],
+      lastScannedBlock: 10n,
+      lastScannedBlockHash: blockHash,
+    });
+    const sync = new BaseContractEventSynchronizer({
+      contractAddress: CONTRACT,
+      client,
+      store,
+      confirmations: 0n,
+      initialRoot: '0x0000000000000000000000000000000000000000000000000000000000000002',
+    });
+
+    const state = await sync.syncOnce();
+
+    expect(state.currentRoot).toBe('2');
+    expect(state.knownRoots).toEqual(['2']);
+  });
 });

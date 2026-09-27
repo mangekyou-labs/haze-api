@@ -102,10 +102,15 @@ function normalizeRoot(value: string): string | null {
 }
 
 function seedInitialRoot(state: BaseRootSnapshot, initialRoot?: string): BaseRootSnapshot {
-  if (state.currentRoot || state.knownRoots.length > 0 || !initialRoot) return state;
+  if (!initialRoot) return state;
   const root = normalizeRoot(initialRoot);
   if (!root) return state;
-  return { ...state, currentRoot: root, knownRoots: [root] };
+  const currentRoot = state.currentRoot ?? root;
+  const knownRoots = state.knownRoots.some((knownRoot) => normalizeRoot(knownRoot) === root)
+    ? state.knownRoots
+    : [...state.knownRoots, root];
+  if (currentRoot === state.currentRoot && knownRoots === state.knownRoots) return state;
+  return { ...state, currentRoot, knownRoots };
 }
 
 function stringValue(value: unknown): string {
