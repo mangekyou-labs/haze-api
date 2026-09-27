@@ -176,6 +176,45 @@ describe('Base zk-prepaid gateway', () => {
     expect(JSON.stringify(found.body)).not.toContain('0x1');
   });
 
+  it('exposes a validated, rate-limited public root check with minimal responses', async () => {
+    const gateway = await createZkPrepaidGateway({
+      ...gatewayOptions(),
+      rootCheckRequestsPerMinute: 10,
+      rootSnapshot: () => ({ currentRoot: '1', knownRoots: ['1', '2'] }),
+    });
+    const found = await request(gateway.app).post('/v1/root-known').send({ root: '0x1' });
+    const missing = await request(gateway.app).post('/v1/root-known').send({ root: '3' });
+    const invalid = await request(gateway.app).post('/v1/root-known').send({ root: `0x${'f'.repeat(64)}` });
+
+    expect(found.status).toBe(200);
+    expect(found.body).toEqual({ known: true });
+    expect(missing.status).toBe(200);
+    expect(missing.body).toEqual({ known: false });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body).toEqual({ error: 'invalid_root' });
+    expect(JSON.stringify(found.body)).not.toContain('0x1');
+  });
+
+  it('limits public root checks and fails closed when the root index is unavailable', async () => {
+    const limitedGateway = await createZkPrepaidGateway({
+      ...gatewayOptions(),
+      rootCheckRequestsPerMinute: 1,
+      rootSnapshot: () => ({ currentRoot: '1', knownRoots: ['1'] }),
+    });
+    expect((await request(limitedGateway.app).post('/v1/root-known').send({ root: '1' })).status).toBe(200);
+    const limited = await request(limitedGateway.app).post('/v1/root-known').send({ root: '1' });
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: 'rate_limited' });
+
+    const unavailableGateway = await createZkPrepaidGateway({
+      ...gatewayOptions(),
+      rootSnapshot: async () => { throw new Error('index unavailable'); },
+    });
+    const unavailable = await request(unavailableGateway.app).post('/v1/root-known').send({ root: '1' });
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toEqual({ error: 'root_index_unavailable' });
+  });
+
   it('constructs the Base Sepolia requirements and a fenced isolated claim store', async () => {
     const gateway = await createZkPrepaidGateway(gatewayOptions());
     expect(gateway.requirements).toMatchObject({ scheme: 'zk-prepaid', network: 'eip155:84532', amount: '1' });

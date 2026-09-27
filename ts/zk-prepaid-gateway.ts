@@ -93,6 +93,8 @@ export interface ZkPrepaidGatewayOptions {
   providerTimeoutMs?: number;
   /** Reads the latest finalized root set maintained by the Base event indexer. */
   rootSnapshot?: () => GatewayRootSnapshot | Promise<GatewayRootSnapshot>;
+  /** Per-client POST /v1/root-known quota. Production defaults to 60 requests per minute. */
+  rootCheckRequestsPerMinute?: number;
   /** Control-plane invites; absent means the pilot endpoints fail closed. */
   pilotInvites?: PilotInviteService;
   /** Provisioning-plane detached funding; absent means the pilot endpoints fail closed. */
@@ -379,6 +381,32 @@ function operationError(error: unknown): { status: number; code: string } {
 export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = {}) {
   const config = gatewayConfig(options);
   const now = options.now ?? Date.now;
+  const requestedRootCheckLimit = options.rootCheckRequestsPerMinute;
+  const rootCheckLimit = Number.isFinite(requestedRootCheckLimit) && (requestedRootCheckLimit ?? 0) > 0
+    ? Math.max(1, Math.floor(requestedRootCheckLimit!))
+    : 60;
+  const rootCheckBuckets = new Map<string, { windowStart: number; count: number }>();
+  const rootCheckBucketLimit = 4096;
+  const allowPublicRootCheck = (client: string): boolean => {
+    const windowStart = Math.floor(now() / 60_000) * 60_000;
+    const bucket = rootCheckBuckets.get(client);
+    if (bucket?.windowStart === windowStart) {
+      if (bucket.count >= rootCheckLimit) return false;
+      bucket.count += 1;
+      return true;
+    }
+    if (rootCheckBuckets.size >= rootCheckBucketLimit) {
+      for (const [key, value] of rootCheckBuckets) {
+        if (value.windowStart !== windowStart) rootCheckBuckets.delete(key);
+      }
+      if (rootCheckBuckets.size >= rootCheckBucketLimit) {
+        const oldest = rootCheckBuckets.keys().next().value;
+        if (oldest !== undefined) rootCheckBuckets.delete(oldest);
+      }
+    }
+    rootCheckBuckets.set(client, { windowStart, count: 1 });
+    return true;
+  };
   let lastChallengeIssuedAt = Math.floor(now() / 1000) - 1;
   const freshChallenge = (): PaymentRequirements => {
     const current = Math.floor(now() / 1000);
@@ -695,6 +723,28 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   /** Checks a public Merkle root against the gateway's current known-root set without returning roots. */
   app.post('/v1/admin/root-known', async (req, res) => {
     if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+    const body = isRecord(req.body) ? req.body : {};
+    const requestedRoot = normalizeField(typeof body.root === 'string' ? body.root : undefined);
+    if (!requestedRoot) { jsonError(res, 400, 'invalid_root'); return; }
+    try {
+      const roots = await readRoots();
+      const knownRoots = new Set(
+        [...(roots.knownRoots ?? []), roots.currentRoot]
+          .map((root) => normalizeField(root))
+          .filter((root): root is string => root !== null),
+      );
+      res.json({ known: knownRoots.has(requestedRoot) });
+    } catch {
+      jsonError(res, 503, 'root_index_unavailable');
+    }
+  });
+
+  /** Public root membership check used by local setup; it reveals no root values. */
+  app.post('/v1/root-known', async (req, res) => {
+    if (!allowPublicRootCheck(req.ip || req.socket.remoteAddress || 'unknown')) {
+      jsonError(res, 429, 'rate_limited');
+      return;
+    }
     const body = isRecord(req.body) ? req.body : {};
     const requestedRoot = normalizeField(typeof body.root === 'string' ? body.root : undefined);
     if (!requestedRoot) { jsonError(res, 400, 'invalid_root'); return; }
