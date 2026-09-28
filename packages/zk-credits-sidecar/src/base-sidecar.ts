@@ -41,6 +41,15 @@ const TREE_DEPTH = 20;
 const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_PAYMENTS = 64;
+const PAYMENT_PROOF_FIELDS = ['pi_a', 'pi_b', 'pi_c'] as const;
+
+function proofForPayment(proof: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    PAYMENT_PROOF_FIELDS
+      .filter((field) => Object.prototype.hasOwnProperty.call(proof, field))
+      .map((field) => [field, proof[field]]),
+  );
+}
 
 export interface BaseCreditWitness {
   root: string;
@@ -229,7 +238,7 @@ export function createBasePaymentFactory(options: BasePrepaidClientOptions): (co
       await slotLedger.commit(selectedSlot);
       const payment = buildPaymentPayload({
         requirements,
-        proof: proof.proof,
+        proof: proofForPayment(proof.proof),
         publicSignals: [...proof.publicSignals],
         nonce,
         responseKey: responseKeys.publicKey,

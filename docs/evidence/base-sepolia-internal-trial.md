@@ -7,6 +7,49 @@ This is an internal technical trial using one locally held credential. It is
 separate from the invite-only external operator pilot. It does not count as an
 operator activation. Keep the issue open and the preview unpromoted.
 
+## Gateway rejection classification and version provenance (2026-09-28 11:27Z)
+
+- This review used the local trial record, checked-in source, package manifests,
+  and read-only GitHub metadata. No gateway, Base, provider, or payment request
+  was made, and no ledger was changed.
+- The 08:20–08:21Z run is bounded to gateway payment verification: the fresh
+  snapshots show 12 challenges, 11 aggregate invalid-proof rejections, and no
+  accepted proof, reservation, claim, or dispatch. The sidecar recorded six
+  locally self-verified proofs and 11 payment rejections. The legacy
+  `proof_invalid` counter covers all facilitator verification rejections; it
+  does not identify a cryptographic-proof category. The exact per-request live
+  category remains unknown.
+- The listener record identifies PID `54844` and
+  `packages/zk-credits-sidecar/dist/zk-credits.js serve`. The worktree package
+  manifest for that rebuilt CLI is `zk-credits@0.2.5`, which was unpublished at
+  the time. No executable hash was retained. Same-day first-party records name
+  Codex CLI `0.157.1`, but the 08:20 record did not independently capture its
+  version banner, so the exact invocation binary version is unverified.
+- The passing compatibility gate and local manifest pin the Base Sepolia V2
+  proving bundle release `v2.0.0` and verifying-key metadata. The protocol
+  package source at fixed point `cbcdc49` is
+  `@zk-credits/x402-zk-prepaid@0.1.0`, with requirements version
+  `zk-prepaid-v1`; its frozen proof schema permits only `pi_a`, `pi_b`, and
+  `pi_c`. The local evidence does not identify the gateway container digest or
+  Fly release ID. Read-only Fly release inspection was unavailable because
+  this environment has no Fly authentication, so the exact deployed gateway
+  build remains unknown.
+- A synthetic offline replay reproduced `invalid_payload_fields` when a real
+  SnarkJS proof included extra `protocol` and `curve` properties. This remains
+  a candidate for the live rejection, not a historical classification. The
+  sidecar now emits only the three schema fields; the corrected proof passes
+  offline verification and mock settlement. Rejected replay cases create no
+  reservation and do not dispatch to the provider.
+- Added fixed aggregate counters for `header`, `authorization`,
+  `request_binding`, `wire_shape`, `public_signals`, `cryptographic_proof`,
+  `verifier_unavailable`, and `other`. The authenticated metrics endpoint and
+  machine-readable trial gate expose the fixed names. These source changes do
+  not alter payment wire fields or rejection responses and are not present in
+  the historical snapshot; the old 11-count cannot be split across them.
+- The 09:22Z replay and this classification are separate from the later
+  dispatch failure and the unattempted adapter exchange. Both exchanges remain
+  incomplete, and B22 remains open.
+
 ## Fresh launcher and compatibility checkpoint (2026-09-27)
 
 - The local launcher preflight passes. `scripts/launch-pilot.sh --check`

@@ -9,7 +9,28 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-export const METRIC_NAMES = [
+export const PAYMENT_VALIDATION_METRICS = {
+  /** Malformed PAYMENT-SIGNATURE header or envelope. */
+  header: 'payment_validation_header',
+  /** Accepted requirements, challenge time, root, or deployment mismatch. */
+  authorization: 'payment_validation_authorization',
+  /** Request signal could not be derived or did not match the request. */
+  request_binding: 'payment_validation_request_binding',
+  /** Payment envelope contains unsupported or malformed wire fields. */
+  wire_shape: 'payment_validation_wire_shape',
+  /** Public signal vector has an invalid shape or field value. */
+  public_signals: 'payment_validation_public_signals',
+  /** Groth16 verification rejected a structurally valid proof. */
+  cryptographic_proof: 'payment_validation_cryptographic_proof',
+  /** The proof verifier is not configured or could not be reached. */
+  verifier_unavailable: 'payment_validation_verifier_unavailable',
+  /** Payment validation failed for an unclassified reason. */
+  other: 'payment_validation_other',
+} as const;
+
+export type PaymentValidationBoundary = keyof typeof PAYMENT_VALIDATION_METRICS;
+
+const BASE_METRIC_NAMES = [
   /** Missing authorization produced a fresh challenge. */
   'challenge_issued',
   /** Structurally valid authorization from the scheme's verifier. */
@@ -42,6 +63,11 @@ export const METRIC_NAMES = [
   'paused_rejected',
   /** Request rejected before any payment work. */
   'request_rejected',
+] as const;
+
+export const METRIC_NAMES = [
+  ...BASE_METRIC_NAMES,
+  ...Object.values(PAYMENT_VALIDATION_METRICS),
 ] as const;
 
 export type MetricName = (typeof METRIC_NAMES)[number];

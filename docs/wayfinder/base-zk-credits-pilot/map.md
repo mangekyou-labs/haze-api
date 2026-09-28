@@ -106,6 +106,7 @@ The links below are the resolved paid-pilot decision files and tickets. They
 are preserved as historical context; this amendment supersedes only their
 paid cohort and market-validation thresholds.
 
+- [Classify the first Codex gateway verification rejection](https://github.com/mangekyou-labs/haze-api/issues/28): the 08:20Z run has 11 aggregate verifier rejections, its exact category remains unknown, and offline `invalid_payload_fields` is a reproduced candidate; see the [trial record](../../evidence/base-sepolia-internal-trial.md#gateway-rejection-classification-and-version-provenance-2026-09-28-1127z).
 - [Name the pilot destination and validation boundary](decisions/001-pilot-destination.md): the historical paid Base Sepolia design-partner destination and its payer/credential unlinkability boundary.
 - [Choose the first production proving-system direction](decisions/002-proving-system-direction.md): retain Circom 2 plus BN254 Groth16 for v1 and defer ceremony until artifacts are frozen.
 - [Define the pilot credit unit and economic safety envelope](tickets/01-credit-unit-and-economics.md): the bounded service-class and success-only claim semantics retained for the unpaid pilot's test credits.

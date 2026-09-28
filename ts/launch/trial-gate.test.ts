@@ -93,6 +93,16 @@ describe('internal trial gate', () => {
       },
       counters: { metrics: { challenge_issued: 0 }, claims: { committed: 0 } },
     });
+    expect(gate.counters.metrics).toMatchObject({
+      payment_validation_header: 0,
+      payment_validation_authorization: 0,
+      payment_validation_request_binding: 0,
+      payment_validation_wire_shape: 0,
+      payment_validation_public_signals: 0,
+      payment_validation_cryptographic_proof: 0,
+      payment_validation_verifier_unavailable: 0,
+      payment_validation_other: 0,
+    });
     expect(requests).toHaveLength(2);
     expect(requests.find((request) => request.url.endsWith('/v1/admin/status'))?.headers.authorization).toBe(`Bearer ${TOKEN}`);
     const serialized = JSON.stringify(gate);

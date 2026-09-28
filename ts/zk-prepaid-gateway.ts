@@ -44,7 +44,7 @@ import {
   MAX_PAUSE_REASON_LENGTH,
   type LaunchControl,
 } from './launch-control.js';
-import type { LaunchMetrics } from './metrics.js';
+import { PAYMENT_VALIDATION_METRICS, type LaunchMetrics, type PaymentValidationBoundary } from './metrics.js';
 import { checkReadiness } from './readiness.js';
 import type { PilotInviteService } from './pilot-invites.js';
 import type { PilotFundingService } from './pilot-funding.js';
@@ -203,6 +203,46 @@ function parsePaymentHeader(req: Request): ParsedPayment {
   } catch {
     return { kind: 'malformed' };
   }
+}
+
+function paymentValidationBoundary(reason: string): PaymentValidationBoundary {
+  switch (reason) {
+    case 'requirements_mismatch':
+    case 'contract_root_not_configured':
+    case 'unknown_contract_root':
+    case 'deployment_domain_mismatch':
+    case 'stale_or_future_proof_timestamp':
+    case 'issued_at_mismatch':
+    case 'invalid_or_stale_authorization':
+      return 'authorization';
+    case 'invalid_request_binding':
+    case 'request_signal_mismatch':
+      return 'request_binding';
+    case 'invalid_payload':
+    case 'invalid_payload_fields':
+    case 'invalid_payment_payload':
+    case 'invalid_nonce':
+    case 'invalid_response_key':
+    case 'identifying_field':
+      return 'wire_shape';
+    case 'invalid_public_signals':
+      return 'public_signals';
+    case 'proof_invalid':
+      return 'cryptographic_proof';
+    case 'verifier_not_configured':
+    case 'verifier_unavailable':
+    case 'verification_failed':
+      return 'verifier_unavailable';
+    default:
+      return 'other';
+  }
+}
+
+function recordPaymentValidationFailure(
+  metrics: LaunchMetrics | undefined,
+  boundary: PaymentValidationBoundary,
+): void {
+  metrics?.increment(PAYMENT_VALIDATION_METRICS[boundary]);
 }
 
 function signalHash(payment: PaymentPayload): string {
@@ -862,12 +902,14 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
       return;
     }
     if (parsed.kind === 'malformed') {
+      recordPaymentValidationFailure(metrics, 'header');
       jsonError(res, 400, 'malformed_payment_envelope');
       return;
     }
     const payment = parsed.payment;
     const candidateRequirements = requirementsForAccepted(config, payment.accepted);
     if (!candidateRequirements || !issuedAtFresh(candidateRequirements, now)) {
+      recordPaymentValidationFailure(metrics, 'authorization');
       sendPaymentRequired(res, url, freshChallenge(), metrics, 'invalid_or_stale_authorization');
       return;
     }
@@ -883,6 +925,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
         responseKey: payment.payload.responseKey,
       })).field;
     } catch {
+      recordPaymentValidationFailure(metrics, 'request_binding');
       sendPaymentRequired(res, url, freshChallenge(), metrics, 'invalid_request_binding');
       return;
     }
@@ -895,6 +938,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     }
     if (!structural.isValid) {
       metrics?.increment('proof_invalid');
+      recordPaymentValidationFailure(metrics, paymentValidationBoundary(structural.invalidReason ?? ''));
       sendPaymentRequired(res, url, freshChallenge(), metrics, structural.invalidReason);
       return;
     }

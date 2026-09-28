@@ -1,4 +1,7 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import {
@@ -19,6 +22,19 @@ import { deriveRequestSignal } from '@zk-credits/shared';
 import { LocalClaimStore, claimFence } from './claim-store.js';
 import { MockProviderAdapter, type ProviderAdapter } from './providerAdapter.js';
 import { createZkPrepaidGateway } from './zk-prepaid-gateway.js';
+import { LaunchMetrics } from './metrics.js';
+import { loadTrialGateCompatibilityPin } from './launch/trial-gate.js';
+import {
+  computeCreditLeaf,
+  createCredential,
+  deriveSparseCreditWitness,
+  generateSecret,
+} from '@zk-credits/shared/base';
+import { createBasePaymentFactory } from '../packages/zk-credits-sidecar/src/base-sidecar.js';
+import { BaseSlotLedger } from '../packages/zk-credits-sidecar/src/slot-ledger.js';
+import { parseCircuitManifest } from '../packages/zk-credits-sidecar/src/artifact-bundle.js';
+import { createPinnedBaseProofGenerator } from '../packages/zk-credits-sidecar/src/proof-coordinator.js';
+import type { ProofWorkerResult } from '../packages/zk-credits-sidecar/src/proof-child.js';
 
 const clockValue = 1_700_000_000_000;
 const clock = () => clockValue;
@@ -124,6 +140,18 @@ async function paidRequest(
     .send(requestBody);
 }
 
+async function paidRequestWithRawBody(
+  gateway: { app: Parameters<typeof request>[0] },
+  payment: PaymentPayload,
+  rawBody: string,
+) {
+  return request(gateway.app)
+    .post('/v1/chat/completions')
+    .set('Content-Type', 'application/json')
+    .set(PAYMENT_SIGNATURE_HEADER, encodeHeader(payment))
+    .send(rawBody);
+}
+
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -151,6 +179,174 @@ class AmbiguousCommitStore extends LocalClaimStore {
 }
 
 describe('Base zk-prepaid gateway', () => {
+  it('exposes fixed payment-validation counters through authenticated admin status', async () => {
+    const metrics = new LaunchMetrics();
+    metrics.increment('payment_validation_wire_shape');
+    const gateway = await createZkPrepaidGateway({
+      ...gatewayOptions(),
+      metrics,
+      internalServiceToken: 'admin-status-token',
+    });
+
+    const unauthorized = await request(gateway.app).get('/v1/admin/status');
+    const authenticated = await request(gateway.app)
+      .get('/v1/admin/status')
+      .set('authorization', 'Bearer admin-status-token');
+
+    expect(unauthorized.status).toBe(401);
+    expect(authenticated.status).toBe(200);
+    expect(authenticated.body.metrics).toMatchObject({
+      payment_validation_header: 0,
+      payment_validation_authorization: 0,
+      payment_validation_request_binding: 0,
+      payment_validation_wire_shape: 1,
+      payment_validation_public_signals: 0,
+      payment_validation_cryptographic_proof: 0,
+      payment_validation_verifier_unavailable: 0,
+      payment_validation_other: 0,
+    });
+  });
+
+  it('classifies gateway rejection boundaries for a pinned real proof without claiming rejected payments', async () => {
+    const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+    const manifestPath = join(repositoryRoot, 'packages/zk-credits-sidecar/circuits/manifest.json');
+    const artifactDirectory = join(repositoryRoot, 'packages/zk-credits-sidecar/circuits/artifacts');
+    const manifest = parseCircuitManifest(JSON.parse(await readFile(manifestPath, 'utf8')) as unknown);
+    const verificationKeyPath = join(artifactDirectory, manifest.circuit.verificationKey);
+    const keyDigest = createHash('sha256').update(await readFile(verificationKeyPath)).digest('hex');
+    const keyPin = manifest.artifacts.find((artifact) => artifact.file === manifest.circuit.verificationKey);
+    const readinessPin = await loadTrialGateCompatibilityPin(manifestPath);
+
+    expect(keyDigest).toBe(keyPin?.sha256);
+    expect(keyDigest).toBe(readinessPin?.verificationKeySha256);
+
+    const previousVerifierPath = process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
+    process.env.ZK_PREPAID_VERIFYING_KEY_PATH = verificationKeyPath;
+    try {
+      const issuedAt = Math.floor(clockValue / 1000);
+      const credential = await createCredential(generateSecret(), 0, issuedAt + 3_600, '84532');
+      const leaf = await computeCreditLeaf(credential.commitment, credential.tierId, credential.expiry);
+      const witness = await deriveSparseCreditWitness(new Map([[5, leaf]]), 5);
+      const claimStore = new LocalClaimStore();
+      const metrics = new LaunchMetrics();
+      const provider = new CountingProvider(() => jsonResponse({ id: 'offline-verifier-replay' }));
+      const deployment = manifest.deployment!;
+      const gateway = await createZkPrepaidGateway({
+        now: clock,
+        provider,
+        claimStore,
+        metrics,
+        config: {
+          publicBaseUrl: 'http://test.local',
+          contractAddress: deployment.bondAddress,
+          treasuryAddress: '0x00000000000000000000000000000000000000b2',
+          deploymentDomain: deployment.deploymentDomain,
+          circuitId: manifest.circuit.id,
+          verifyingKeyId: deployment.verifyingKeyId,
+          currentRoot: witness.root,
+          knownRoots: [witness.root],
+        },
+        rootSnapshot: () => ({ currentRoot: witness.root, knownRoots: [witness.root] }),
+      });
+
+      const requestBody = '{"model":"demo","messages":[{"role":"user","content":"hello"}]}';
+      const challengeResponse = await request(gateway.app)
+        .post('/v1/chat/completions')
+        .set('Content-Type', 'application/json')
+        .send(requestBody);
+      expect(challengeResponse.status).toBe(402);
+      const challenge = decodeHeader<{ accepts: PaymentRequirements[] }>(
+        challengeResponse.headers[PAYMENT_REQUIRED_HEADER.toLowerCase()] as string,
+      );
+      const requirements = challenge.accepts[0]!;
+
+      const prove = await createPinnedBaseProofGenerator({
+        artifactDirectory,
+        manifest,
+        now: clock,
+        workerFactory: (workerRequest) => ({
+          result: import('snarkjs').then(async ({ groth16 }) => {
+            const result = await groth16.fullProve(
+              workerRequest.input,
+              workerRequest.wasmPath,
+              workerRequest.zkeyPath,
+            );
+            return result as unknown as ProofWorkerResult;
+          }),
+          terminate: async () => undefined,
+        }),
+      });
+      const preparePayment = createBasePaymentFactory({
+        credential,
+        slotLedger: await BaseSlotLedger.open({}),
+        witnessProvider: {
+          async witnessForCredential() {
+            return {
+              root: witness.root,
+              pathElements: witness.pathElements,
+              pathIndices: witness.pathIndices,
+              expiry: credential.expiry,
+            };
+          },
+        },
+        prove,
+      });
+      const prepared = await preparePayment({
+        url: 'http://test.local/v1/chat/completions',
+        method: 'POST',
+        body: new TextEncoder().encode(requestBody),
+        requirements,
+      });
+      const nullifier = prepared.payment.payload.publicSignals[4]!;
+
+      const historicalWireShape = structuredClone(prepared.payment);
+      (historicalWireShape.payload.proof as Record<string, unknown>).protocol = 'groth16';
+      (historicalWireShape.payload.proof as Record<string, unknown>).curve = 'bn128';
+      const wireShapeRejected = await paidRequestWithRawBody(gateway, historicalWireShape, requestBody);
+      expect(wireShapeRejected.status).toBe(402);
+      expect(paymentRequiredError(wireShapeRejected)).toBe('invalid_payload_fields');
+      expect(metrics.snapshot().payment_validation_wire_shape).toBe(1);
+      expect(provider.calls).toBe(0);
+      expect(Boolean(await claimStore.get(nullifier, clockValue))).toBe(false);
+
+      const changedBody = '{ "model" : "demo", "messages" : [{"role":"user","content":"hello"}] }';
+      const bindingRejected = await paidRequestWithRawBody(gateway, prepared.payment, changedBody);
+      expect(bindingRejected.status).toBe(402);
+      expect(paymentRequiredError(bindingRejected)).toBe('request_signal_mismatch');
+      expect(metrics.snapshot().payment_validation_request_binding).toBe(1);
+      expect(provider.calls).toBe(0);
+      expect(Boolean(await claimStore.get(nullifier, clockValue))).toBe(false);
+
+      const malformed = structuredClone(prepared.payment);
+      malformed.payload.publicSignals.pop();
+      const structuralRejected = await paidRequestWithRawBody(gateway, malformed, requestBody);
+      expect(structuralRejected.status).toBe(402);
+      expect(paymentRequiredError(structuralRejected)).toBe('invalid_public_signals');
+      expect(metrics.snapshot().payment_validation_public_signals).toBe(1);
+      expect(provider.calls).toBe(0);
+      expect(Boolean(await claimStore.get(nullifier, clockValue))).toBe(false);
+
+      const invalidProof = structuredClone(prepared.payment);
+      const proofA = invalidProof.payload.proof.pi_a as string[];
+      proofA[0] = ((BigInt(proofA[0]!) + 1n) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n).toString();
+      const groth16Rejected = await paidRequestWithRawBody(gateway, invalidProof, requestBody);
+      expect(groth16Rejected.status).toBe(402);
+      expect(paymentRequiredError(groth16Rejected)).toBe('proof_invalid');
+      expect(metrics.snapshot().payment_validation_cryptographic_proof).toBe(1);
+      expect(provider.calls).toBe(0);
+      expect(Boolean(await claimStore.get(nullifier, clockValue))).toBe(false);
+
+      const accepted = await paidRequestWithRawBody(gateway, prepared.payment, requestBody);
+      expect(accepted.status).toBe(200);
+      expect(Boolean(accepted.headers[PAYMENT_RESPONSE_HEADER.toLowerCase()])).toBe(true);
+      expect(provider.calls).toBe(1);
+      expect((await claimStore.get(nullifier, clockValue))?.state).toBe('committed');
+    } finally {
+      if (previousVerifierPath === undefined) delete process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
+      else process.env.ZK_PREPAID_VERIFYING_KEY_PATH = previousVerifierPath;
+    }
+  }, 120_000);
+
   it('checks whether a credential root is gateway-known without returning the root value', async () => {
     const gateway = await createZkPrepaidGateway({
       ...gatewayOptions(),
@@ -224,7 +420,8 @@ describe('Base zk-prepaid gateway', () => {
   });
 
   it('issues fresh timestamped challenges, maps malformed envelopes to 400, and keeps /supported public', async () => {
-    const gateway = await createZkPrepaidGateway(gatewayOptions());
+    const metrics = new LaunchMetrics();
+    const gateway = await createZkPrepaidGateway({ ...gatewayOptions(), metrics });
     const first = await request(gateway.app).post('/v1/chat/completions').send(body);
     const second = await request(gateway.app).post('/v1/chat/completions').send(body);
     expect(first.status).toBe(402);
@@ -232,12 +429,14 @@ describe('Base zk-prepaid gateway', () => {
     const firstRequired = decodeHeader<{ accepts: PaymentRequirements[] }>(first.headers[PAYMENT_REQUIRED_HEADER.toLowerCase()]);
     const secondRequired = decodeHeader<{ accepts: PaymentRequirements[] }>(second.headers[PAYMENT_REQUIRED_HEADER.toLowerCase()]);
     expect(secondRequired.accepts[0]!.extra.issuedAt).toBeGreaterThan(firstRequired.accepts[0]!.extra.issuedAt);
+    expect(metrics.snapshot().payment_validation_header).toBe(0);
 
     const malformed = await request(gateway.app)
       .post('/v1/chat/completions')
       .set(PAYMENT_SIGNATURE_HEADER, encodeHeader({ nope: true }))
       .send(body);
     expect(malformed.status).toBe(400);
+    expect(metrics.snapshot().payment_validation_header).toBe(1);
     expect((await request(gateway.app).get('/x402/facilitator/supported')).status).toBe(200);
   });
 
@@ -260,7 +459,8 @@ describe('Base zk-prepaid gateway', () => {
   });
 
   it('maps invalid/stale authorization to a fresh 402 and creates no claim', async () => {
-    const gateway = await createZkPrepaidGateway(gatewayOptions());
+    const metrics = new LaunchMetrics();
+    const gateway = await createZkPrepaidGateway({ ...gatewayOptions(), metrics });
     const invalidGateway = await createZkPrepaidGateway({ ...gatewayOptions(), verifyProof: async () => ({ isValid: false, invalidReason: 'proof_invalid' }) });
     const invalidPayment = await paymentFor(invalidGateway, body, { nullifier: '1002' });
     const invalid = await paidRequest(invalidGateway, invalidPayment);
@@ -287,7 +487,46 @@ describe('Base zk-prepaid gateway', () => {
     const staleResponse = await paidRequest(gateway, stale);
     expect(staleResponse.status).toBe(402);
     expect(staleResponse.headers[PAYMENT_REQUIRED_HEADER.toLowerCase()]).toBeDefined();
+    expect(metrics.snapshot().payment_validation_authorization).toBe(1);
     await expect(gateway.claimStore.lookup('1003')).resolves.toBeUndefined();
+  });
+
+  it('counts verifier unavailability without reserving a claim or dispatching the provider', async () => {
+    const metrics = new LaunchMetrics();
+    const provider = new CountingProvider(() => jsonResponse({ ok: true }));
+    const gateway = await createZkPrepaidGateway({
+      ...gatewayOptions(provider),
+      metrics,
+      verifyProof: async () => ({ isValid: false, invalidReason: 'verifier_unavailable' }),
+    });
+    const payment = await paymentFor(gateway, body, { nullifier: '10031' });
+
+    const response = await paidRequest(gateway, payment);
+
+    expect(response.status).toBe(402);
+    expect(paymentRequiredError(response)).toBe('verifier_unavailable');
+    expect(metrics.snapshot().payment_validation_verifier_unavailable).toBe(1);
+    expect(provider.calls).toBe(0);
+    await expect(gateway.claimStore.lookup('10031')).resolves.toBeUndefined();
+  });
+
+  it('counts unclassified verifier failures as other without changing the rejection response', async () => {
+    const metrics = new LaunchMetrics();
+    const provider = new CountingProvider(() => jsonResponse({ ok: true }));
+    const gateway = await createZkPrepaidGateway({
+      ...gatewayOptions(provider),
+      metrics,
+      verifyProof: async () => ({ isValid: false, invalidReason: 'unrecognized_verifier_reason' }),
+    });
+    const payment = await paymentFor(gateway, body, { nullifier: '10032' });
+
+    const response = await paidRequest(gateway, payment);
+
+    expect(response.status).toBe(402);
+    expect(paymentRequiredError(response)).toBe('unrecognized_verifier_reason');
+    expect(metrics.snapshot().payment_validation_other).toBe(1);
+    expect(provider.calls).toBe(0);
+    await expect(gateway.claimStore.lookup('10032')).resolves.toBeUndefined();
   });
 
   it('bounds the challenge window to [now-300s, now+5s] and binds the proof timestamp to it', async () => {

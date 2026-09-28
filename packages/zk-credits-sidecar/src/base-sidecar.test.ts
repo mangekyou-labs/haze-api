@@ -69,7 +69,16 @@ describe('Base x402 sidecar adapter', () => {
       prove: async (input, context) => {
         proofInput = input as unknown as Record<string, unknown>;
         expectedSignals = context.expectedPublicSignals;
-        return { proof: { pi_a: ['1', '2'] }, publicSignals: [...context.expectedPublicSignals] };
+        return {
+          proof: {
+            pi_a: ['1', '2'],
+            pi_b: [['3', '4'], ['5', '6']],
+            pi_c: ['7', '8'],
+            protocol: 'groth16',
+            curve: 'bn128',
+          },
+          publicSignals: [...context.expectedPublicSignals],
+        };
       },
       fetch: async (_input, init) => {
         call += 1;
@@ -79,6 +88,11 @@ describe('Base x402 sidecar adapter', () => {
         const payment = decodeHeader<PaymentPayload>(header!);
         expect(payment.payload).not.toHaveProperty('commitment');
         expect(payment.payload).not.toHaveProperty('secret');
+        expect(payment.payload.proof).toEqual({
+          pi_a: ['1', '2'],
+          pi_b: [['3', '4'], ['5', '6']],
+          pi_c: ['7', '8'],
+        });
         expect(payment.payload.publicSignals).toHaveLength(6);
         expect(payment.payload.publicSignals).toEqual(expectedSignals);
         return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
