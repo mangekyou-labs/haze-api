@@ -201,6 +201,7 @@ function bundleCommand() {
     },
     activatedAt: new Date().toISOString(),
     humanActionDurationMs: parseHumanActionMs(),
+    machineWaitDurationMs: parseDurationMs('MACHINE_WAIT_MS'),
     counters: {
       beforeWarmup: snapshotOf(parse('METRICS_FRESH')),
       afterWarmup: snapshotOf(parse('METRICS_AFTER_WARMUP')),
@@ -219,7 +220,7 @@ function bundleCommand() {
   // malformed activation is caught here rather than after it is sent.
   const allowed = new Set([
     'kind', 'schemaVersion', 'slot', 'participantType', 'integrationMode', 'versions',
-    'activatedAt', 'humanActionDurationMs', 'counters', 'assistanceCount', 'attestations',
+    'activatedAt', 'humanActionDurationMs', 'machineWaitDurationMs', 'counters', 'assistanceCount', 'attestations',
   ]);
   const stray = Object.keys(evidence).filter((key) => !allowed.has(key));
   if (stray.length > 0) throw new Error(`unexpected evidence fields: ${stray.join(', ')}`);
@@ -249,10 +250,14 @@ function bundleCommand() {
 }
 
 function parseHumanActionMs() {
-  const raw = requireEnv('HUMAN_ACTION_MS');
-  if (!/^[0-9]+$/u.test(raw)) throw new Error('HUMAN_ACTION_MS must be a whole number of milliseconds');
+  return parseDurationMs('HUMAN_ACTION_MS');
+}
+
+function parseDurationMs(name) {
+  const raw = requireEnv(name);
+  if (!/^[0-9]+$/u.test(raw)) throw new Error(`${name} must be a whole number of milliseconds`);
   const value = Number(raw);
-  if (!Number.isSafeInteger(value)) throw new Error('HUMAN_ACTION_MS must be a safe integer');
+  if (!Number.isSafeInteger(value)) throw new Error(`${name} must be a safe integer`);
   return value;
 }
 

@@ -277,23 +277,25 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
         INSERT INTO control_plane.pilot_invites (invite_id, code_hash, github_account_id, expires_at)
         VALUES
           ($1, $2, '4242', now() + interval '7 days'),
-          ($3, $4, '9001', now() + interval '7 days')`,
-      [`inv_${'a'.repeat(16)}`, 'a'.repeat(64), `inv_${'b'.repeat(16)}`, 'b'.repeat(64)]);
+          ($3, $4, '9001', now() + interval '7 days'),
+          ($5, $6, '9002', now() + interval '7 days')`,
+      [`inv_${'a'.repeat(16)}`, 'a'.repeat(64), `inv_${'b'.repeat(16)}`, 'b'.repeat(64), `inv_${'d'.repeat(16)}`, 'd'.repeat(64)]);
       await pool.query(`
         INSERT INTO control_plane.activation_windows
           (slot, invite_id, participant_type, integration_mode, started_at, baseline_committed_claims, evidence, evidence_digest, committed_claims_after)
         VALUES
           ('A', $1, 'coding_agent', 'openai_compatible_sidecar', '2026-09-21T03:00:00Z', 4, NULL, NULL, NULL),
-          ('B', $2, 'x402_native_agent', 'x402_zk_prepaid_adapter', '2026-09-21T04:00:00Z', 7, '{"schemaVersion":2}'::jsonb, $3, 9)`,
-      [`inv_${'a'.repeat(16)}`, `inv_${'b'.repeat(16)}`, 'c'.repeat(64)]);
+          ('B', $2, 'x402_native_agent', 'x402_zk_prepaid_adapter', '2026-09-21T04:00:00Z', 7, '{"schemaVersion":2}'::jsonb, $3, 9),
+          ('C', $4, 'coding_agent', 'openai_compatible_sidecar', '2026-09-21T05:00:00Z', 9, NULL, NULL, NULL)`,
+      [`inv_${'a'.repeat(16)}`, `inv_${'b'.repeat(16)}`, 'c'.repeat(64), `inv_${'d'.repeat(16)}`]);
 
       const migrated = await runMigrations(pool, MIGRATIONS_DIR);
-      expect(migrated.applied).toEqual(['0018_activation_attempts.sql']);
+      expect(migrated.applied).toEqual(['0018_activation_attempts.sql', '0019_founder_x402_cohort.sql']);
       const attempts = await pool.query(`
         SELECT slot, attempt_number, invite_id, invite_request_id, status, funding_outcome,
                evidence, evidence_digest, committed_claims_after
           FROM control_plane.activation_attempts ORDER BY slot`);
-      expect(attempts.rows).toHaveLength(2);
+      expect(attempts.rows).toHaveLength(3);
       expect(attempts.rows[0]).toMatchObject({
         slot: 'A', attempt_number: 1, invite_request_id: null,
         status: 'open', funding_outcome: 'unknown', evidence: null, evidence_digest: null,
@@ -303,8 +305,10 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
         status: 'submitted', funding_outcome: 'unknown', evidence: { schemaVersion: 2 }, evidence_digest: 'c'.repeat(64),
         committed_claims_after: '9',
       });
+      const historicalC = await pool.query("SELECT participant_type, integration_mode FROM control_plane.activation_attempts WHERE slot = 'C'");
+      expect(historicalC.rows).toEqual([{ participant_type: 'coding_agent', integration_mode: 'openai_compatible_sidecar' }]);
       const inviteKey = await pool.query('SELECT creation_request_id FROM control_plane.pilot_invites ORDER BY invite_id');
-      expect(inviteKey.rows).toEqual([{ creation_request_id: null }, { creation_request_id: null }]);
+      expect(inviteKey.rows).toEqual(Array.from({ length: 3 }, () => ({ creation_request_id: null })));
     } finally {
       rmSync(legacyMigrationsDir, { recursive: true, force: true });
     }

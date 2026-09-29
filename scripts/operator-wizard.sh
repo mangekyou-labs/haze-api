@@ -327,6 +327,12 @@ while true; do
   warn "enter whole seconds from 0 to 86400"
 done
 HUMAN_ACTION_MS=$(( HUMAN_ACTION_SECONDS * 1000 ))
+while true; do
+  ask MACHINE_WAIT_SECONDS "Unattended machine/provider wait seconds (download, install, proof, and response):"
+  if [[ "${MACHINE_WAIT_SECONDS:-}" =~ ^[0-9]+$ ]] && (( MACHINE_WAIT_SECONDS <= 86400 )); then break; fi
+  warn "enter whole seconds from 0 to 86400"
+done
+MACHINE_WAIT_MS=$(( MACHINE_WAIT_SECONDS * 1000 ))
 if (( HUMAN_ACTION_SECONDS > 300 )); then
   note "This exceeds the five-minute target and is recorded as friction;"
   note "it does not disqualify a valid protocol exchange."
@@ -344,7 +350,7 @@ confirm "Are you the distinct operator assigned this slot?" && ATTEST_OWNERSHIP=
 
 BUNDLE_DIR="${ZK_CREDITS_EVIDENCE_DIR:-$PWD}"
 BUNDLE="$BUNDLE_DIR/zk-credits-activation-evidence-$SLOT.json"
-export SLOT PARTICIPANT_TYPE INTEGRATION_MODE ASSISTANCE HUMAN_ACTION_MS BUNDLE
+export SLOT PARTICIPANT_TYPE INTEGRATION_MODE ASSISTANCE HUMAN_ACTION_MS MACHINE_WAIT_MS BUNDLE
 export PINNED_SIDECAR_VERSION PINNED_ADAPTER_VERSION PINNED_SHARED_VERSION PINNED_ARTIFACT_RELEASE
 export ATTEST_LOCAL ATTEST_CREDENTIAL ATTEST_NO_RECOVERY ATTEST_OWNERSHIP
 if ! node "$WIZARD_DIR/operator-evidence.mjs" bundle; then

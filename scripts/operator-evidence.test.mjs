@@ -166,7 +166,7 @@ test('refuses an uncaptured or malformed counter read instead of guessing', () =
   assert.match(run('warmup', { METRICS_FRESH: 'not json', METRICS_AFTER_WARMUP: json(metrics(1)) }).output, /is not valid JSON/u);
 });
 
-test('writes a version-3 bundle carrying human action time and all three snapshots', () => {
+test('writes a version-3 bundle carrying human time, machine wait, and three snapshots', () => {
   const directory = mkdtempSync(join(tmpdir(), 'zk-evidence-'));
   const bundle = join(directory, 'evidence.json');
   try {
@@ -179,6 +179,7 @@ test('writes a version-3 bundle carrying human action time and all three snapsho
       PINNED_SHARED_VERSION: '0.1.0',
       PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v2',
       HUMAN_ACTION_MS: '1800000',
+      MACHINE_WAIT_MS: '42000',
       ASSISTANCE: '0',
       ATTEST_LOCAL: 'true',
       ATTEST_CREDENTIAL: 'true',
@@ -194,6 +195,7 @@ test('writes a version-3 bundle carrying human action time and all three snapsho
     const evidence = JSON.parse(readFileSync(bundle, 'utf8'));
     assert.equal(evidence.schemaVersion, 3);
     assert.equal(evidence.humanActionDurationMs, 1_800_000);
+    assert.equal(evidence.machineWaitDurationMs, 42_000);
     assert.deepEqual(Object.keys(evidence.counters), ['beforeWarmup', 'afterWarmup', 'afterHotExchange']);
     assert.equal(evidence.counters.beforeWarmup.exchange.exchangeSuccesses, 0);
     assert.equal(evidence.counters.afterWarmup.proving.hotProveSamples, 0);
@@ -226,6 +228,7 @@ test('writes a bundle whose own attestation survives the secret-field check', ()
       PINNED_SHARED_VERSION: '0.1.0',
       PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v2',
       HUMAN_ACTION_MS: '600000',
+      MACHINE_WAIT_MS: '42000',
       ASSISTANCE: '0',
       ATTEST_LOCAL: 'true',
       ATTEST_CREDENTIAL: 'true',
@@ -261,6 +264,7 @@ test('refuses a bundle that smuggles a differently named credential field', () =
       PINNED_SHARED_VERSION: '0.1.0',
       PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v2',
       HUMAN_ACTION_MS: '1000',
+      MACHINE_WAIT_MS: '42000',
       ASSISTANCE: '0',
       ATTEST_LOCAL: 'true',
       ATTEST_CREDENTIAL: 'true',
@@ -278,7 +282,7 @@ test('refuses a bundle that smuggles a differently named credential field', () =
     const evidence = JSON.parse(readFileSync(join(directory, 'evidence.json'), 'utf8'));
     assert.equal(Object.keys(evidence).sort().join(','), [
       'activatedAt', 'assistanceCount', 'attestations', 'counters', 'humanActionDurationMs',
-      'integrationMode', 'kind', 'participantType', 'schemaVersion', 'slot', 'versions',
+      'integrationMode', 'kind', 'machineWaitDurationMs', 'participantType', 'schemaVersion', 'slot', 'versions',
     ].join(','));
   } finally {
     rmSync(directory, { recursive: true, force: true });
