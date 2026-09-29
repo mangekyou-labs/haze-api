@@ -200,7 +200,7 @@ function bundleCommand() {
       artifactRelease: requireEnv('PINNED_ARTIFACT_RELEASE'),
     },
     activatedAt: new Date().toISOString(),
-    humanActionDurationMs: parseHumanActionMs(),
+    humanActionDurationMs: parseDurationMs('HUMAN_ACTION_MS'),
     machineWaitDurationMs: parseDurationMs('MACHINE_WAIT_MS'),
     counters: {
       beforeWarmup: snapshotOf(parse('METRICS_FRESH')),
@@ -247,10 +247,6 @@ function bundleCommand() {
   const hot = delta(evidence.counters.afterWarmup, evidence.counters.afterHotExchange);
   console.log(`  counted exchange: ${hot.exchange.exchangeSuccesses} succeeded, ${hot.exchange.failures} failed, ${hot.proving.hotProveSamples} hot proof sample(s)`);
   return 0;
-}
-
-function parseHumanActionMs() {
-  return parseDurationMs('HUMAN_ACTION_MS');
 }
 
 function parseDurationMs(name) {

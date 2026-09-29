@@ -95,25 +95,28 @@ export interface PilotProgress {
  */
 export function summarizePilotProgress(attempts: readonly ActivationWindow[]): PilotProgress {
   const qualifiedAttempts = attempts.filter((attempt) => attempt.status === 'qualified');
-  const qualified = new Set(qualifiedAttempts.map((attempt) => attempt.slot));
-  const external = new Set(qualifiedAttempts.filter((attempt) =>
+  const matchesCurrentSlotAssignment = (attempt: ActivationWindow): boolean => {
+    const assignment = SLOT_ASSIGNMENT[attempt.slot];
+    return attempt.participantType === assignment.participantType
+      && attempt.integrationMode === assignment.integrationMode;
+  };
+  const qualifiedSlots = new Set(qualifiedAttempts.map((attempt) => attempt.slot));
+  const externalMarketSlots = new Set(qualifiedAttempts.filter((attempt) =>
     (attempt.slot === 'A' || attempt.slot === 'C')
-    && attempt.participantType === SLOT_ASSIGNMENT[attempt.slot].participantType
-    && attempt.integrationMode === SLOT_ASSIGNMENT[attempt.slot].integrationMode,
+    && matchesCurrentSlotAssignment(attempt),
   ).map((attempt) => attempt.slot));
   const firstQualifiedA = qualifiedAttempts
     .filter((attempt) => attempt.slot === 'A'
-      && attempt.participantType === SLOT_ASSIGNMENT.A.participantType
-      && attempt.integrationMode === SLOT_ASSIGNMENT.A.integrationMode
+      && matchesCurrentSlotAssignment(attempt)
       && attempt.closedAt !== null)
     .sort((left, right) => Date.parse(left.closedAt!) - Date.parse(right.closedAt!))[0];
   const startedAt = firstQualifiedA?.closedAt ?? null;
   const startedMs = startedAt === null ? Number.NaN : Date.parse(startedAt);
   const closesAt = Number.isFinite(startedMs) ? new Date(startedMs + 14 * 24 * 60 * 60 * 1000).toISOString() : null;
   return {
-    technicalActivations: qualified.size,
-    externalMarketActivations: external.size,
-    founderTechnicalActivation: qualified.has('B'),
+    technicalActivations: qualifiedSlots.size,
+    externalMarketActivations: externalMarketSlots.size,
+    founderTechnicalActivation: qualifiedSlots.has('B'),
     validationWindowStartedAt: startedAt,
     validationWindowClosesAt: closesAt,
   };

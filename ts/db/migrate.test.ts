@@ -263,9 +263,9 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
 
   it('migrates legacy activation rows, applies migrations idempotently, and creates all isolated schemas', async () => {
     // Build a legacy install through migration 0017, seed its one-row-per-slot
-    // state, then apply 0018 through the normal runner. This exercises the
-    // rename and backfill against real Postgres rows instead of only checking
-    // the migration text.
+    // state, then apply the remaining migrations through the normal runner.
+    // This exercises the rename and backfill against real Postgres rows
+    // instead of only checking the migration text.
     const legacyMigrationsDir = mkdtempSync(join(tmpdir(), 'zk-credits-legacy-migrations-'));
     try {
       for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith('.sql') && name < '0018_activation_attempts.sql')) {
