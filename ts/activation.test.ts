@@ -19,12 +19,13 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ZK_PREPAID_LIFECYCLE_FAILURES, type ZkPrepaidLifecycleFailure } from '@zk-credits/x402-zk-prepaid';
 import {
   ACTIVATION_DENYLIST_KEYS,
   ACTIVATION_EVIDENCE_KIND,
   ACTIVATION_EVIDENCE_SCHEMA_VERSION,
+  PILOT_ROLE_BY_SLOT,
   PINNED_ACTIVATION_VERSIONS,
   PINNED_ARTIFACT_RELEASE,
   SLOT_ASSIGNMENT,
@@ -39,6 +40,8 @@ import {
   qualifyActivation,
   readActivationStatus,
   runActivationCommand,
+  summarizePilotProgress,
+  type ActivationWindow,
   type ActivationGatewayStatus,
   type ActivationProbe,
 } from './activation.js';
@@ -89,7 +92,7 @@ function evidenceFor(slot: OperatorSlot = 'A'): ActivationEvidence {
     integrationMode: assignment.integrationMode,
     versions: { ...PINNED_ACTIVATION_VERSIONS, artifactRelease: PINNED_ARTIFACT_RELEASE },
     activatedAt: '2026-09-21T04:00:00.000Z',
-    onboardingDurationMs: 1_800_000,
+    humanActionDurationMs: 1_800_000,
     counters: {
       beforeWarmup: cleanSnapshots(0),
       afterWarmup: cleanSnapshots(1),
@@ -134,13 +137,35 @@ function probe(statuses: ActivationGatewayStatus[], options: { ready?: boolean; 
 
 function activationDependencies(statuses: ActivationGatewayStatus[], options: { ready?: boolean; checks?: { name: string; ok: boolean }[] } = {}) {
   const ledger = new MemoryActivationLedger();
+  const invites = new Map<string, { inviteId: string; githubAccountId: string; creationRequestId: string; state: 'open' | 'redeemed' | 'revoked' | 'expired' }>();
+  const inviteIdsByRequest = new Map<string, string>();
+  let nextInvite = 0;
   return {
     ledger,
     dependencies: {
       ledger,
       probe: probe(statuses, options),
-      issueInvite: async (githubAccountId: string) => ({ inviteId: `inv_${githubAccountId}`, code: 'one-time-code', expiresAt: 1_800_600_000_000 }),
-      revokeInvite: async () => true,
+      issueInvite: async ({ githubAccountId, creationRequestId }: { githubAccountId: string; creationRequestId: string }) => {
+        const inviteId = `inv_${githubAccountId}_${++nextInvite}`;
+        invites.set(inviteId, { inviteId, githubAccountId, creationRequestId, state: 'open' });
+        inviteIdsByRequest.set(creationRequestId, inviteId);
+        return { inviteId, code: 'one-time-code', expiresAt: 1_800_600_000_000 };
+      },
+      inspectInvite: async (inviteId: string) => {
+        const invite = invites.get(inviteId);
+        return invite ? { ...invite } : undefined;
+      },
+      inspectInviteRequest: async (creationRequestId: string) => {
+        const inviteId = inviteIdsByRequest.get(creationRequestId);
+        const invite = inviteId ? invites.get(inviteId) : undefined;
+        return invite ? { inviteId: invite.inviteId, githubAccountId: invite.githubAccountId, state: invite.state } : undefined;
+      },
+      revokeInvite: async (inviteId: string) => {
+        const invite = invites.get(inviteId);
+        if (!invite || invite.state !== 'open') return false;
+        invites.set(inviteId, { ...invite, state: 'revoked' });
+        return true;
+      },
       now: () => 1_800_000_000_000,
     },
   };
@@ -172,6 +197,25 @@ describe('operator activation evidence schema', () => {
 
     const wrongSlot = evidenceFor('A');
     expect(validateActivationEvidence(wrongSlot, 'B').failures).toContainEqual({ path: 'slot', reason: 'slot_mismatch' });
+  });
+
+  it('assigns external x402 work to C while keeping founder B technical-only', () => {
+    expect(PILOT_ROLE_BY_SLOT).toEqual({
+      A: 'external_codex_developer',
+      B: 'founder_x402_agent',
+      C: 'external_x402_agent',
+    });
+    expect(SLOT_ASSIGNMENT.C).toEqual({
+      participantType: 'x402_native_agent',
+      integrationMode: 'x402_zk_prepaid_adapter',
+    });
+
+    const historicalCodexC = evidenceFor('C');
+    historicalCodexC.participantType = 'coding_agent';
+    historicalCodexC.integrationMode = 'openai_compatible_sidecar';
+    expect(validateActivationEvidence(historicalCodexC, 'C').failures).toContainEqual({
+      path: 'participantType', reason: 'slot_participant_type_mismatch',
+    });
   });
 
   it('rejects unknown keys at every depth', () => {
@@ -218,8 +262,8 @@ describe('operator activation evidence schema', () => {
 
   it('rejects a value that is not a count, a pin, or an ISO timestamp', () => {
     const negative = evidenceFor();
-    negative.onboardingDurationMs = -1;
-    expect(validateActivationEvidence(negative, 'A').failures).toContainEqual({ path: 'onboardingDurationMs', reason: 'not_a_duration' });
+    negative.humanActionDurationMs = -1;
+    expect(validateActivationEvidence(negative, 'A').failures).toContainEqual({ path: 'humanActionDurationMs', reason: 'not_a_duration' });
 
     const fractional = evidenceFor();
     fractional.assistanceCount = 0.5;
@@ -320,7 +364,11 @@ describe('operator activation evidence schema', () => {
 describe('activation qualification', () => {
   const window = {
     slot: 'A' as const,
+    attemptNumber: 1,
+    inviteRequestId: 'request_abcdefghijklmnop',
     inviteId: 'inv_4242',
+    status: 'open' as const,
+    fundingOutcome: 'unknown' as const,
     participantType: SLOT_ASSIGNMENT.A.participantType,
     integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
     startedAt: '2026-09-21T03:00:00.000Z',
@@ -328,10 +376,35 @@ describe('activation qualification', () => {
     assistanceCount: 1,
     evidenceDigest: null,
     committedClaimsAfter: null,
+    qualificationReasons: [],
+    closedAt: null,
   };
 
-  it('qualifies a complete activation whose aggregate committed claims increased', () => {
-    expect(qualifyActivation(evidenceFor('A'), window, 5)).toEqual({ qualified: true, reasons: [] });
+  it('qualifies only when the warm-up and counted exchange add exactly two claims', () => {
+    expect(qualifyActivation(evidenceFor('A'), window, 6)).toEqual({ qualified: true, reasons: [] });
+  });
+
+  it('counts B as technical only and starts the UTC window at A qualification', () => {
+    const attempt = (slot: OperatorSlot, status: ActivationWindow['status'], closedAt: string | null): ActivationWindow => ({
+      ...window,
+      slot,
+      participantType: SLOT_ASSIGNMENT[slot].participantType,
+      integrationMode: SLOT_ASSIGNMENT[slot].integrationMode,
+      status,
+      closedAt,
+    });
+    const progress = summarizePilotProgress([
+      attempt('A', 'qualified', '2026-09-21T04:10:00.000Z'),
+      attempt('B', 'qualified', '2026-09-22T02:00:00.000Z'),
+      attempt('C', 'open', null),
+    ]);
+    expect(progress).toEqual({
+      technicalActivations: 2,
+      externalMarketActivations: 1,
+      founderTechnicalActivation: true,
+      validationWindowStartedAt: '2026-09-21T04:10:00.000Z',
+      validationWindowClosesAt: '2026-10-05T04:10:00.000Z',
+    });
   });
 
   it('refuses an activation that was not preceded by a discarded warm-up', () => {
@@ -341,7 +414,7 @@ describe('activation qualification', () => {
     noWarmup.counters.afterWarmup = cleanSnapshots(0);
     noWarmup.counters.afterHotExchange = cleanSnapshots(1);
 
-    const verdict = qualifyActivation(noWarmup, window, 5);
+    const verdict = qualifyActivation(noWarmup, window, 6);
     expect(verdict.qualified).toBe(false);
     expect(verdict.reasons).toContain('cold_warmup_incomplete_exchange');
     expect(verdict.reasons).toContain('hot_exchange_not_a_hot_proof');
@@ -352,7 +425,7 @@ describe('activation qualification', () => {
     stale.counters.beforeWarmup = cleanSnapshots(1);
     stale.counters.afterWarmup = cleanSnapshots(2);
     stale.counters.afterHotExchange = cleanSnapshots(3);
-    expect(qualifyActivation(stale, window, 5).reasons).toContain('stale_traffic_before_warmup');
+    expect(qualifyActivation(stale, window, 6).reasons).toContain('stale_traffic_before_warmup');
   });
 
   it('refuses a warm-up window that absorbed a second exchange', () => {
@@ -360,7 +433,7 @@ describe('activation qualification', () => {
     shared.counters.afterWarmup = cleanSnapshots(2);
     shared.counters.afterHotExchange = cleanSnapshots(3);
 
-    const verdict = qualifyActivation(shared, window, 5);
+    const verdict = qualifyActivation(shared, window, 6);
     expect(verdict.qualified).toBe(false);
     expect(verdict.reasons).toContain('cold_warmup_contaminated_by_extra_traffic');
     expect(verdict.reasons).toContain('cold_warmup_not_the_cold_sample');
@@ -370,7 +443,7 @@ describe('activation qualification', () => {
     const concurrent = evidenceFor('A');
     concurrent.counters.afterHotExchange = cleanSnapshots(3);
 
-    const verdict = qualifyActivation(concurrent, window, 5);
+    const verdict = qualifyActivation(concurrent, window, 6);
     expect(verdict.qualified).toBe(false);
     expect(verdict.reasons).toContain('hot_exchange_contaminated_by_extra_traffic');
     expect(verdict.reasons).toContain('hot_exchange_not_a_hot_proof');
@@ -380,7 +453,7 @@ describe('activation qualification', () => {
     const failed = evidenceFor('A');
     failed.counters.afterHotExchange.exchange.failures = 1;
     failed.counters.afterHotExchange.exchange.failuresByCategory.transport_failed = 1;
-    const failedVerdict = qualifyActivation(failed, window, 5);
+    const failedVerdict = qualifyActivation(failed, window, 6);
     expect(failedVerdict.reasons).toContain('hot_exchange_recorded_failures');
     expect(failedVerdict.reasons).toContain('hot_exchange_recorded_failure_categories');
 
@@ -389,13 +462,13 @@ describe('activation qualification', () => {
     retried.counters.afterHotExchange.proving.attempts = 3;
     retried.counters.afterHotExchange.proving.successes = 3;
     retried.counters.afterHotExchange.proving.retries = 1;
-    const retriedVerdict = qualifyActivation(retried, window, 5);
+    const retriedVerdict = qualifyActivation(retried, window, 6);
     expect(retriedVerdict.reasons).toContain('hot_exchange_recorded_retries');
     expect(retriedVerdict.reasons).toContain('hot_exchange_contaminated_by_extra_traffic');
 
     const incomplete = evidenceFor('A');
     incomplete.counters.afterHotExchange.exchange.settlementsConfirmed = 0;
-    expect(qualifyActivation(incomplete, window, 5).reasons).toContain('hot_exchange_incomplete_exchange');
+    expect(qualifyActivation(incomplete, window, 6).reasons).toContain('hot_exchange_incomplete_exchange');
   });
 
   it('refuses a warm-up that recorded failures or retries', () => {
@@ -406,7 +479,7 @@ describe('activation qualification', () => {
     dirty.counters.afterWarmup.proving.retries = 1;
     dirty.counters.afterHotExchange = cleanSnapshots(3);
 
-    const verdict = qualifyActivation(dirty, window, 5);
+    const verdict = qualifyActivation(dirty, window, 6);
     expect(verdict.reasons).toContain('cold_warmup_recorded_retries');
     expect(verdict.reasons).toContain('cold_warmup_contaminated_by_extra_traffic');
   });
@@ -415,13 +488,15 @@ describe('activation qualification', () => {
     const noExchange = evidenceFor('A');
     noExchange.counters.afterWarmup = cleanSnapshots(0);
     noExchange.counters.afterHotExchange = cleanSnapshots(0);
-    const verdict = qualifyActivation(noExchange, window, 5);
+    const verdict = qualifyActivation(noExchange, window, 6);
     expect(verdict.qualified).toBe(false);
     expect(verdict.reasons).toContain('cold_warmup_incomplete_exchange');
     expect(verdict.reasons).toContain('hot_exchange_incomplete_exchange');
     expect(verdict.reasons).toContain('hot_exchange_incomplete_proof');
 
-    expect(qualifyActivation(evidenceFor('A'), window, 4).reasons).toEqual(['aggregate_committed_claims_did_not_increase']);
+    expect(qualifyActivation(evidenceFor('A'), window, 4).reasons).toEqual(['aggregate_committed_claim_delta_0_expected_2']);
+    expect(qualifyActivation(evidenceFor('A'), window, 5).reasons).toEqual(['aggregate_committed_claim_delta_1_expected_2']);
+    expect(qualifyActivation(evidenceFor('A'), window, 7).reasons).toEqual(['aggregate_committed_claim_delta_3_expected_2']);
     expect(qualifyActivation(evidenceFor('A'), window, null).reasons).toEqual(['aggregate_claim_count_unreadable']);
   });
 
@@ -431,7 +506,7 @@ describe('activation qualification', () => {
     notLocal.attestations.credentialStayedLocal = false;
     notLocal.attestations.noManualRecovery = false;
     notLocal.attestations.distinctOperatorOwnership = false;
-    expect(qualifyActivation(notLocal, window, 5).reasons).toEqual([
+    expect(qualifyActivation(notLocal, window, 6).reasons).toEqual([
       'agent_not_run_locally',
       'credential_not_retained_locally',
       'manual_recovery_observed',
@@ -452,16 +527,15 @@ describe('founder activation coordinator', () => {
 
   it('prewarms, requires readiness, records the baseline, and issues exactly one invite', async () => {
     const { dependencies, ledger } = activationDependencies([baseline]);
-    const output = await runActivationCommand(['activation-start', '--slot', 'B', '--github-id', '4242'], dependencies);
-    expect(output).toMatch(/activation window opened for slot B/u);
+    const output = await runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '4242'], dependencies);
+    expect(output).toMatch(/activation window opened for slot A/u);
     expect(output).toMatch(/baseline committed claims: 7/u);
-    expect(output).toMatch(/participant type: x402_native_agent/u);
-    expect(output).toMatch(/integration mode: x402_zk_prepaid_adapter/u);
+    expect(output).toMatch(/participant type: coding_agent/u);
+    expect(output).toMatch(/integration mode: openai_compatible_sidecar/u);
     expect(output).toMatch(/code \(shown once\): one-time-code/u);
     expect(await ledger.windows()).toHaveLength(1);
 
-    // A slot is assigned once.
-    await expect(runActivationCommand(['activation-start', '--slot', 'B', '--github-id', '4242'], dependencies)).rejects.toThrow(/already has an open activation window/u);
+    await expect(runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '4242'], dependencies)).rejects.toThrow(/slot A already has attempt 1/u);
   });
 
   it('refuses to open a window when readiness or the launch state is wrong', async () => {
@@ -476,25 +550,27 @@ describe('founder activation coordinator', () => {
     await expect(runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '1'], paused.dependencies)).rejects.toThrow(/paused/u);
   });
 
-  it('revokes an invite when the durable activation window cannot be opened', async () => {
+  it('persists pending state before invite issue so a failed row insert cannot orphan an invite', async () => {
     const { dependencies } = activationDependencies([baseline]);
-    const revoked: string[] = [];
-    const ledger = new MemoryActivationLedger();
+    let inviteCalls = 0;
+    dependencies.issueInvite = async () => { inviteCalls += 1; throw new Error('should not be called'); };
     dependencies.ledger = {
       openWindow: async () => { throw new Error('database unavailable'); },
-      window: (slot) => ledger.window(slot),
-      windows: () => ledger.windows(),
-      recordAssistance: (slot, count) => ledger.recordAssistance(slot, count),
-      storeEvidence: (slot, evidence, digest, claims) => ledger.storeEvidence(slot, evidence, digest, claims),
-    };
-    dependencies.revokeInvite = async (inviteId) => {
-      revoked.push(inviteId);
-      return true;
+      attachInvite: async () => { throw new Error('unexpected'); },
+      window: async () => undefined,
+      windows: async () => [],
+      attempts: async () => [],
+      recordAssistance: async () => { throw new Error('unexpected'); },
+      markNeedsReconciliation: async () => { throw new Error('unexpected'); },
+      abort: async () => { throw new Error('unexpected'); },
+      reconcileFunding: async () => { throw new Error('unexpected'); },
+      revalidateSubmitted: async () => { throw new Error('unexpected'); },
+      storeEvidence: async () => { throw new Error('unexpected'); },
     };
 
     await expect(runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '1'], dependencies))
       .rejects.toThrow(/database unavailable/u);
-    expect(revoked).toEqual(['inv_1']);
+    expect(inviteCalls).toBe(0);
   });
 
   it('validates an operator bundle and confirms the committed-claim increase', async () => {
@@ -507,9 +583,10 @@ describe('founder activation coordinator', () => {
     expect(output).toMatch(/activation qualifies/u);
     expect(output).toMatch(/committed claims: 7 -> 9/u);
 
-    const stored = await ledger.window('A');
+    const stored = (await ledger.attempts()).find((attempt) => attempt.slot === 'A');
     expect(stored!.evidenceDigest).toBe(createHash('sha256').update(JSON.stringify(evidenceFor('A'), null, 2)).digest('hex'));
     expect(stored!.committedClaimsAfter).toBe(9);
+    expect(stored!.status).toBe('qualified');
   });
 
   it('reports every counter and failure category as a warm-up and hot delta', async () => {
@@ -544,11 +621,11 @@ describe('founder activation coordinator', () => {
 
   it('reports a non-qualifying activation without inventing an identifier join', async () => {
     const { dependencies } = activationDependencies([baseline, afterActivation]);
-    await runActivationCommand(['activation-start', '--slot', 'C', '--github-id', '4242'], dependencies);
-    await runActivationCommand(['activation-assist', '--slot', 'C'], dependencies);
-    const incomplete = evidenceFor('C');
+    await runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '4242'], dependencies);
+    await runActivationCommand(['activation-assist', '--slot', 'A'], dependencies);
+    const incomplete = evidenceFor('A');
     incomplete.counters.afterHotExchange.exchange.settlementsConfirmed = 0;
-    const output = await runActivationCommand(['activation-evidence', '--slot', 'C', '--file', await writeBundle(incomplete)], dependencies);
+    const output = await runActivationCommand(['activation-evidence', '--slot', 'A', '--file', await writeBundle(incomplete)], dependencies);
     expect(output).toMatch(/activation does NOT qualify: hot_exchange_incomplete_exchange/u);
     // The readout is aggregate only: no identity, token, or credential appears.
     expect(output).not.toMatch(/github|commitment|nullifier|seed|prompt/i);
@@ -587,9 +664,133 @@ describe('founder activation coordinator', () => {
     expect(await runActivationCommand(['activation-status'], dependencies)).toMatch(/no activation windows are open/u);
     await runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '1'], dependencies);
     const output = await runActivationCommand(['activation-status'], dependencies);
-    expect(output).toMatch(/slot A: awaiting evidence/u);
+    expect(output).toMatch(/slot A attempt 1: open/u);
     expect(output).toMatch(/assistance: 0/u);
     expect(output).toMatch(/committed claims: 7 -> pending/u);
+  });
+
+  it('preserves rejected evidence, reconciles its outcome, and retries the same operator', async () => {
+    const oneClaimAfter = { ...baseline, committedClaims: 8, generatedAt: '2026-09-21T04:00:00.000Z' };
+    const { dependencies, ledger } = activationDependencies([baseline, oneClaimAfter]);
+    await runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '4242'], dependencies);
+    await runActivationCommand(['activation-assist', '--slot', 'A'], dependencies);
+    const bundle = await writeBundle(evidenceFor('A'));
+
+    const rejected = await runActivationCommand(['activation-evidence', '--slot', 'A', '--file', bundle], dependencies);
+    expect(rejected).toMatch(/aggregate_committed_claim_delta_1_expected_2/u);
+    const beforeRetry = (await ledger.attempts()).find((attempt) => attempt.slot === 'A')!;
+    expect(beforeRetry.status).toBe('rejected');
+    expect(beforeRetry.fundingOutcome).toBe('unknown');
+    expect(beforeRetry.evidenceDigest).not.toBeNull();
+
+    await expect(runActivationCommand(['activation-retry', '--slot', 'A', '--same-operator'], dependencies))
+      .rejects.toThrow(/unresolved funding outcome/u);
+    expect(await runActivationCommand(['activation-reconcile', '--slot', 'A', '--funding-outcome', 'not-funded'], dependencies))
+      .toMatch(/funding outcome reconciled: not_funded/u);
+
+    // The invite is still open in this rehearsal. The retry path must revoke
+    // it before issuing a replacement invite, and each attempt gets a new
+    // aggregate baseline.
+    const retried = await runActivationCommand(['activation-retry', '--slot', 'A', '--same-operator'], dependencies);
+    expect(retried).toMatch(/activation window opened for slot A \(attempt 2\)/u);
+    const attempts = (await ledger.attempts()).filter((attempt) => attempt.slot === 'A');
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatchObject({ status: 'rejected', evidenceDigest: beforeRetry.evidenceDigest });
+    expect(attempts[1]).toMatchObject({ attemptNumber: 2, status: 'open', baselineCommittedClaims: 8, evidenceDigest: null });
+    expect(attempts[1]!.inviteId).not.toBe(attempts[0]!.inviteId);
+
+    // A hash already used by a failed attempt cannot be submitted again.
+    await runActivationCommand(['activation-assist', '--slot', 'A'], dependencies);
+    await expect(runActivationCommand(['activation-evidence', '--slot', 'A', '--file', bundle], dependencies))
+      .rejects.toThrow(/duplicate activation evidence digest/u);
+  });
+
+  it('revalidates preserved submitted evidence only after a redeemed invite is reconciled', async () => {
+    const { dependencies, ledger } = activationDependencies([baseline]);
+    await runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '4242'], dependencies);
+    const open = (await ledger.window('A'))!;
+    const submitted = {
+      ...open,
+      status: 'submitted' as const,
+      assistanceCount: 1,
+      evidence: evidenceFor('A'),
+      evidenceDigest: 'd'.repeat(64),
+      committedClaimsAfter: 9,
+    };
+    ledger.attempts = async () => [submitted];
+    dependencies.inspectInvite = async (inviteId) => ({
+      inviteId,
+      githubAccountId: '4242',
+      state: 'redeemed',
+    });
+    const revalidate = vi.fn(async (
+      _slot: OperatorSlot,
+      _attemptNumber: number,
+      qualified: boolean,
+      fundingOutcome: 'funded' | 'not_funded',
+      reasons: string[],
+    ) => ({
+      ...submitted,
+      status: qualified ? 'qualified' as const : 'rejected' as const,
+      fundingOutcome,
+      qualificationReasons: reasons,
+    }));
+    ledger.revalidateSubmitted = revalidate;
+
+    await expect(runActivationCommand(['activation-reconcile', '--slot', 'A'], dependencies))
+      .rejects.toThrow(/verify its detached funding result/u);
+    expect(revalidate).not.toHaveBeenCalled();
+
+    const output = await runActivationCommand(
+      ['activation-reconcile', '--slot', 'A', '--funding-outcome', 'funded'],
+      dependencies,
+    );
+    expect(output).toMatch(/preserved evidence revalidated as qualified/u);
+    expect(output).toMatch(/committed-claim delta: 2 \(exactly 2 required\)/u);
+    expect(revalidate).toHaveBeenCalledWith('A', open.attemptNumber, true, 'funded', []);
+  });
+
+  it('requires uncertain invite outcomes to be reconciled and supports replacement operators', async () => {
+    const { dependencies, ledger } = activationDependencies([baseline]);
+    const originalIssue = dependencies.issueInvite;
+    let committedInvite: { inviteId: string; githubAccountId: string; creationRequestId: string } | undefined;
+    dependencies.issueInvite = async ({ githubAccountId, creationRequestId }) => {
+      const created = await originalIssue({ githubAccountId, creationRequestId });
+      committedInvite = { inviteId: created.inviteId, githubAccountId, creationRequestId };
+      throw new Error('connection dropped after invite commit');
+    };
+    dependencies.inspectInviteRequest = async (creationRequestId) => committedInvite?.creationRequestId === creationRequestId
+      ? { inviteId: committedInvite.inviteId, githubAccountId: committedInvite.githubAccountId, state: 'open' }
+      : undefined;
+
+    await expect(runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '4242'], dependencies))
+      .rejects.toThrow(/invite outcome is unresolved/u);
+    expect((await ledger.window('A'))?.status).toBe('needs_reconciliation');
+    await expect(runActivationCommand(['activation-retry', '--slot', 'A', '--github-id', '9001'], dependencies))
+      .rejects.toThrow(/no failed attempt eligible for retry/u);
+
+    const reconciled = await runActivationCommand(['activation-reconcile', '--slot', 'A'], dependencies);
+    expect(reconciled).toMatch(/attempt aborted; funding outcome: not_funded/u);
+    dependencies.issueInvite = originalIssue;
+    const replaced = await runActivationCommand(['activation-retry', '--slot', 'A', '--github-id', '9001'], dependencies);
+    expect(replaced).toMatch(/activation window opened for slot A \(attempt 2\)/u);
+    const attempts = (await ledger.attempts()).filter((attempt) => attempt.slot === 'A');
+    expect(attempts.map((attempt) => attempt.status)).toEqual(['aborted', 'open']);
+    expect(attempts[1]!.inviteId).not.toBe(attempts[0]!.inviteId);
+  });
+
+  it('does not let slot B or C start before the preceding slot qualifies', async () => {
+    const { dependencies } = activationDependencies([baseline, afterActivation]);
+    await expect(runActivationCommand(['activation-start', '--slot', 'B', '--github-id', '2'], dependencies))
+      .rejects.toThrow(/slot B cannot start until slot A qualifies/u);
+    await runActivationCommand(['activation-start', '--slot', 'A', '--github-id', '1'], dependencies);
+    await runActivationCommand(['activation-assist', '--slot', 'A'], dependencies);
+    await runActivationCommand(['activation-evidence', '--slot', 'A', '--file', await writeBundle(evidenceFor('A'))], dependencies);
+
+    const slotB = await runActivationCommand(['activation-start', '--slot', 'B', '--github-id', '2'], dependencies);
+    expect(slotB).toMatch(/slot B/u);
+    await expect(runActivationCommand(['activation-start', '--slot', 'C', '--github-id', '3'], dependencies))
+      .rejects.toThrow(/slot C cannot start until slot B qualifies/u);
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createCipheriv, publicEncrypt, randomBytes } from 'node:crypto';
 import { buildPaymentRequired, CODING_DEEPSEEK_V4_FLASH_V1, decodeHeader, encodeHeader, PAYMENT_RESPONSE_HEADER, type PaymentPayload } from '@zk-credits/x402-zk-prepaid';
 import { createCredential, generateSecret } from '@zk-credits/shared/base';
-import { createBasePrepaidClient } from './base-sidecar.js';
+import { createBasePaymentFactory, createBasePrepaidClient, validateBaseCreditWitness } from './base-sidecar.js';
 import { BaseSlotLedger } from './slot-ledger.js';
 
 const requirements = {
@@ -57,6 +57,19 @@ async function credential() {
 }
 
 describe('Base x402 sidecar adapter', () => {
+  it('validates a local witness before the sidecar reports setup ready', () => {
+    expect(validateBaseCreditWitness({
+      root: '123',
+      pathElements: Array.from({ length: 20 }, () => '0'),
+      pathIndices: Array.from({ length: 20 }, () => 0),
+    }).root).toBe('123');
+    expect(() => validateBaseCreditWitness({
+      root: '123',
+      pathElements: ['0'],
+      pathIndices: [0],
+    })).toThrow('Base membership witness is malformed');
+  });
+
   it('generates request-bound proof payloads without identifying fields', async () => {
     const ledger = await BaseSlotLedger.open({});
     let proofInput: Record<string, unknown> | undefined;
@@ -153,6 +166,42 @@ describe('Base x402 sidecar adapter', () => {
 
     await expect(prepaid.client.fetch('https://api.test/v1/chat/completions', { method: 'POST', body: '{"model":"stub"}' })).resolves.toMatchObject({ status: 200 });
     expect(ledger.committedSlots()).toEqual([0]);
+  });
+
+  it('does not prove or commit again when a refreshed challenge requests another payment', async () => {
+    const ledger = await BaseSlotLedger.open({ capacity: 8 });
+    const prove = async (_input: unknown, context: { expectedPublicSignals: readonly string[] }) => ({
+      proof: { pi_a: ['1'] },
+      publicSignals: [...context.expectedPublicSignals],
+    });
+    let proofAttempts = 0;
+    const createPayment = createBasePaymentFactory({
+      credential: await credential(),
+      slotLedger: ledger,
+      witnessProvider,
+      internalTrialOneProof: true,
+      prove: async (input, context) => {
+        proofAttempts += 1;
+        return prove(input, context);
+      },
+    });
+    const firstChallenge = requirements;
+    const refreshedChallenge = {
+      ...requirements,
+      extra: { ...requirements.extra, issuedAt: requirements.extra.issuedAt + 1 },
+    };
+    const request = (accepted: typeof firstChallenge) => createPayment({
+      method: 'POST',
+      url: 'https://api.test/v1/chat/completions',
+      body: '{"model":"synthetic"}',
+      requirements: accepted,
+    });
+
+    await request(firstChallenge);
+    await expect(request(refreshedChallenge)).rejects.toThrow('internal_trial_limit_reached');
+    expect(proofAttempts).toBe(1);
+    expect(ledger.committedSlots()).toEqual([0]);
+    expect(ledger.snapshot()).toMatchObject({ committed: 1, provisional: 0 });
   });
 
   it('decrypts a committed replay through the local proxy without server plaintext', async () => {

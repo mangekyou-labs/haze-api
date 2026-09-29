@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// Copy-contract freeze for the invite-only, unpaid, experimental Base Sepolia
+// Copy-contract freeze for the invite-only, experimental Base Sepolia
 // pilot. The scan is limited to these explicitly active surfaces: repository
 // and installation guides, landing metadata and page, footer, sign-in,
 // onboarding, dashboard, and recovery. Archives, historical design documents,
@@ -35,7 +35,8 @@ const combined = sources.map(({ contents }) => contents).join('\n');
 
 const REQUIRED_CONTRACT = [
   { label: 'invite-only access', pattern: /\binvite-only\b/i },
-  { label: 'unpaid pilot status', pattern: /\bunpaid\b/i },
+  { label: 'research compensation', pattern: /\$25[\s\S]{0,100}30-minute[\s\S]{0,150}(?:setup success|setup fails)/i },
+  { label: 'compensation separated from intent', pattern: /not product revenue[\s\S]{0,80}(?:willingness-to-pay|payment intent)/i },
   { label: 'experimental pilot status', pattern: /\bexperimental\b/i },
   { label: 'Base Sepolia network', pattern: /\bBase Sepolia\b/ },
   { label: 'founder-provisioned test credits', pattern: /founder-provisioned test credits/i },
@@ -63,10 +64,14 @@ const REQUIRED_CONTRACT = [
     pattern:
       /gateway\s+and\s+the\s+upstream\s+provider\s+can\s+still\s+observe\s+request\s+content\s+and\s+traffic\s+metadata/i,
   },
+  {
+    label: 'precise valid-spend unlinkability claim',
+    pattern: /valid spends[\s\S]{0,100}payer and credential unlinkability/i,
+  },
 ];
 
 const REQUIRED_IN_METADATA = [
-  { label: 'pilot status', pattern: /invite-only, unpaid, experimental Base Sepolia pilot/i },
+  { label: 'pilot status', pattern: /invite-only, experimental Base Sepolia pilot/i },
   { label: 'audit warning', pattern: /not independently audited/i },
 ];
 
@@ -77,10 +82,9 @@ const REJECTED_TERMS = [
   { label: 'price or pricing', pattern: /\bprice|\bpricing\b/i },
   { label: 'renewal', pattern: /\brenew/i },
   { label: 'SKU', pattern: /\bsku\b/i },
-  { label: 'legacy plan names', pattern: /\b(?:starter|builder|scale)\b/i },
+  { label: 'legacy plan names', pattern: /\b(?:plan|tier|sku)\s+(?:starter|builder|scale)\b|\b(?:starter|builder|scale)\s+(?:plan|tier|sku)\b/i },
   { label: 'fixed 30-day validity', pattern: /\b(?:30[- ]day|thirty[- ]day)\b/i },
   { label: 'subscription', pattern: /subscri/i },
-  { label: 'dollar pricing', pattern: /\$\d/ },
   { label: 'broad anonymity claim', pattern: /\banonym(?:ous|ity)\b/i },
 ];
 
@@ -98,5 +102,28 @@ describe('pilot copy contract', () => {
       .filter(({ contents }) => pattern.test(contents))
       .map(({ relativePath }) => relativePath);
     expect(offenders).toEqual([]);
+  });
+
+  it('gives new users the single Codex setup guide, local requirements, gateway, and password prompt', () => {
+    const onboarding = read('web/src/app/dashboard/pilot-onboarding-flow.tsx');
+    const dashboard = read('web/src/app/dashboard/page.tsx');
+    const guide = read('docs/onboarding/base-zk-credits-codex-first-use.md');
+    expect(onboarding).toContain('one-instruction Codex guide');
+    expect(guide).toContain('zk-credits@0.2.7');
+    expect(guide).toContain('gh auth status');
+    expect(guide).toContain('zk-credits setup codex');
+    expect(guide).toContain('30-minute session');
+    expect(dashboard).toContain('https://zk-credits-gateway.onrender.com');
+    expect(guide).toContain('synchronized the public Base witness');
+    expect(guide).not.toContain('ZK_CREDITS_WITNESS_PATH');
+    expect(guide).toMatch(/password.{0,90}hidden local prompt/iu);
+    expect(guide).not.toContain('ZK_CREDITS_CREDENTIAL_PASSWORD');
+    expect(dashboard).not.toContain('your-gateway.example');
+  });
+
+  it('keeps the telemetry boundary and provider observation disclosure on onboarding', () => {
+    const onboarding = read('web/src/app/dashboard/pilot-onboarding-flow.tsx');
+    expect(onboarding).toMatch(/Pilot telemetry does not collect[\s\S]{0,200}payer\/spend-plane joins/);
+    expect(onboarding).toMatch(/gateway and the upstream provider can still observe request content and traffic metadata/i);
   });
 });

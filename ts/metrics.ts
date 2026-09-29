@@ -30,7 +30,7 @@ export const PAYMENT_VALIDATION_METRICS = {
 
 export type PaymentValidationBoundary = keyof typeof PAYMENT_VALIDATION_METRICS;
 
-const BASE_METRIC_NAMES = [
+export const BASE_METRIC_NAMES = [
   /** Missing authorization produced a fresh challenge. */
   'challenge_issued',
   /** Structurally valid authorization from the scheme's verifier. */

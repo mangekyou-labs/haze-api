@@ -97,6 +97,8 @@ export interface BasePrepaidClientOptions {
   credential: CreditCredential;
   witnessProvider: BaseWitnessProvider;
   prove: BaseProofGenerator;
+  /** Limits this local client to one proof attempt for a single internal trial. */
+  internalTrialOneProof?: boolean;
   fetch?: typeof fetch;
   /**
    * Durable local slot ledger. A slot is provisional until the proof passes
@@ -137,7 +139,7 @@ function field(value: string, label: string): string {
   return parsed.toString();
 }
 
-function assertWitness(witness: BaseCreditWitness): BaseCreditWitness {
+export function validateBaseCreditWitness(witness: BaseCreditWitness): BaseCreditWitness {
   if (
     typeof witness.root !== 'string'
     || witness.pathElements.length !== TREE_DEPTH
@@ -183,6 +185,7 @@ function requestBodyBytes(body: unknown): Uint8Array {
 /** Creates the shared local proof factory used by both client transports. */
 export function createBasePaymentFactory(options: BasePrepaidClientOptions): (context: BasePaymentContext) => Promise<BasePreparedPayment> {
   const secret = secretFromBase64Url(options.credential.secret);
+  let internalTrialProofAttempted = false;
   return async ({ method, url, body, requirements }): Promise<BasePreparedPayment> => {
     if (requirements.extra.deploymentDomain !== options.credential.deploymentDomain) {
       throw new Error('Credential deployment domain does not match the gateway challenge');
@@ -201,7 +204,7 @@ export function createBasePaymentFactory(options: BasePrepaidClientOptions): (co
         nonce,
         responseKey: responseKeys.publicKey,
       });
-      const witness = assertWitness(await options.witnessProvider.witnessForCredential(options.credential));
+      const witness = validateBaseCreditWitness(await options.witnessProvider.witnessForCredential(options.credential));
       const expiry = witness.expiry ?? options.credential.expiry;
       if (!Number.isSafeInteger(expiry) || expiry <= 0) throw new Error('Invalid Base credential expiry');
       const slotBlinding = await computeSlotBlinding(secret, selectedSlot, options.credential.deploymentDomain);
@@ -216,6 +219,10 @@ export function createBasePaymentFactory(options: BasePrepaidClientOptions): (co
         nullifier,
         share,
       ];
+      if (options.internalTrialOneProof) {
+        if (internalTrialProofAttempted) throw new Error('internal_trial_limit_reached');
+        internalTrialProofAttempted = true;
+      }
       const proof = await options.prove({
         secret: secretToField(secret),
         tier_id: String(options.credential.tierId),

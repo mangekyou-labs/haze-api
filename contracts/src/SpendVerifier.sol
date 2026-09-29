@@ -2,16 +2,16 @@
 pragma solidity ^0.8.20;
 
 import {ISpendVerifier} from "./PrivateCreditBond.sol";
-import {Groth16Verifier} from "./PrivateCreditSpendVerifier.sol";
+import {Groth16Verifier as Groth16VerifierV2} from "./PrivateCreditSpendVerifierV2.sol";
 
 /// @title SpendVerifier
-/// @notice `ISpendVerifier` adapter for the frozen `private-credit-spend-bn254-dev`
+/// @notice `ISpendVerifier` adapter for the v2 Base Sepolia proving bundle.
 ///         circuit.
-/// @dev `PrivateCreditSpendVerifier.sol` is the unmodified snarkjs output for the
-///      development zkey pinned by `packages/zk-credits-sidecar/circuits/manifest.json`
-///      (zkey sha256 `3afb378d832d646a7d207b7eecbbd33cf3b041b99274cb074bbe314ac0b79291`).
+/// @dev `PrivateCreditSpendVerifierV2.sol` is the unmodified snarkjs output for
+///      the development zkey pinned by `packages/zk-credits-sidecar/circuits/manifest.json`
+///      (zkey sha256 `7cc83e6df3f0c805d8b49d4063ee56a93123ff19acd49d639ff263588ef7a144`).
 ///      Regenerate it with
-///      `snarkjs zkey export solidityverifier <zkey> PrivateCreditSpendVerifier.sol`
+///      `snarkjs zkey export solidityverifier <zkey> PrivateCreditSpendVerifierV2.sol`
 ///      and never hand-edit it.
 ///
 ///      Payload layout: the snarkjs `soliditycalldata` word list — the eight
@@ -80,7 +80,7 @@ contract SpendVerifier is ISpendVerifier {
         if (publicSignals[NULLIFIER_INDEX] != nullifier) return _reject();
         if (publicSignals[SHARE_INDEX] != share) return _reject();
 
-        if (!Groth16Verifier(verifier).verifyProof(pA, pB, pC, publicSignals)) return _reject();
+        if (!Groth16VerifierV2(verifier).verifyProof(pA, pB, pC, publicSignals)) return _reject();
         return (true, bytes32(publicSignals[0]), publicSignals[1], bytes32(publicSignals[2]));
     }
 

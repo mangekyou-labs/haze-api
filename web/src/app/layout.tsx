@@ -5,7 +5,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'ZK API Credits',
   description:
-    'Invite-only, unpaid, experimental Base Sepolia pilot for private prepaid API credits with the x402 zk-prepaid scheme. Not independently audited.',
+    'Invite-only, experimental Base Sepolia pilot for private prepaid API credits with the x402 zk-prepaid scheme. Not independently audited.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -26,7 +26,7 @@ import {
 
 const PACK_JSON = JSON.stringify([
   {
-    filename: 'zk-credits-0.2.0.tgz',
+    filename: 'zk-credits-0.2.7.tgz',
     files: [
       { path: 'package.json', size: 1_200 },
       { path: 'dist/zk-credits.js', size: 40_000, integrity: 'sha512-abc' },
@@ -81,20 +81,20 @@ describe('packed contents', () => {
     const baseline = packContentDigest(report!);
 
     const added = parsePackOutput(JSON.stringify([{
-      filename: 'zk-credits-0.2.0.tgz',
+      filename: 'zk-credits-0.2.7.tgz',
       files: [...report!.files, { path: 'dist/extra.js', size: 1 }],
     }]))[0]!;
     expect(packContentDigest(added)).not.toBe(baseline);
 
     const resized = parsePackOutput(JSON.stringify([{
-      filename: 'zk-credits-0.2.0.tgz',
+      filename: 'zk-credits-0.2.7.tgz',
       files: report!.files.map((file) => (file.path === 'package.json' ? { ...file, size: 1_201 } : file)),
     }]))[0]!;
     expect(packContentDigest(resized)).not.toBe(baseline);
 
     // The same contents in a different order must still digest the same.
     const reordered = parsePackOutput(JSON.stringify([{
-      filename: 'zk-credits-0.2.0.tgz',
+      filename: 'zk-credits-0.2.7.tgz',
       files: [...report!.files].reverse(),
     }]))[0]!;
     expect(packContentDigest(reordered)).toBe(baseline);
@@ -112,7 +112,7 @@ describe('an already-published version', () => {
   it('is accepted when its contents match the artifact', () => {
     expect(() => assertVersionMatchesArtifact({
       name: 'zk-credits',
-      version: '0.2.0',
+      version: '0.2.7',
       publishedDigest: 'same',
       expectedDigest: 'same',
     })).not.toThrow();
@@ -121,7 +121,7 @@ describe('an already-published version', () => {
   it('stops the release when its contents differ', () => {
     expect(() => assertVersionMatchesArtifact({
       name: 'zk-credits',
-      version: '0.2.0',
+      version: '0.2.7',
       publishedDigest: 'published',
       expectedDigest: 'expected',
     })).toThrow(/already published with different contents .*bump the version instead of republishing/u);
@@ -130,7 +130,7 @@ describe('an already-published version', () => {
   it('is treated as a first publish when the registry reports no digest', () => {
     expect(() => assertVersionMatchesArtifact({
       name: 'zk-credits',
-      version: '0.2.0',
+      version: '0.2.7',
       publishedDigest: null,
       expectedDigest: 'expected',
     })).not.toThrow();
@@ -140,7 +140,7 @@ describe('an already-published version', () => {
 describe('the sidecar dependency rewrite', () => {
   const manifest = {
     name: 'zk-credits',
-    version: '0.2.0',
+    version: '0.2.7',
     dependencies: {
       '@zk-credits/shared': 'file:../zk-credits-shared',
       '@zk-credits/x402-zk-prepaid': 'file:../x402-zk-prepaid',

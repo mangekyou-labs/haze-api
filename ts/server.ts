@@ -1,5 +1,5 @@
 /** Active Base / x402 gateway entry point. Historical Stellar runtime lives in
- * ts/archive/stellar and is excluded from the active build. The unpaid pilot
+ * ts/archive/stellar and is excluded from the active build. The research pilot
  * runtime has no Stripe checkout, order, refund, dispute, or wallet-link path. */
 
 import { createServer } from 'node:http';

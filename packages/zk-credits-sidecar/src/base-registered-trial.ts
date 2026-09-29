@@ -1,11 +1,11 @@
 /**
- * One-shot local transport for exercising the official @x402/core adapter.
+ * One-shot local transport for the founder's task-running x402 demo agent.
  *
  * @x402/core creates scheme payloads from PaymentRequired and does not pass
  * HTTP method/body context to a scheme client. This harness captures that
  * request context locally, then binds it into the same Base proof factory
  * before invoking the registered `zk-prepaid` scheme. It is intended only for
- * the internal Base Sepolia trial, not as a general HTTP client.
+ * the internal Base Sepolia founder demo, not as a general HTTP client.
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -58,6 +58,19 @@ export interface BaseRegisteredTrialOptions extends BasePrepaidClientOptions {
   body: string;
   headers?: HeadersInit;
   fetch?: typeof fetch;
+  /** The response can be shown locally to the operator; it is never retained by metrics. */
+  onResponse?: (response: Response) => void | Promise<void>;
+}
+
+/** A bounded, single-task request for the founder's internal x402 demo. */
+export function buildBaseRegisteredTrialRequestBody(task = 'Reply with exactly: internal trial complete.'): string {
+  if (typeof task !== 'string' || task.trim().length === 0 || task.length > 4_000) {
+    throw new Error('Task must contain between 1 and 4000 characters');
+  }
+  return JSON.stringify({
+    model: 'deepseek/deepseek-v4-flash',
+    messages: [{ role: 'user', content: task }],
+  });
 }
 
 function observe(options: BaseRegisteredTrialOptions, event: ReturnType<typeof lifecycleStage> | ReturnType<typeof lifecycleFailure>): void {
@@ -225,6 +238,11 @@ export async function runBaseRegisteredTrialExchange(options: BaseRegisteredTria
   }
   result.responseSucceeded = true;
   observe(options, lifecycleStage('exchange_succeeded'));
+  try {
+    await options.onResponse?.(paidResponse.clone());
+  } catch {
+    // Displaying a completed response is local convenience, not settlement.
+  }
   result.committedSlotDelta = ledger.snapshot().committed - startingCommittedSlots;
   return result;
 }

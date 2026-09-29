@@ -236,7 +236,4 @@ export function explorerAddressUrl(address: string): string {
   return `${BASE_SEPOLIA_EXPLORER}/address/${address}`;
 }
 
-export function formatDate(timestamp: number | null): string {
-  if (!timestamp) return 'Pending';
-  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(new Date(timestamp));
-}
+export { formatDate } from './format-date';

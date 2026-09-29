@@ -22,6 +22,7 @@ import {
   assertBoundedApproval,
   assertChainId,
   assertImmutables,
+  assertVerifierLinkage,
   broadcastIntent,
   deploymentIntentDetail,
   intentsFromDetail,
@@ -52,7 +53,7 @@ describe('the pilot chain', () => {
     expect(() => assertChainId(8453)).toThrow(/the RPC reports chain 8453; the pilot is chain 84532 only/u);
   });
 
-  it('builds on the B11 verifier and adapter rather than replacing them', () => {
+  it('keeps the existing v1 verifier and adapter available to the original bond', () => {
     expect(EXISTING_B11_CONTRACTS.verifier).toMatch(/^0x[0-9a-fA-F]{40}$/u);
     expect(EXISTING_B11_CONTRACTS.adapter).toMatch(/^0x[0-9a-fA-F]{40}$/u);
   });
@@ -145,7 +146,7 @@ describe('deployed immutables', () => {
     poseidonT2: '0x7777777777777777777777777777777777777777',
     poseidonT3: '0x8888888888888888888888888888888888888888',
     poseidonT4: '0x9999999999999999999999999999999999999999',
-    spendVerifier: EXISTING_B11_CONTRACTS.adapter,
+    spendVerifier: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     deploymentDomain: `0x${PILOT_CHAIN_ID.toString(16).padStart(64, '0')}`,
   };
 
@@ -159,6 +160,13 @@ describe('deployed immutables', () => {
       treasury: '0x6666666666666666666666666666666666666666',
       deploymentDomain: `0x${(8453).toString(16).padStart(64, '0')}`,
     }, expected)).toThrow(/deploymentDomain is .*expected/u);
+  });
+
+  it('requires a SpendVerifier adapter to point at its pinned verifier', () => {
+    const verifier = '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const wrongVerifier = '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+    expect(() => assertVerifierLinkage(verifier, verifier)).not.toThrow();
+    expect(() => assertVerifierLinkage(wrongVerifier, verifier)).toThrow(/expected verifier/u);
   });
 });
 
@@ -220,22 +228,22 @@ describe('Foundry artifact reconciliation', () => {
     };
   }
 
-  it('parses the four CREATEs and reconciles signer, nonce, order, receipts, and bytecode', async () => {
+  it('parses all six v2 CREATEs and reconciles signer, nonce, order, receipts, and bytecode', async () => {
     const current = intents();
     const artifact = parseFoundryRunLatest(artifactJson(current));
     expect(artifact.chainId).toBe(PILOT_CHAIN_ID);
     expect(artifact.transactions.map((entry) => entry.contract)).toEqual([...CONTRACT_DEPLOY_ORDER]);
 
     const result = await reconcileDeploymentArtifact(current, artifact, chainFor(current));
-    expect(result).toMatchObject({ kind: 'confirmed', bondDeploymentBlock: 103n });
+    expect(result).toMatchObject({ kind: 'confirmed', bondDeploymentBlock: 105n });
     expect(result.deployments?.map((deployment) => deployment.address)).toEqual(current.map((intent) => intent.predictedAddress));
   });
 
   it('uses receipt-linked metadata when Foundry shifts hashes and omits Poseidon names', async () => {
     const current = intents();
-    const shiftedHashes = [current[0]!.transactionHash, current[3]!.transactionHash, current[1]!.transactionHash, current[2]!.transactionHash];
+    const shiftedHashes = [current[0]!.transactionHash, current[5]!.transactionHash, current[1]!.transactionHash, current[2]!.transactionHash, current[3]!.transactionHash, current[4]!.transactionHash];
     const transactions = current.map((intent, index) => ({
-      contractName: index === 3 ? intent.contract : null,
+      contractName: index === 0 || index === 1 || index === 5 ? intent.contract : null,
       transactionType: 'CREATE',
       hash: shiftedHashes[index],
       contractAddress: intent.predictedAddress,
@@ -259,13 +267,13 @@ describe('Foundry artifact reconciliation', () => {
     expect(artifact.transactions.map((entry) => entry.contractAddress)).toEqual(current.map((intent) => intent.predictedAddress));
     const result = await reconcileDeploymentArtifact(current, artifact, chainFor(current));
 
-    expect(result).toMatchObject({ kind: 'confirmed', bondDeploymentBlock: 103n });
+    expect(result).toMatchObject({ kind: 'confirmed', bondDeploymentBlock: 105n });
   });
 
   it('round-trips scalar intent state without persisting private material', () => {
     const current = intents();
     const detail = deploymentIntentDetail(current, '/tmp/run-latest.json');
-    expect(detail).toMatchObject({ signer: SIGNER, startingNonce, contractNonce: startingNonce + 3 });
+    expect(detail).toMatchObject({ signer: SIGNER, startingNonce, contractNonce: startingNonce + 5 });
     expect(JSON.stringify(detail)).not.toContain('cd'.repeat(32));
     expect(intentsFromDetail(detail)).toEqual(current.map(({ transactionHash: _hash, ...intent }) => ({ ...intent, transactionHash: null })));
   });
@@ -274,7 +282,7 @@ describe('Foundry artifact reconciliation', () => {
     ['nonce drift', (transactions: Record<string, unknown>[]) => { transactions[1]!.tx = { ...(transactions[1]!.tx as object), nonce: '0x99' }; }],
     ['reordered deployment', (transactions: Record<string, unknown>[]) => { [transactions[0], transactions[1]] = [transactions[1]!, transactions[0]!]; }],
     ['unexpected transaction type', (transactions: Record<string, unknown>[]) => { transactions[2]!.transactionType = 'CALL'; }],
-    ['reverted receipt', (_transactions: Record<string, unknown>[], receipts: Record<string, unknown>[]) => { receipts[3]!.status = '0x0'; }],
+    ['reverted receipt', (_transactions: Record<string, unknown>[], receipts: Record<string, unknown>[]) => { receipts[5]!.status = '0x0'; }],
   ])('keeps %s artifacts unknown', async (_label, mutate) => {
     const current = intents();
     const artifact = parseFoundryRunLatest(artifactJson(current, mutate));
@@ -288,7 +296,7 @@ describe('Foundry artifact reconciliation', () => {
     raw.transactions.pop();
     const result = await reconcileDeploymentArtifact(current, parseFoundryRunLatest(JSON.stringify(raw)), chainFor(current));
     expect(result.kind).toBe('unknown');
-    expect(result.reason).toMatch(/expected 4/u);
+    expect(result.reason).toMatch(/expected 6/u);
   });
 
   it('keeps a missing deployed bytecode unknown', async () => {

@@ -1,5 +1,5 @@
 /**
- * Versioned operator activation evidence for the invite-only unpaid pilot.
+ * Versioned operator activation evidence for the invite-only research pilot.
  *
  * This bundle is the only artifact committed for an operator activation, so it
  * has to be structurally incapable of carrying anything private. Every leaf is
@@ -13,7 +13,7 @@
  * representable form: there is no string field wide enough to hold one. The
  * denylist below is defense in depth against a future field being added.
  *
- * Schema version 2 reports three counter snapshots read from the operator's
+ * Schema version 3 reports three counter snapshots read from the operator's
  * authenticated loopback `/metrics` body instead of one cumulative total:
  *
  *   beforeWarmup      a fresh sidecar reads zero here
@@ -38,7 +38,7 @@ import {
 } from '@zk-credits/x402-zk-prepaid';
 
 export const ACTIVATION_EVIDENCE_KIND = 'zk-credits.operator-activation-evidence' as const;
-export const ACTIVATION_EVIDENCE_SCHEMA_VERSION = 2 as const;
+export const ACTIVATION_EVIDENCE_SCHEMA_VERSION = 3 as const;
 
 export const OPERATOR_SLOTS = ['A', 'B', 'C'] as const;
 export type OperatorSlot = (typeof OPERATOR_SLOTS)[number];
@@ -49,20 +49,25 @@ export type ParticipantType = (typeof PARTICIPANT_TYPES)[number];
 export const INTEGRATION_MODES = ['openai_compatible_sidecar', 'x402_zk_prepaid_adapter'] as const;
 export type IntegrationMode = (typeof INTEGRATION_MODES)[number];
 
-/**
- * Deterministic slot assignment. A and C are OpenAI-compatible sidecar
- * daily-driver calls; B is an existing x402-native agent that explicitly
- * registers the project adapter.
- */
+/** The participant role is fixed by slot; only A and C are market evidence. */
+export const PILOT_ROLE_BY_SLOT = {
+  A: 'external_codex_developer',
+  B: 'founder_x402_agent',
+  C: 'external_x402_agent',
+} as const;
+
+export type PilotRole = (typeof PILOT_ROLE_BY_SLOT)[OperatorSlot];
+
+/** Deterministic cohort assignment enforced by evidence validation. */
 export const SLOT_ASSIGNMENT: Record<OperatorSlot, { participantType: ParticipantType; integrationMode: IntegrationMode }> = {
   A: { participantType: 'coding_agent', integrationMode: 'openai_compatible_sidecar' },
   B: { participantType: 'x402_native_agent', integrationMode: 'x402_zk_prepaid_adapter' },
-  C: { participantType: 'coding_agent', integrationMode: 'openai_compatible_sidecar' },
+  C: { participantType: 'x402_native_agent', integrationMode: 'x402_zk_prepaid_adapter' },
 };
 
 /** Exact published versions. An activation pinned to anything else is rejected. */
 export const PINNED_ACTIVATION_VERSIONS = {
-  sidecar: '0.2.0',
+  sidecar: '0.2.7',
   adapter: '0.1.0',
   shared: '0.1.0',
 } as const;
@@ -144,7 +149,7 @@ export interface ActivationEvidence {
     artifactRelease: string;
   };
   activatedAt: string;
-  onboardingDurationMs: number;
+  humanActionDurationMs: number;
   counters: Record<CounterSnapshotKey, ActivationCounterSnapshot>;
   assistanceCount: number;
   attestations: ActivationAttestations;
@@ -227,7 +232,7 @@ function checkUnknownKeys(value: Record<string, unknown>, allowed: readonly stri
 
 const EVIDENCE_KEYS = [
   'kind', 'schemaVersion', 'slot', 'participantType', 'integrationMode',
-  'versions', 'activatedAt', 'onboardingDurationMs', 'counters',
+  'versions', 'activatedAt', 'humanActionDurationMs', 'counters',
   'assistanceCount', 'attestations',
 ] as const;
 
@@ -405,7 +410,7 @@ export function validateActivationEvidence(value: unknown, expectedSlot?: Operat
   }
 
   if (!isIsoTimestamp(value.activatedAt)) failures.push({ path: 'activatedAt', reason: 'not_an_iso_timestamp' });
-  if (!isCount(value.onboardingDurationMs)) failures.push({ path: 'onboardingDurationMs', reason: 'not_a_duration' });
+  if (!isCount(value.humanActionDurationMs)) failures.push({ path: 'humanActionDurationMs', reason: 'not_a_duration' });
   if (!isCount(value.assistanceCount)) failures.push({ path: 'assistanceCount', reason: 'not_a_count' });
 
   if (!isRecord(value.counters)) failures.push({ path: 'counters', reason: 'not_an_object' });
@@ -493,7 +498,7 @@ export function activationEvidenceJsonSchema(): Record<string, unknown> {
         },
       },
       activatedAt: { type: 'string', format: 'date-time', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$' },
-      onboardingDurationMs: count,
+      humanActionDurationMs: count,
       counters: {
         type: 'object',
         additionalProperties: false,

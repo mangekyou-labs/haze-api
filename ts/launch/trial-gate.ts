@@ -8,9 +8,11 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { METRIC_NAMES } from '../metrics.js';
+import { BASE_METRIC_NAMES, METRIC_NAMES } from '../metrics.js';
 import { DEFAULT_MAX_ROOT_LAG_BLOCKS } from '../readiness.js';
 import { ProviderRequestError, type HttpTransport } from './providers.js';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 const READINESS_CHECKS = ['launchControl', 'database', 'baseRoot', 'baseRpc', 'verifierAssets', 'provider'] as const;
 const CLAIM_NAMES = ['reserved', 'ready', 'committed', 'cancelled'] as const;
@@ -24,6 +26,20 @@ export type AdminStatusResult = 'pass' | 'unavailable' | 'stale' | 'invalid' | '
 export type AuthenticationResult = 'authenticated' | 'missing_token' | 'unauthorized' | 'unavailable' | 'not_checked';
 export type LaunchControlResult = 'enabled' | 'paused' | 'unknown';
 export type BaseScanResult = 'current' | 'stale' | 'lagging' | 'missing' | 'invalid' | 'unavailable' | 'not_checked';
+export type CompatibilityResult = 'pass' | 'mismatch' | 'unavailable' | 'invalid' | 'not_checked';
+
+export interface TrialGateCompatibilityPin {
+  network: string;
+  chainId: number;
+  circuitId: string;
+  verifyingKeyId: string;
+  verificationKeySha256: string;
+  bondAddress: string;
+  deploymentBlock: string;
+  deploymentDomain: string;
+  spendVerifierAddress: string;
+  groth16VerifierAddress: string;
+}
 
 export type TrialGateCounters = {
   metrics: Record<(typeof METRIC_NAMES)[number], number | null>;
@@ -31,11 +47,12 @@ export type TrialGateCounters = {
 };
 
 export interface TrialGateReport {
-  schemaVersion: 'base-sepolia-internal-trial-gate/v1';
+  schemaVersion: 'base-sepolia-internal-trial-gate/v2';
   checkedAt: string;
   result: GateResult;
   localPreflight: GateResult;
   gatewayReadiness: ReadinessResult;
+  v2Compatibility: CompatibilityResult;
   provider: 'pass' | 'failed' | 'unknown' | 'not_checked';
   adminAuthentication: AuthenticationResult;
   adminStatus: AdminStatusResult;
@@ -56,6 +73,7 @@ export interface TrialGateOptions {
   adminToken?: string;
   transport: HttpTransport;
   now?: () => number;
+  expectedV2Compatibility?: TrialGateCompatibilityPin;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -127,15 +145,95 @@ function mergeLaunchControl(readiness: unknown, admin: unknown): LaunchControlRe
   return 'unknown';
 }
 
+/** Reads the single source of V2 compatibility pins used by the npm sidecar. */
+export async function loadTrialGateCompatibilityPin(
+  manifestPath = resolve(process.cwd(), 'packages/zk-credits-sidecar/circuits/manifest.json'),
+): Promise<TrialGateCompatibilityPin | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.circuit) || !isRecord(parsed.deployment) || !Array.isArray(parsed.artifacts)) return undefined;
+    const circuit = parsed.circuit;
+    const deployment = parsed.deployment;
+    const keyFile = circuit.verificationKey;
+    const keyPin = parsed.artifacts.find((artifact) => isRecord(artifact) && artifact.file === keyFile);
+    if (!isRecord(keyPin)) return undefined;
+    const pin: TrialGateCompatibilityPin = {
+      network: typeof parsed.network === 'string' ? parsed.network : '',
+      chainId: deployment.chainId as number,
+      circuitId: typeof circuit.id === 'string' ? circuit.id : '',
+      verifyingKeyId: typeof deployment.verifyingKeyId === 'string' ? deployment.verifyingKeyId : '',
+      verificationKeySha256: typeof keyPin.sha256 === 'string' ? keyPin.sha256 : '',
+      bondAddress: typeof deployment.bondAddress === 'string' ? deployment.bondAddress : '',
+      deploymentBlock: typeof deployment.deploymentBlock === 'string' ? deployment.deploymentBlock : '',
+      deploymentDomain: typeof deployment.deploymentDomain === 'string' ? deployment.deploymentDomain : '',
+      spendVerifierAddress: typeof deployment.spendVerifierAddress === 'string' ? deployment.spendVerifierAddress : '',
+      groth16VerifierAddress: typeof deployment.groth16VerifierAddress === 'string' ? deployment.groth16VerifierAddress : '',
+    };
+    return pin.network === BASE_SEPOLIA_NETWORK
+      && pin.chainId === 84532
+      && Boolean(pin.circuitId && pin.verifyingKeyId)
+      && /^[0-9a-f]{64}$/u.test(pin.verificationKeySha256)
+      && /^0x[0-9a-fA-F]{40}$/u.test(pin.bondAddress)
+      && /^\d+$/u.test(pin.deploymentBlock)
+      && pin.deploymentDomain === '84532'
+      && /^0x[0-9a-fA-F]{40}$/u.test(pin.spendVerifierAddress)
+      && /^0x[0-9a-fA-F]{40}$/u.test(pin.groth16VerifierAddress)
+      ? pin
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function compareV2Compatibility(value: unknown, pin?: TrialGateCompatibilityPin): CompatibilityResult {
+  if (!pin) return 'invalid';
+  if (!isRecord(value)) return 'unavailable';
+  const address = (candidate: unknown): string | undefined => (
+    typeof candidate === 'string' && /^0x[0-9a-fA-F]{40}$/u.test(candidate) ? candidate.toLowerCase() : undefined
+  );
+  const decimal = (candidate: unknown): string | undefined => (
+    typeof candidate === 'string' && /^\d+$/u.test(candidate) ? candidate : undefined
+  );
+  if (value.status !== 'pass'
+    || typeof value.network !== 'string'
+    || !Number.isSafeInteger(value.chainId)
+    || typeof value.circuitId !== 'string'
+    || typeof value.verifyingKeyId !== 'string'
+    || typeof value.verificationKeySha256 !== 'string'
+    || !/^[0-9a-f]{64}$/u.test(value.verificationKeySha256)
+    || !address(value.bondAddress)
+    || !decimal(value.deploymentBlock)
+    || !decimal(value.deploymentDomain)
+    || !decimal(value.onchainDeploymentDomain)
+    || !address(value.bondSpendVerifierAddress)
+    || !address(value.groth16VerifierAddress)
+    || value.bytecodePresent !== true) {
+    return 'invalid';
+  }
+  const matches = value.network === pin.network
+    && value.chainId === pin.chainId
+    && value.circuitId === pin.circuitId
+    && value.verifyingKeyId === pin.verifyingKeyId
+    && value.verificationKeySha256 === pin.verificationKeySha256
+    && address(value.bondAddress) === pin.bondAddress.toLowerCase()
+    && decimal(value.deploymentBlock) === pin.deploymentBlock
+    && decimal(value.deploymentDomain) === pin.deploymentDomain
+    && decimal(value.onchainDeploymentDomain) === pin.deploymentDomain
+    && address(value.bondSpendVerifierAddress) === pin.spendVerifierAddress.toLowerCase()
+    && address(value.groth16VerifierAddress) === pin.groth16VerifierAddress.toLowerCase();
+  return matches ? 'pass' : 'mismatch';
+}
+
 /** Collects one fresh, machine-readable gate snapshot without changing state. */
 export async function collectTrialGate(options: TrialGateOptions): Promise<TrialGateReport> {
   const now = (options.now ?? Date.now)();
   const report: TrialGateReport = {
-    schemaVersion: 'base-sepolia-internal-trial-gate/v1',
+    schemaVersion: 'base-sepolia-internal-trial-gate/v2',
     checkedAt: new Date(now).toISOString(),
     result: 'fail',
     localPreflight: options.localPreflightPassed ? 'pass' : 'fail',
     gatewayReadiness: options.localPreflightPassed ? 'unavailable' : 'not_checked',
+    v2Compatibility: options.localPreflightPassed ? 'unavailable' : 'not_checked',
     provider: options.localPreflightPassed ? 'unknown' : 'not_checked',
     adminAuthentication: options.localPreflightPassed ? 'unavailable' : 'not_checked',
     adminStatus: options.localPreflightPassed ? 'unavailable' : 'not_checked',
@@ -178,6 +276,7 @@ export async function collectTrialGate(options: TrialGateOptions): Promise<Trial
     report.gatewayReadiness = 'invalid';
   } else {
     readinessControl = readyBody.launchControl;
+    report.v2Compatibility = compareV2Compatibility(readyBody.v2Compatibility, options.expectedV2Compatibility);
     const checks = Array.isArray(readyBody.checks) ? readyBody.checks : undefined;
     const byName = new Map<string, JsonRecord>();
     let checksValid = Boolean(checks);
@@ -233,10 +332,13 @@ export async function collectTrialGate(options: TrialGateOptions): Promise<Trial
     const isTimestampFresh = isFresh(body.generatedAt, now);
 
     let countersValid = Boolean(rawMetrics && rawClaims);
+    const requiredMetrics = new Set<string>(BASE_METRIC_NAMES);
     for (const name of METRIC_NAMES) {
       const count = safeCount(rawMetrics?.[name]);
       report.counters.metrics[name] = count;
-      if (count === null) countersValid = false;
+      if (count === null && (requiredMetrics.has(name) || (rawMetrics && Object.hasOwn(rawMetrics, name)))) {
+        countersValid = false;
+      }
     }
     for (const name of CLAIM_NAMES) {
       const count = safeCount(rawClaims?.[name]);
@@ -297,6 +399,7 @@ export async function collectTrialGate(options: TrialGateOptions): Promise<Trial
   report.launchControl = mergeLaunchControl(readinessControl, adminControl);
   const passed = report.localPreflight === 'pass'
     && report.gatewayReadiness === 'pass'
+    && report.v2Compatibility === 'pass'
     && report.provider === 'pass'
     && report.adminAuthentication === 'authenticated'
     && report.adminStatus === 'pass'

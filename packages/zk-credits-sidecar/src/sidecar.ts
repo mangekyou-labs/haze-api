@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { codexModelsResponse } from './codex-profile.js';
+import { responsesEventStream, translateResponsesRequest } from './responses-bridge.js';
 import type { BaseProofMetricsSnapshot } from './proof-metrics.js';
 import {
   PAYMENT_REQUIRED_HEADER,
@@ -28,6 +29,8 @@ export interface SidecarOptions {
   localToken: string;
   gatewayBaseUrl: string;
   prepaidClient: PrepaidTransport;
+  /** Limits this process to one authenticated, valid spend request for the internal trial. */
+  internalTrialOneProof?: boolean;
   /** Aggregate-only proof and exchange metrics served to the authenticated local operator. */
   metrics?: () => SidecarMetricsSnapshot;
 }
@@ -113,10 +116,40 @@ async function relayGatewayResponse(res: ServerResponse, upstream: Response): Pr
   }
 }
 
+async function relayResponsesGatewayResponse(
+  res: ServerResponse,
+  upstream: Response,
+  responseModel: string,
+): Promise<void> {
+  if (upstream.status < 200 || upstream.status >= 300) {
+    await relayGatewayResponse(res, upstream);
+    return;
+  }
+  const upstreamText = await upstream.text();
+  let completion: unknown;
+  try {
+    completion = JSON.parse(upstreamText) as unknown;
+  } catch {
+    throw new Error('Gateway returned an invalid chat completion');
+  }
+  const eventStream = responsesEventStream(completion, responseModel);
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+  };
+  for (const name of PAYMENT_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  res.writeHead(upstream.status, headers);
+  res.end(eventStream);
+}
+
 /** Creates a loopback-only proxy whose sole spend path is x402 zk-prepaid. */
 export function createSidecarServer(options: SidecarOptions): RunningSidecar {
   const gatewayBaseUrl = options.gatewayBaseUrl.replace(/\/$/u, '');
   let server: Server | null = null;
+  let internalTrialRequestClaimed = false;
   const inFlight = new Set<Promise<void>>();
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -150,7 +183,7 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       sendJson(res, 200, options.metrics());
       return;
     }
-    if (req.method !== 'POST' || pathname !== '/v1/chat/completions') {
+    if (req.method !== 'POST' || (pathname !== '/v1/chat/completions' && pathname !== '/v1/responses')) {
       sendJson(res, 404, { error: 'unsupported_openai_path' });
       return;
     }
@@ -161,17 +194,38 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
 
     try {
       const body = await readJsonBody(req);
-      const rejection = completionRejection(body.parsed);
-      if (rejection) {
-        sendJson(res, 400, { error: rejection });
-        return;
+      const isResponses = pathname === '/v1/responses';
+      let outboundBody = body.raw;
+      let responseModel = '';
+      if (isResponses) {
+        const translation = translateResponsesRequest(body.parsed);
+        if (!translation.ok) {
+          sendJson(res, 400, { error: translation.error });
+          return;
+        }
+        outboundBody = JSON.stringify(translation.chatRequest);
+        responseModel = translation.responseModel;
+      } else {
+        const rejection = completionRejection(body.parsed);
+        if (rejection) {
+          sendJson(res, 400, { error: rejection });
+          return;
+        }
       }
-      const upstream = await options.prepaidClient.fetch(`${gatewayBaseUrl}${pathname}`, {
+      if (options.internalTrialOneProof) {
+        if (internalTrialRequestClaimed) {
+          sendJson(res, 409, { error: 'internal_trial_limit_reached' });
+          return;
+        }
+        internalTrialRequestClaimed = true;
+      }
+      const upstream = await options.prepaidClient.fetch(`${gatewayBaseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: body.raw,
+        body: outboundBody,
       });
-      await relayGatewayResponse(res, upstream);
+      if (isResponses) await relayResponsesGatewayResponse(res, upstream, responseModel);
+      else await relayGatewayResponse(res, upstream);
     } catch (error: unknown) {
       if (!res.headersSent) {
         sendJson(res, 502, {

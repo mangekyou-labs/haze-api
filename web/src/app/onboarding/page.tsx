@@ -2,13 +2,16 @@ import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import Link from 'next/link';
 
+const CODEX_FIRST_USE_GUIDE =
+  'https://github.com/mangekyou-labs/haze-api/blob/main/docs/onboarding/base-zk-credits-codex-first-use.md';
+
 export default function OnboardingPage() {
   return (
     <main className="flex min-h-screen flex-col">
       <SiteHeader />
       <div className="mx-auto flex w-full max-w-3xl flex-1 items-center px-6 py-16">
         <section className="w-full rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 shadow-2xl shadow-black/20">
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Invite-only · unpaid · experimental</p>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Invite-only · research pilot · experimental</p>
           <h1 className="mt-3 text-3xl font-bold tracking-tight text-white">Join the Base Sepolia pilot</h1>
           <p className="mt-4 text-sm leading-6 text-zinc-400">
             The pilot is limited to founder-issued invites and GitHub sign-in.
@@ -16,20 +19,31 @@ export default function OnboardingPage() {
             step, no card, and no wallet flow. The browser generates your
             secret, and the service never receives it or your backup password.
           </p>
+          <p className="mt-3 text-sm leading-6 text-zinc-400">
+            External slots A and C receive a fixed $25 honorarium for a
+            30-minute session even if setup fails. This research payment is not
+            product revenue or willingness-to-pay evidence.
+          </p>
           <ol className="mt-8 space-y-4 text-sm text-zinc-300">
             <li><span className="font-semibold text-cyan-200">01.</span> Sign in with GitHub.</li>
             <li><span className="font-semibold text-cyan-200">02.</span> Redeem your single-use pilot invite.</li>
             <li><span className="font-semibold text-cyan-200">03.</span> Generate, download, and re-import your recovery capsule.</li>
             <li><span className="font-semibold text-cyan-200">04.</span> A founder provisions tier 0 test credits on Base Sepolia; verify the activated credential locally.</li>
-            <li><span className="font-semibold text-cyan-200">05.</span> Point the project sidecar, or an x402-native agent with the custom zk-prepaid adapter registered, at the activated credential and make a call.</li>
+            <li><span className="font-semibold text-cyan-200">05.</span> A founder pregrants access to the proving bundle. For Codex, give it one setup instruction from the <a className="text-cyan-200 underline underline-offset-4" href={CODEX_FIRST_USE_GUIDE} target="_blank" rel="noreferrer">first-use guide</a>; Codex verifies and installs the pinned bundle. x402 operators integrate the request-aware adapter into their own agent.</li>
           </ol>
           <p className="mt-6 text-xs leading-5 text-zinc-500">
+            The first-use target is five minutes of active human setup; unattended
+            download, proving, and provider waits are recorded separately. For
+            valid spends, the proof is designed for payer and credential
+            unlinkability. The model provider still receives each request.
+            <br />
             Experimental software on a test network: the circuit is
             experimental and not independently audited, and nothing here is
             production-ready. The supported clients are the project sidecar
             and x402-native agents that explicitly register the project
             <code className="mx-1 text-zinc-400">zk-prepaid</code> adapter.
-            Pilot telemetry does not collect prompts, responses, secrets,
+            For valid spends, the proof is designed for payer and credential
+            unlinkability. Pilot telemetry does not collect prompts, responses, secrets,
             proofs, nullifiers, request signals, or payer/spend-plane joins;
             the gateway and the upstream provider can still observe request
             content and traffic metadata.

@@ -16,6 +16,9 @@ interface NetworkStatus {
 }
 
 const CONTRACT_PATTERN = /^0x[0-9a-fA-F]{40}$/u;
+const PUBLIC_GATEWAY_URL = process.env.PUBLIC_GATEWAY_URL?.trim()
+  || process.env.NEXT_PUBLIC_GATEWAY_URL?.trim()
+  || 'https://zk-credits-gateway.onrender.com';
 
 async function networkStatus(): Promise<NetworkStatus> {
   try {
@@ -46,7 +49,7 @@ export default async function DashboardPage() {
       <div className="mx-auto w-full max-w-4xl flex-1 px-6 py-12">
         <div className="mb-8 flex items-center justify-between gap-4">
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Invite-only unpaid pilot</p>
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Invite-only research pilot</p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">Pilot onboarding</h1>
             <p className="mt-1 text-sm text-zinc-400">
               {session.user?.email ?? session.user?.name} · experimental Base Sepolia, no payment
@@ -68,16 +71,24 @@ export default async function DashboardPage() {
         </div>
 
         <p className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-sm leading-6 text-zinc-400">
-          This pilot is invite-only, unpaid, and experimental. Founder-issued
+          This pilot is invite-only and experimental. Founder-issued
           invites provision Base Sepolia test credits; there is no payment
-          step, no card, and no wallet flow. Your credential secret and backup
+          step for product calls, no card, and no wallet flow. External slots A
+          and C receive a fixed $25 research honorarium for a 30-minute session
+          even if setup fails. It is not product revenue or payment intent.
+          Your credential secret and backup
           password never leave this browser. Pilot telemetry does not collect
           prompts, responses, secrets, proofs, nullifiers, request signals, or
-          payer/spend-plane joins; the gateway and the upstream provider can
-          still observe request content and traffic metadata.
+          payer/spend-plane joins. For valid spends, the payment proof is
+          designed for payer and credential unlinkability; the gateway and the
+          upstream provider still receive requests and can observe their
+          content and traffic metadata.
         </p>
 
-        <PilotOnboardingFlow network={network} gatewayBaseUrl={process.env.PUBLIC_GATEWAY_URL ?? 'https://your-gateway.example'} />
+        <PilotOnboardingFlow
+          network={network}
+          gatewayBaseUrl={PUBLIC_GATEWAY_URL}
+        />
 
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Supported clients</p>

@@ -14,10 +14,11 @@ import {
 } from '@zk-credits/x402-zk-prepaid';
 import { createCredential, deriveRequestSignal, generateSecret } from '@zk-credits/shared/base';
 import { BaseSlotLedger } from './slot-ledger.js';
-import { runBaseRegisteredTrialExchange } from './base-registered-trial.js';
+import { normalizeServiceClassRequest } from '../../../ts/service-class.js';
+import { buildBaseRegisteredTrialRequestBody, runBaseRegisteredTrialExchange } from './base-registered-trial.js';
 
 const target = 'https://api.test/v1/chat/completions';
-const body = '{"messages":[{"role":"user","content":"trial probe"}],"stream":false}';
+const body = buildBaseRegisteredTrialRequestBody();
 const witnessProvider = {
   witnessForCredential: async () => ({
     root: '123',
@@ -43,12 +44,26 @@ async function credential() {
 }
 
 describe('Base direct registered-adapter trial harness', () => {
+  it('sends a request the gateway accepts before issuing its 402 challenge', () => {
+    expect(normalizeServiceClassRequest(JSON.parse(body))).toMatchObject({ ok: true });
+  });
+
+  it('builds a bounded custom task body for the founder demo agent', () => {
+    expect(JSON.parse(buildBaseRegisteredTrialRequestBody('Summarize this example locally.'))).toMatchObject({
+      model: 'deepseek/deepseek-v4-flash',
+      messages: [{ role: 'user', content: 'Summarize this example locally.' }],
+    });
+    expect(() => buildBaseRegisteredTrialRequestBody('   ')).toThrow(/between 1 and 4000/u);
+    expect(() => buildBaseRegisteredTrialRequestBody('x'.repeat(4_001))).toThrow(/between 1 and 4000/u);
+  });
+
   it('binds the HTTP request in the local proof factory and completes the official adapter handshake', async () => {
     const ledger = await BaseSlotLedger.open({});
     const accepted = requirements();
     const metrics = createZkPrepaidLifecycleMetrics();
     let calls = 0;
     let signatureHeader = '';
+    let displayedResponse = '';
     let mockFailure: string | undefined;
     const result = await runBaseRegisteredTrialExchange({
       url: target,
@@ -58,6 +73,7 @@ describe('Base direct registered-adapter trial harness', () => {
       slotLedger: ledger,
       witnessProvider,
       lifecycle: metrics.observe,
+      onResponse: async (response) => { displayedResponse = await response.text(); },
       prove: async (_input, context) => ({ proof: { pi_a: ['1'], pi_b: [['1']], pi_c: ['1'] }, publicSignals: [...context.expectedPublicSignals] }),
       fetch: async (input, init) => {
         calls += 1;
@@ -111,6 +127,7 @@ describe('Base direct registered-adapter trial harness', () => {
     });
     expect(result.failurePhase).toBeUndefined();
     expect(ledger.committedSlots()).toHaveLength(1);
+    expect(displayedResponse).toBe('{"ok":true}');
     expect(metrics.snapshot()).toMatchObject({
       challengesReceived: 1,
       paymentsPrepared: 1,

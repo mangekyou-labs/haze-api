@@ -113,6 +113,13 @@ exists only after the sidecar has produced a self-verified spend proof and
 presented it for reservation. A claim can be reserved, ready, committed, or
 cancelled.
 
+## Claim completion
+
+The outcome of a verified claim after reservation: a successful response makes
+it ready and then committed, while a failure before readiness may cancel the
+reservation. A ready claim with an uncertain commit remains held until its
+outcome is reconciled.
+
 ## Reservation
 
 A temporary exclusive hold on the credit identified by a claim while the
@@ -214,12 +221,27 @@ An ordinary payer-identifying x402 session used as a paper alternative during
 validation. It is not a product path.
 _Avoid_: exact rail, supported session product
 
-## Unpaid pilot participant
+## External pilot participant
 
-An invitee in the amended first cohort who receives founder-provisioned test
-credits, runs its own agent and credential on Base Sepolia, and contributes
-behavioral evidence without making a real payment. The team may assist with
-installation but never handles the participant's secret.
+An invited operator outside the founding team who runs their own agent and
+credential on Base Sepolia and contributes usability and market evidence.
+Slots A and C are external participants. Each receives a fixed $25 research
+honorarium for a 30-minute session even if setup fails. The honorarium is not a
+product payment, revenue, or evidence of willingness to pay.
+
+## Founder technical participant
+
+The founder running the x402 agent in slot B after the internal demo. The run
+checks the technical path and is counted as a technical activation only. It is
+not an external participant or market-validation observation.
+
+## Technical activation
+
+A real call from the participant's own agent that completes the supported
+`zk-prepaid` challenge, local proof and self-check, `PAYMENT-SIGNATURE`,
+facilitator settlement, and `PAYMENT-RESPONSE` exchange. A technical activation
+can be external or founder-run; only external activations count toward market
+validation.
 
 ## Adapter-enabled x402 agent
 
@@ -230,13 +252,26 @@ An unmodified generic x402 client is not an adapter-enabled x402 agent.
 
 ## Credible payment intent
 
-An unpaid pilot participant's acceptance of a concrete paid-pilot price or a
-dated next step to decide on that price. General enthusiasm, a preference for
-privacy, or a willingness to keep testing is not credible payment intent.
+An external participant's concrete response to a stated product price, such as
+agreeing to a paid pilot at that price or scheduling a dated decision about it.
+General enthusiasm, a preference for privacy, a willingness to keep testing,
+and the $25 research honorarium are not payment intent.
 
-These three terms apply only to the amended unpaid pilot. The existing
-definitions of activated design partner and renewal intent remain unchanged
-historical definitions for the paid pilot.
+## Human setup time
+
+The participant's active time spent on setup actions through the first counted
+call. It excludes unattended download, installation, proof, and provider wait
+time. The five-minute target is a usability target; a valid exchange remains a
+valid activation if the participant takes longer.
+
+## Research honorarium
+
+The fixed $25 payment for a 30-minute external research session, paid regardless
+of whether setup succeeds. It compensates participation and is kept separate
+from product revenue, willingness to pay, and credible payment intent.
+
+The original paid-pilot definitions of activated design partner and renewal
+intent remain historical definitions and do not describe this research cohort.
 
 ## Pilot invite
 
@@ -255,6 +290,14 @@ produced it: its only durable identifiers are the digest and, after the first
 funding attempt, the commitment it is bound to. One capability binds to one
 commitment; retries return the same authoritative result.
 _Avoid_: API key, purchase, order, license
+
+## Funding attempt
+
+The use of a funding capability to sponsor one bundle for its bound commitment.
+An attempt remains unresolved when a transaction may have been broadcast but
+its outcome is unknown; it cannot authorize another broadcast until that
+uncertainty is reconciled. A confirmed funding result may be recorded after the
+capability expires.
 
 ## Recovery capsule
 
@@ -284,4 +327,3 @@ The detached side of onboarding: funding capabilities and the Base Sepolia
 funding transaction. It never stores a GitHub account id, an invite id, or any
 other identifier that could join a commitment back to a person. The two planes
 are separate database schemas with no foreign key and no durable join.
-

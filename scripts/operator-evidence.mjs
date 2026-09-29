@@ -4,7 +4,7 @@
 //
 //   operator-evidence.mjs warmup    verify the discarded warm-up window
 //   operator-evidence.mjs hot       verify the counted exchange window
-//   operator-evidence.mjs bundle    write the version-2 evidence bundle
+//   operator-evidence.mjs bundle    write the version-3 evidence bundle
 //
 // The activation evidence is three snapshots of the sidecar's authenticated
 // loopback counters — before the warm-up, after the warm-up, and after the
@@ -189,7 +189,7 @@ function requireEnv(name) {
 function bundleCommand() {
   const evidence = {
     kind: 'zk-credits.operator-activation-evidence',
-    schemaVersion: 2,
+    schemaVersion: 3,
     slot: requireEnv('SLOT'),
     participantType: requireEnv('PARTICIPANT_TYPE'),
     integrationMode: requireEnv('INTEGRATION_MODE'),
@@ -200,7 +200,7 @@ function bundleCommand() {
       artifactRelease: requireEnv('PINNED_ARTIFACT_RELEASE'),
     },
     activatedAt: new Date().toISOString(),
-    onboardingDurationMs: Number(requireEnv('ONBOARDING_MS')),
+    humanActionDurationMs: parseHumanActionMs(),
     counters: {
       beforeWarmup: snapshotOf(parse('METRICS_FRESH')),
       afterWarmup: snapshotOf(parse('METRICS_AFTER_WARMUP')),
@@ -219,7 +219,7 @@ function bundleCommand() {
   // malformed activation is caught here rather than after it is sent.
   const allowed = new Set([
     'kind', 'schemaVersion', 'slot', 'participantType', 'integrationMode', 'versions',
-    'activatedAt', 'onboardingDurationMs', 'counters', 'assistanceCount', 'attestations',
+    'activatedAt', 'humanActionDurationMs', 'counters', 'assistanceCount', 'attestations',
   ]);
   const stray = Object.keys(evidence).filter((key) => !allowed.has(key));
   if (stray.length > 0) throw new Error(`unexpected evidence fields: ${stray.join(', ')}`);
@@ -246,6 +246,14 @@ function bundleCommand() {
   const hot = delta(evidence.counters.afterWarmup, evidence.counters.afterHotExchange);
   console.log(`  counted exchange: ${hot.exchange.exchangeSuccesses} succeeded, ${hot.exchange.failures} failed, ${hot.proving.hotProveSamples} hot proof sample(s)`);
   return 0;
+}
+
+function parseHumanActionMs() {
+  const raw = requireEnv('HUMAN_ACTION_MS');
+  if (!/^[0-9]+$/u.test(raw)) throw new Error('HUMAN_ACTION_MS must be a whole number of milliseconds');
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) throw new Error('HUMAN_ACTION_MS must be a safe integer');
+  return value;
 }
 
 const command = process.argv[2];

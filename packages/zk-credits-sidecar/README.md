@@ -2,12 +2,14 @@
 
 Loopback sidecar that attaches a hash-pinned BN254 Groth16 proof to each
 coding-agent LLM request through the experimental x402 `zk-prepaid` scheme.
-Built for the invite-only, unpaid, experimental Base Sepolia pilot; credits
-are founder-provisioned test credits, and the circuit is not independently
-audited.
+Built for the invite-only experimental Base Sepolia pilot. Product calls use
+founder-provisioned test credits and have no product payment step; the circuit
+is not independently audited. External research participants in slots A and C
+receive $25 for a 30-minute session regardless of setup success. That payment
+is not product revenue or willingness-to-pay evidence.
 
 ```bash
-npm install --global zk-credits
+npm install --global zk-credits@0.2.7
 ```
 
 ## Pinned pilot versions
@@ -17,15 +19,17 @@ not mix versions between the sidecar, the adapter package, and the gateway:
 
 | Package | Version |
 | --- | --- |
-| `zk-credits` (this sidecar) | `0.2.0` |
+| `zk-credits` (this sidecar) | `0.2.7` |
 | `@zk-credits/x402-zk-prepaid` (adapter) | `0.1.0` |
 | `@zk-credits/shared` | `0.1.0` |
 
-`zk-credits@0.2.0` is a breaking release against the Base Sepolia pilot: it
-speaks only the non-streaming `POST /v1/chat/completions` service class below
-and carries no Stellar or evaluation path. The proving artifacts
-(`private-credit-spend-bn254-dev-sepolia-v1`) are delivered directly through
-the invite channel, never from a public host.
+The pinned Base Sepolia trial version is `0.2.7`. It uses the non-streaming
+`POST /v1/chat/completions` path below, includes the narrow loopback Responses
+bridge for supported Codex text and function-tool requests, and acquires the
+pinned private proving bundle through the local GitHub CLI session. It also
+synchronizes V2 Base events and checks the gateway known root before local
+setup completes. The proving artifacts are available only from the private
+immutable release pinned by `circuits/manifest.json`.
 
 Verify the shipped artifacts before your first prove. The package's
 `circuits/manifest.json` fixes the SHA-256 of the frozen
@@ -43,9 +47,9 @@ an arbitrary API call, and the gateway enforces the class before it reserves
 the credit:
 
 - text messages, tool definitions, and tool calls, with one generated choice;
-- no streaming, images, files, audio, web plugins, model fallback,
+- no provider streaming, images, files, audio, web search, model fallback,
   client-selected routing, or unknown cost-affecting fields;
-- input capped at 16,000 UTF-8 bytes (counted conservatively, never below the
+- input capped at 128,000 UTF-8 byte units (counted conservatively, never below the
   provider's token count), output at 4,000 tokens, request body at 256 KiB,
   encrypted replay at 1 MiB, and upstream timeout at 120 seconds.
 
@@ -55,58 +59,79 @@ still receives the class. A rejected request consumes no credit.
 
 ## First run
 
-1. Redeem an invite to the unpaid, experimental Base Sepolia pilot and
-   download the password-encrypted credential backup. Credits are
-   founder-provisioned test credits; there is no payment step.
-2. Install the pinned proving artifacts. The package ships
-   `circuits/manifest.json`, which fixes the SHA-256 of the frozen
-   `private_credit_spend.wasm`, `private_credit_spend.zkey`, and
-   `verification_key_private_credit.json`. The bytes are installed out of
-   band; the sidecar never fetches proving material at runtime:
+1. Redeem the founder-prepared invite and download the encrypted V2 credential
+   export. The founder grants access to the private bundle repository
+   `mangekyou-labs/zk-credits-base-sepolia-v2-bundle` before the session.
+2. Give Codex the single setup instruction in the
+   [first-use guide](../../docs/onboarding/base-zk-credits-codex-first-use.md).
+   Codex checks local GitHub CLI authentication and repository access, installs
+   this pinned release, downloads and verifies the bundle, and runs setup.
+   The human signs in if needed, enters the recovery password at the hidden
+   prompt, gives consent, and chooses their own task. No product payment is
+   involved. The sidecar uses the local GitHub CLI session and never receives
+   or stores the GitHub token.
+3. The setup command sets the credential, gateway, and Base Sepolia RPC
+   endpoint:
 
    ```bash
-   export ZK_CREDITS_ARTIFACT_DIR="$PWD/private-credit-bundle"
-   ls "$ZK_CREDITS_ARTIFACT_DIR"   # the three pinned files
+   export ZK_CREDITS_CREDENTIAL_PATH="$HOME/Downloads/zk-credits-credential.json"
+   export ZK_CREDITS_GATEWAY_URL="https://zk-credits-gateway.onrender.com"
+   export BASE_RPC_URL="https://sepolia.base.org"
    ```
+
+   `zk-credits setup codex` searches the standard local folders first. If it
+   finds no valid bundle, it downloads the pinned release, verifies the
+   release id, tag, immutability, archive digest, and all three file digests,
+   then atomically installs the bundle under `~/.zk-credits/artifacts` with
+   owner-only permissions. Missing GitHub access or any mismatch stops setup.
+   It syncs public Base events from the pinned V2 bond and deployment block,
+   validates that the resulting witness resolves the activated credential,
+   and asks the gateway's public `POST /v1/root-known` endpoint whether the
+   resulting root is known. This check sends no admin token and returns only
+   `{ "known": boolean }`; the protected admin endpoints remain unavailable
+   to setup. The witness and event cache remain local. The package does not
+   accept a supplied witness file for this V2 deployment.
+
+   The package ships `circuits/manifest.json`, which fixes the immutable
+   release identity, the SHA-256 of the archive and each proving artifact, and
+   the V2 Base deployment pins. `BASE_PRIVATE_CREDIT_BOND_ADDRESS` and
+   `BASE_DEPLOYMENT_BLOCK` are optional checks; if set, they must match the
+   manifest. V2 setup rejects `ZK_CREDITS_WITNESS_PATH` because it builds the
+   witness from the pinned public Base events. The local setup config is
+   owner-readable only and never stores the credential password. If the RPC
+   URL contains a provider key, it remains in that local config file.
 
    A missing, relocated, symlinked-out, or altered artifact fails closed
    before the first prove. A hash mismatch is a proof failure: no payment
-   leaves, and the local slot stays reusable.
-
-3. Configure the credential and a witness source:
-
-   ```bash
-   export ZK_CREDITS_CREDENTIAL_PATH="$PWD/credential.json"
-   export ZK_CREDITS_CREDENTIAL_PASSWORD='use-a-long-local-password'
-   ```
-
-   Set `ZK_CREDITS_WITNESS_PATH` to a local witness artifact — either a
-   prepared witness (`root`, `pathElements`, `pathIndices`) or a public tree
-   (`leaves: [{ index, leaf, expiry? }]`, optional `root`) from which the
-   sidecar derives the depth-20 path — or configure `BASE_RPC_URL`,
-   `BASE_PRIVATE_CREDIT_BOND_ADDRESS`, and optionally
-   `BASE_DEPLOYMENT_BLOCK` so the sidecar synchronizes public `BundleFunded`
-   events and builds a local Merkle witness. The gateway never serves a path
+   leaves, and the local slot stays reusable. The gateway never serves a path
    for a named leaf or commitment.
 
-4. Run:
+4. Start setup. It verifies the credential, pinned artifact hashes, and
+   witness locally, then prompts for the backup password without echo:
 
    ```bash
-   zk-credits cline "summarize this repository"
-   zk-credits setup codex && zk-credits codex "summarize this repository"
+   zk-credits setup codex
    ```
+
+   No gateway admin token is required. Then run `zk-credits codex` to open
+   Codex with the local sidecar. A/C first-use measurement targets five
+   minutes of active human work; unattended download, proving, and provider
+   waits are measured separately. More than five minutes is a friction finding.
 
 The sidecar binds `127.0.0.1:3210` only. It does not modify `~/.cline` or
 `~/.codex`.
 
 ## Supported route
 
-The pilot serves one spend path: non-streaming `POST /v1/chat/completions`
-on the loopback listener, either through this sidecar (the supported
-OpenAI-compatible client) or through an x402-native agent that explicitly
-registers the project `zk-prepaid` adapter. Generic x402 clients, unmodified
-agents, public facilitators, Bazaar, MCP, and the standard `exact` rail are
-unsupported; the sidecar never falls back to another rail.
+The pilot serves one bounded upstream spend path: non-streaming
+`POST /v1/chat/completions`, either through this sidecar or through an
+x402-native agent that explicitly registers the project `zk-prepaid` adapter.
+The sidecar also accepts Codex `POST /v1/responses` requests with text input
+and function tools, translates them to that bounded chat request, and converts
+the committed result into Responses SSE events. It rejects unsupported fields
+before starting a proof. Generic x402 clients, public facilitators, Bazaar,
+MCP, and the standard `exact` rail are unsupported; the sidecar never falls
+back to another rail.
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
@@ -114,10 +139,14 @@ unsupported; the sidecar never falls back to another rail.
 | `GET /v1/models` | local token | Codex model discovery |
 | `GET /metrics` | local token | Aggregate proof metrics (below) |
 | `POST /v1/chat/completions` | local token | The only proving and spend path |
+| `POST /v1/responses` | local token | Codex bridge to the bounded chat spend path |
 
-`/v1/responses`, Anthropic `/v1/messages`, streaming bodies (`stream`,
-`stream_options`), and a missing `model` are rejected with a `4xx` before any
-proof is attempted. Unknown paths return `404 unsupported_openai_path`. The
+The chat route rejects streaming bodies (`stream`, `stream_options`) and a
+missing `model` with a `4xx` before any proof. The Responses route requires
+`stream: true`, text-only message/function-call input, and the known Codex
+metadata fields; it rejects images, unsupported tools, and unknown controls
+before any proof. Its upstream request is always `stream: false`. Anthropic
+`/v1/messages` and unknown paths return `404 unsupported_openai_path`. The
 sidecar never substitutes a model and never falls back to another rail.
 
 ### Gateway responses and retries
@@ -178,10 +207,19 @@ zk-credits cline [cline arguments...]
 zk-credits setup codex [--model <model>]
 zk-credits codex [codex arguments...]
 zk-credits status
-zk-credits serve [--port <port>]
+zk-credits serve [--port <port>] [--internal-trial-one-proof]
+zk-credits x402-agent
+zk-credits founder-demo-agent
 zk-credits trial-registered-adapter
 eval "$(zk-credits env)"
 ```
+
+`serve --internal-trial-one-proof` is an opt-in maintainer mode for the
+internal Base Sepolia trial. During that process lifetime, one authenticated,
+valid spend request may reach the prepaid transport and the proof factory may
+attempt one proof. A later valid request receives HTTP 409 with
+`internal_trial_limit_reached`; ordinary `serve` behavior is unchanged without
+the flag.
 
 `trial-registered-adapter` is a maintainer-only internal trial command. It
 requires the locally recovered credential and pinned proving bundle, prompts
@@ -199,6 +237,17 @@ Codex SDK:
 ```ts
 import { buildCodexSdkOptions, buildCodexThreadOptions } from 'zk-credits/codex';
 ```
+
+`zk-credits/x402` exports `createLocalX402Agent` for an operator who is
+integrating the adapter into their own x402 agent. It loads the same local
+credential, pinned proof artifacts, public witness, proof engine, and slot
+ledger used by the sidecar. The request-aware client binds the actual method,
+URL, and body into each spend; its metrics endpoint exposes authenticated
+aggregate counters on loopback. See
+[`docs/onboarding/base-zk-credits-x402-agent.md`](../../docs/onboarding/base-zk-credits-x402-agent.md)
+for integration and measured-call steps. The included `zk-credits x402-agent`
+command is a small task-running starter for the founder demo and local
+rehearsal; external slot C uses their own agent.
 
 The credential secret is decrypted only in local memory. The sidecar cache
 contains public Base event leaves and never stores the secret, prompt, response,

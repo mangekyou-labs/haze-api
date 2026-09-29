@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { auth } from '@/auth';
 
-export const REPO_URL = 'https://github.com/mangekyou-labs/haze';
+export const REPO_URL = 'https://github.com/mangekyou-labs/haze-api';
 
 export async function SiteHeader() {
   const session = await auth();

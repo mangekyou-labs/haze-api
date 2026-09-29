@@ -64,16 +64,17 @@ Class boundary:
 
 - Accept text messages, tool definitions, and tool calls, with one generated
   choice.
-- Reject streaming, images, files, audio, web plugins, model fallback,
+- Reject upstream streaming, images, files, audio, web plugins, model fallback,
   client-selected routing, and unknown cost-affecting fields.
-- Cap input at 16,000 UTF-8 bytes of text and tool payload, output at 4,000
+- Cap input at 128,000 UTF-8 byte units of text and tool payload, output at 4,000
   tokens, request body at 256 KiB, encrypted replay at 1 MiB, and upstream
   timeout at 120 seconds.
 - Reject an input whose conservative byte unit count exceeds the class limit
   before reserve.
 - Set OpenRouter `provider.max_price` to $0.90 / M input and $1.80 / M
-  output, and an effective provider-cost ceiling of $0.025 per dispatch
-  including the OpenRouter platform fee.
+  output, and debit at most $0.130 per dispatch including the OpenRouter
+  platform fee. At both token ceilings, listed usage is $0.1224 and usage
+  including the 5.5% fee is $0.129132.
 - If the model is unavailable or no eligible route fits the ceilings, fail
   closed and pause new checkout. A replacement is a new service-class
   version.
@@ -95,18 +96,21 @@ Pilot-wide provider spend is capped at $40 per UTC day and $200 per rolling
 30 days. Hitting either cap cancels without consuming a credit, returns a
 retryable service-unavailable response, pauses new checkout, and alerts.
 
-Contribution at class ceilings (bond is not revenue):
+Contribution at the 250-credit tier's maximum class usage (bond is not
+revenue). The widened input ceiling makes maximum-use economics negative; this
+is an upper-bound calculation, not expected usage, and paid traffic requires a
+separate economic review.
 
 | Item | Normal full bundle | Two-dispatch worst case |
 | --- | ---: | ---: |
 | Service-fee revenue | $20.00 | $20.00 |
 | Stripe fee on $40 checkout | ($1.46) | ($1.46) |
-| Provider usage including 5.5% OpenRouter fee | ($5.70) | ($11.39) |
+| Provider usage including 5.5% OpenRouter fee | ($32.28) | ($64.57) |
 | Support allowance | ($3.00) | ($3.00) |
 | Gateway, proof verification, and RPC | ($0.50) | ($0.50) |
 | Replay storage and egress | ($0.10) | ($0.10) |
 | Fraud and operational-risk allowance | ($1.00) | ($1.00) |
-| Remaining contribution | **$8.24 (41.2%)** | **$2.55 (12.7%)** |
+| Remaining contribution | **($18.34) (-91.7%)** | **($50.63) (-253.1%)** |
 
 ## Contract
 
@@ -303,10 +307,13 @@ Missing authorization produces `402` plus Base64 `PAYMENT-REQUIRED`.
 Malformed Base64/JSON or a structurally invalid envelope produces `400`.
 An invalid, expired, or stale proof produces `402` with a fresh challenge.
 
-Compatibility matrix: project sidecar required; custom agents possible but
-not a launch requirement; generic wallets, public facilitator, hosted
-Bazaar, MCP, `/v1/responses`, Anthropic translation, and a standard `exact`
-rail are out of scope.
+Compatibility matrix: the project sidecar accepts a bounded Codex
+`POST /v1/responses` subset and translates it locally to the class's
+non-streaming `POST /v1/chat/completions` spend path. This does not add a
+gateway Responses endpoint or alter the x402 route and wire format. Custom
+agents may register the project adapter; generic wallets, public facilitator,
+hosted Bazaar, MCP, Anthropic translation, and a standard `exact` rail are out
+of scope.
 
 ### Escrow settlement state machine
 

@@ -83,7 +83,7 @@ function requirements(issuedAt: number): PaymentRequirements {
     contract: '0x00000000000000000000000000000000000000a1',
     deploymentDomain: '84532',
     circuitId: 'private-credit-spend-bn254-dev',
-    verifyingKeyId: 'private-credit-spend-vk-dev',
+    verifyingKeyId: 'private-credit-spend-vk-dev-sepolia-v2',
     issuedAt,
   });
 }
@@ -210,7 +210,13 @@ async function fixtureProof(request: ProofWorkerRequest): Promise<ProofWorkerRes
 
 describe('coding-agent sidecar fixture', () => {
   it('completes the real 402, proof, settlement, and response exchange', async () => {
-    const resource = await startResourceServer({ providerResponse: '{"id":"chatcmpl-fixture","choices":[]}' });
+    const resource = await startResourceServer({ providerResponse: JSON.stringify({
+      id: 'chatcmpl-fixture',
+      created: 1_790_000_000,
+      model: 'deepseek/deepseek-v4-flash',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'fixture answer' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 31, completion_tokens: 4, total_tokens: 35 },
+    }) });
     const { directory, manifest } = await fixtureArtifactDirectory();
     const metrics = createBaseProofMetrics();
     const exchangeMetrics = createZkPrepaidLifecycleMetrics();
@@ -229,29 +235,51 @@ describe('coding-agent sidecar fixture', () => {
       slotLedger: await BaseSlotLedger.open({}),
       witnessProvider: createFileWitnessProvider({ root: tree.root, leaves: [{ index: 5, leaf, expiry: credential.expiry }] }),
       prove,
+      internalTrialOneProof: true,
       lifecycle: exchangeMetrics.observe,
     });
     const sidecar = createSidecarServer({
       localToken: 'fixture-local-token',
       gatewayBaseUrl: resource.baseUrl,
       prepaidClient: prepaid.client,
+      internalTrialOneProof: true,
       metrics: () => ({ ...metrics.snapshot(), exchange: exchangeMetrics.snapshot() }),
     });
     const loopback = await sidecar.listen(0);
     try {
-      const rawRequest = '{ "model" : "openai/gpt-4o-mini" ,\n  "messages" : [ {"role":"user","content":"hi"} ] }';
-      const response = await fetch(`${loopback}/v1/chat/completions`, {
+      const responsesResponse = await fetch(`${loopback}/v1/responses`, {
         method: 'POST',
         headers: { Authorization: 'Bearer fixture-local-token', 'Content-Type': 'application/json' },
-        body: rawRequest,
+        body: JSON.stringify({
+          model: 'openai/gpt-4o-mini',
+          instructions: 'synthetic instruction',
+          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'synthetic prompt' }] }],
+          stream: true,
+          store: false,
+        }),
       });
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ id: 'chatcmpl-fixture', choices: [] });
+      expect(responsesResponse.status).toBe(200);
+      expect(responsesResponse.headers.get('content-type')).toMatch(/^text\/event-stream/u);
+      const responseFrames = (await responsesResponse.text()).split('\n\n').filter(Boolean).map((frame) => frame.split('\n')[0]);
+      expect(responseFrames).toEqual([
+        'event: response.created', 'event: response.in_progress', 'event: response.output_item.added',
+        'event: response.content_part.added', 'event: response.output_text.delta', 'event: response.output_text.done',
+        'event: response.content_part.done', 'event: response.output_item.done', 'event: response.completed',
+      ]);
 
-      const paymentResponse = decodeHeader<SettlementResponse>(response.headers.get(PAYMENT_RESPONSE_HEADER)!);
+      const paymentResponse = decodeHeader<SettlementResponse>(responsesResponse.headers.get(PAYMENT_RESPONSE_HEADER)!);
       expect(paymentResponse).toMatchObject({ success: true, network: 'eip155:84532' });
       expect(resource.settleCalls()).toBe(1);
-      expect(resource.seenBodies).toEqual([rawRequest]);
+      expect(resource.seenBodies).toHaveLength(1);
+      expect(JSON.parse(resource.seenBodies[0]!)).toMatchObject({
+        model: 'openai/gpt-4o-mini',
+        messages: [
+          { role: 'developer', content: 'synthetic instruction' },
+          { role: 'user', content: 'synthetic prompt' },
+        ],
+      });
+      expect(JSON.parse(resource.seenBodies[0]!)).not.toHaveProperty('stream');
+      expect(resource.seenBodies[0]).not.toMatch(/synthetic-message-id|client_metadata|prompt_cache_key/u);
 
       const payment = resource.payments[0]!;
       expect(payment.payload.publicSignals).toHaveLength(PUBLIC_SIGNAL_COUNT);
@@ -276,10 +304,28 @@ describe('coding-agent sidecar fixture', () => {
       expect(JSON.stringify(exchangeMetrics.snapshot())).not.toContain(payment.payload.nonce);
       expect(JSON.stringify(exchangeMetrics.snapshot())).not.toContain(payment.payload.publicSignals[4]!);
 
-      const unauthorized = await fetch(`${loopback}/v1/chat/completions`, {
+      const repeated = await fetch(`${loopback}/v1/responses`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer fixture-local-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'openai/gpt-4o-mini',
+          instructions: 'synthetic instruction',
+          input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'synthetic prompt' }] }],
+          stream: true,
+          store: false,
+        }),
+      });
+      expect(repeated.status).toBe(409);
+      await expect(repeated.json()).resolves.toEqual({ error: 'internal_trial_limit_reached' });
+      expect(resource.payments).toHaveLength(1);
+      expect(resource.settleCalls()).toBe(1);
+      expect(metrics.snapshot()).toMatchObject({ attempts: 1, successes: 1, failures: 0 });
+      expect(prepaid.committedSlots()).toEqual([0]);
+
+      const unauthorized = await fetch(`${loopback}/v1/responses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: rawRequest,
+        body: '{}',
       });
       expect(unauthorized.status).toBe(401);
       expect(resource.settleCalls()).toBe(1);

@@ -10,7 +10,7 @@ import {PoseidonT2} from "poseidon-solidity/PoseidonT2.sol";
 import {PoseidonT3} from "poseidon-solidity/PoseidonT3.sol";
 import {PoseidonT4} from "poseidon-solidity/PoseidonT4.sol";
 import {IPoseidonT2, IPoseidonT3, IPoseidonT4, PrivateCreditBond} from "../../src/PrivateCreditBond.sol";
-import {Groth16Verifier} from "../../src/PrivateCreditSpendVerifier.sol";
+import {Groth16Verifier as Groth16VerifierV2} from "../../src/PrivateCreditSpendVerifierV2.sol";
 import {SpendVerifier} from "../../src/SpendVerifier.sol";
 import {MockUSDC} from "./PrivateCreditBond.t.sol";
 import {PrivateCreditSpendFixture as F} from "../fixtures/PrivateCreditSpendFixture.sol";
@@ -32,7 +32,7 @@ abstract contract RealProofFixture is Test {
     IPoseidonT2 internal poseidonT2;
     IPoseidonT3 internal poseidonT3;
     IPoseidonT4 internal poseidonT4;
-    Groth16Verifier internal groth16;
+    Groth16VerifierV2 internal groth16;
     SpendVerifier internal adapter;
     PrivateCreditBond internal bond;
 
@@ -41,7 +41,7 @@ abstract contract RealProofFixture is Test {
         poseidonT2 = IPoseidonT2(deployCode("out/PoseidonT2.sol/PoseidonT2.json"));
         poseidonT3 = IPoseidonT3(deployCode("out/PoseidonT3.sol/PoseidonT3.json"));
         poseidonT4 = IPoseidonT4(deployCode("out/PoseidonT4.sol/PoseidonT4.json"));
-        groth16 = new Groth16Verifier();
+        groth16 = new Groth16VerifierV2();
         adapter = new SpendVerifier(address(groth16));
         usdc = new MockUSDC();
         bond = new PrivateCreditBond(

@@ -12,14 +12,16 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { chmod, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   LAUNCH_STATE_PATH,
+  LAUNCH_STATE_V2_PATH,
   buildLaunchPlan,
+  buildV2DeploymentPlan,
   createLaunchContext,
   runCheck,
   runLaunchCli,
@@ -105,7 +107,7 @@ const DEPLOYER = '0x1111111111111111111111111111111111111111';
 
 /** A pack report shaped like `npm pack --dry-run --json`. */
 const PACK_JSON = JSON.stringify([
-  { filename: 'zk-credits-0.2.0.tgz', files: [{ path: 'package.json', size: 1_200 }, { path: 'dist/zk-credits.js', size: 40_000 }] },
+  { filename: 'zk-credits-0.2.7.tgz', files: [{ path: 'package.json', size: 1_200 }, { path: 'dist/zk-credits.js', size: 40_000 }] },
 ]);
 
 /**
@@ -310,12 +312,43 @@ describe('preflight', () => {
 });
 
 describe('internal trial launcher modes', () => {
-  it('prints a passing JSON gate without preparing or writing launcher files', async () => {
+  it('prints a passing JSON gate for the live gateway core counters without preparing or writing launcher files', async () => {
     const { directory, statePath, envPath } = await sandbox();
+    const manifestPath = join(directory, 'packages', 'zk-credits-sidecar', 'circuits', 'manifest.json');
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(manifestPath, JSON.stringify({
+      version: 1,
+      scheme: 'zk-prepaid',
+      network: 'eip155:84532',
+      circuit: {
+        id: 'private-credit-spend-bn254-dev',
+        depth: 20,
+        wasm: 'private_credit_spend.wasm',
+        zkey: 'private_credit_spend.zkey',
+        verificationKey: 'verification_key_private_credit.json',
+      },
+      artifacts: [
+        { file: 'private_credit_spend.wasm', sha256: 'a'.repeat(64) },
+        { file: 'private_credit_spend.zkey', sha256: 'b'.repeat(64) },
+        { file: 'verification_key_private_credit.json', sha256: 'c'.repeat(64) },
+      ],
+      deployment: {
+        chainId: 84532,
+        bondAddress: '0x1111111111111111111111111111111111111111',
+        deploymentBlock: '47372040',
+        deploymentDomain: '84532',
+        circuitId: 'private-credit-spend-bn254-dev',
+        verifyingKeyId: 'private-credit-spend-vk-dev-sepolia-v2',
+        spendVerifierAddress: '0x2222222222222222222222222222222222222222',
+        groth16VerifierAddress: '0x3333333333333333333333333333333333333333',
+      },
+    }));
     const now = Date.UTC(2026, 8, 27, 4, 0, 0);
     const readyChecks = ['launchControl', 'database', 'baseRoot', 'baseRpc', 'verifierAssets', 'provider']
       .map((name) => ({ name, ok: true }));
-    const metrics = Object.fromEntries(METRIC_NAMES.map((name) => [name, 0]));
+    const metrics = Object.fromEntries(METRIC_NAMES
+      .filter((name) => !name.startsWith('payment_validation_'))
+      .map((name) => [name, 0]));
     const adminStatus = {
       launchControl: { state: 'enabled' },
       network: 'eip155:84532',
@@ -336,7 +369,27 @@ describe('internal trial launcher modes', () => {
       transport: () => ({
         async send(request) {
           return request.url.endsWith('/ready')
-            ? { status: 200, body: { ready: true, launchControl: 'enabled', checks: readyChecks, generatedAt: new Date(now).toISOString() } }
+            ? { status: 200, body: {
+              ready: true,
+              launchControl: 'enabled',
+              checks: readyChecks,
+              generatedAt: new Date(now).toISOString(),
+              v2Compatibility: {
+                status: 'pass',
+                network: 'eip155:84532',
+                chainId: 84532,
+                circuitId: 'private-credit-spend-bn254-dev',
+                verifyingKeyId: 'private-credit-spend-vk-dev-sepolia-v2',
+                verificationKeySha256: 'c'.repeat(64),
+                bondAddress: '0x1111111111111111111111111111111111111111',
+                deploymentBlock: '47372040',
+                deploymentDomain: '84532',
+                onchainDeploymentDomain: '84532',
+                bondSpendVerifierAddress: '0x2222222222222222222222222222222222222222',
+                groth16VerifierAddress: '0x3333333333333333333333333333333333333333',
+                bytecodePresent: true,
+              },
+            } }
             : { status: 200, body: adminStatus };
         },
       }),
@@ -344,11 +397,44 @@ describe('internal trial launcher modes', () => {
 
     expect(result.exitCode).toBe(0);
     expect(printed).toHaveLength(1);
-    expect(JSON.parse(printed[0]!).result).toBe('pass');
+    const gate = JSON.parse(printed[0]!);
+    expect(gate.result).toBe('pass');
+    expect(gate.adminStatus).toBe('pass');
+    expect(gate.counters.metrics.challenge_issued).toBe(0);
+    expect(gate.counters.metrics.payment_validation_header).toBeNull();
     expect(printed[0]).not.toContain('secret-root');
     expect(printed[0]).not.toContain('private-admin-token');
     await expect(stat(envPath)).rejects.toThrow(/ENOENT/u);
     await expect(stat(statePath)).rejects.toThrow(/ENOENT/u);
+  });
+
+  it('fails the trial gate when a v2 deployment broadcast is unresolved', async () => {
+    const { directory, statePath, envPath } = await sandbox();
+    const v2State = new LaunchStateStore({ path: join(directory, LAUNCH_STATE_V2_PATH), isTracked: async () => false });
+    await v2State.record('deploy:contracts', { status: 'unknown', note: 'awaiting broadcast reconciliation' });
+    const printed: string[] = [];
+    let gatewayRequests = 0;
+
+    const result = await runLaunchCli(['--trial-gate'], {
+      cwd: directory,
+      repoRoot: directory,
+      envPath,
+      statePath,
+      env: { ...COMPLETE_ENV, PUBLIC_GATEWAY_URL: 'https://gateway.example', BILLING_INTERNAL_TOKEN: 'private-admin-token' },
+      print: (line) => printed.push(line),
+      transport: () => ({
+        async send() {
+          gatewayRequests += 1;
+          return { status: 200, body: {} };
+        },
+      }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(gatewayRequests).toBe(0);
+    expect(JSON.parse(printed[0]!).localPreflight).toBe('fail');
+    expect(JSON.parse(printed[0]!).result).toBe('fail');
+    await expect(stat(envPath)).rejects.toThrow(/ENOENT/u);
   });
 
   it('refuses a targeted Render action when earlier checkpoints are incomplete', async () => {
@@ -465,6 +551,60 @@ describe('the plan', () => {
     expect(index('release:publish-sidecar')).toBeLessThan(index('deploy:contracts'));
   });
 
+  it('provides a guarded v2 deployment lane that does not publish packages', () => {
+    const plan = buildV2DeploymentPlan(COMPLETE_ENV);
+    expect(plan.map((step) => step.name)).toEqual([
+      'deploy:preflight',
+      'deploy:simulation',
+      'deploy:contracts',
+      'deploy:verification',
+      'deploy:approve-usdc',
+    ]);
+    expect(plan.some((step) => step.name.startsWith('release:'))).toBe(false);
+    expect(plan.find((step) => step.name === 'deploy:contracts')?.irreversible).toBe(true);
+  });
+
+  it('keeps v2 deployment checkpoints separate from the existing v1 launch state', async () => {
+    const { directory, statePath, envPath, passwordFile } = await sandbox();
+    const oldState = new LaunchStateStore({ path: statePath, isTracked: async () => false });
+    for (const name of ['deploy:preflight', 'deploy:simulation', 'deploy:contracts', 'deploy:verification', 'deploy:approve-usdc']) {
+      await oldState.record(name, { status: 'succeeded' });
+    }
+
+    const printed: string[] = [];
+    const result = await runLaunchCli(['--deploy-v2'], {
+      cwd: directory,
+      repoRoot: directory,
+      envPath,
+      statePath,
+      gitProbe: PERMISSIVE,
+      env: { ...COMPLETE_ENV, BASE_DEPLOYER_PASSWORD_FILE: passwordFile },
+      print: (line) => printed.push(line),
+      confirm: async () => false,
+      chain: () => ({
+        chainId: async () => 84532,
+        balance: async () => 1n,
+        nonce: async () => 42,
+        call: async (_address, data) => data === abiSelector('decimals()')
+          ? `0x${'0'.repeat(63)}6`
+          : `0x${'0'.repeat(24)}${EXISTING_B11_CONTRACTS.verifier.slice(2)}`,
+        code: async () => '0x6080604052600436106100',
+      }),
+      run: async (command, args) => {
+        if (command === 'cast' && args[0] === 'wallet') return { code: 0, stdout: `${DEPLOYER}\n`, stderr: '' };
+        if (command === 'forge') return { code: 0, stdout: '', stderr: '' };
+        return { code: 1, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(printed.join('\n')).toMatch(/^run\s+deploy:preflight/mu);
+    expect(printed.join('\n')).not.toMatch(/^skip\s+deploy:/mu);
+    const v2State = new LaunchStateStore({ path: join(directory, LAUNCH_STATE_V2_PATH) });
+    expect((await v2State.load()).steps['deploy:preflight']?.status).toBe('succeeded');
+    expect((await oldState.load()).steps['deploy:preflight']?.status).toBe('succeeded');
+  });
+
   it('marks the irreversible steps so they always stop and ask', () => {
     const irreversible = buildLaunchPlan().filter((step) => step.irreversible).map((step) => step.name);
     expect(irreversible).toEqual(expect.arrayContaining([
@@ -492,7 +632,7 @@ describe('the plan', () => {
   });
 
   it('stops at the deployment authorization boundary without broadcasting', async () => {
-    const { context, printed } = await harness();
+    const { context, printed, runOptions } = await harness();
     const result = await runResume({ mode: 'resume', context });
     const plan = buildLaunchPlan(COMPLETE_ENV);
     const deploymentIndex = plan.findIndex((step) => step.name === 'deploy:contracts');
@@ -502,7 +642,7 @@ describe('the plan', () => {
     const record = (await context.state.load()).steps['deploy:contracts'];
     expect(record).toMatchObject({
       status: 'unknown',
-      detail: { signer: DEPLOYER, startingNonce: 42, contractNonce: 45, commandExposed: true },
+      detail: { signer: DEPLOYER, startingNonce: 42, contractNonce: 47, commandExposed: true },
     });
     const output = printed.join('\n');
     expect(output).toContain('no-broadcast simulation succeeded; no transaction was sent');
@@ -510,8 +650,10 @@ describe('the plan', () => {
     expect(output).toContain(' run -- sh -c ');
     expect(output).not.toContain('dotenv -e ');
     expect(output).toContain('--broadcast');
+    expect(output).toContain('LC_ALL=C LANG=C forge script');
     expect(output).toContain('resolved sponsor address');
     expect(output).not.toContain(COMPLETE_ENV.BASE_SPONSOR_PRIVATE_KEY);
+    expect(runOptions.find((entry) => entry.command === 'forge')?.env).toMatchObject({ LC_ALL: 'C', LANG: 'C' });
   });
 
   it('blocks an unreadable present artifact instead of offering a fresh broadcast', async () => {
@@ -548,6 +690,8 @@ describe('the plan', () => {
     await context.state.record('deploy:contracts', {
       status: 'succeeded',
       detail: {
+        verifier: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        spendVerifier: '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         poseidonT2: COMPLETE_ENV.BASE_POSEIDON_T2_ADDRESS,
         poseidonT3: COMPLETE_ENV.BASE_POSEIDON_T3_ADDRESS,
         poseidonT4: COMPLETE_ENV.BASE_POSEIDON_T4_ADDRESS,

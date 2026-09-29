@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Pool } from 'pg';
 import { runMigrations } from './migrate.js';
@@ -196,6 +197,32 @@ describe('migrations (offline, static)', () => {
     expect(ddl).toMatch(/invite_id\s+TEXT NOT NULL/i);
     expect(ddl).not.toMatch(/invite_code/i);
   });
+
+  it('activation attempt migration retains prior rows and adds safe retry state', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0018_activation_attempts.sql'), 'utf8');
+    const ddl = sql.replace(/--[^\n]*/gu, '');
+    expect(ddl).toMatch(/ALTER TABLE control_plane\.activation_windows RENAME TO activation_attempts/i);
+    expect(ddl).toMatch(/PRIMARY KEY \(slot, attempt_number\)/i);
+    expect(ddl).toMatch(/status IN \('invite_pending', 'open', 'submitted', 'needs_reconciliation', 'aborted', 'rejected', 'qualified'\)/i);
+    expect(ddl).toMatch(/evidence IS NULL THEN 'open' ELSE 'submitted'/i);
+    expect(ddl).toMatch(/funding_outcome = 'unknown'/i);
+    expect(ddl).not.toMatch(/committed_claims_after > baseline_committed_claims/i);
+    expect(ddl).toMatch(/activation_attempts_invite_request_id_unique/i);
+    expect(ddl).toMatch(/activation_attempts_evidence_digest_unique/i);
+    expect(ddl).toMatch(/activation_attempts_one_active_per_slot/i);
+    expect(ddl).toMatch(/ADD COLUMN creation_request_id TEXT/i);
+    expect(ddl).not.toMatch(/DROP TABLE|TRUNCATE|DELETE FROM control_plane\.activation_windows/i);
+  });
+
+  it('revises current C to an external x402 operator while tolerating historical C rows', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_founder_x402_cohort.sql'), 'utf8');
+    const ddl = sql.replace(/--[^\n]*/gu, '');
+    expect(ddl).toMatch(/DROP CONSTRAINT activation_attempts_slot_assignment_check/i);
+    expect(ddl).toMatch(/slot = 'A' AND participant_type = 'coding_agent' AND integration_mode = 'openai_compatible_sidecar'/i);
+    expect(ddl).toMatch(/slot = 'B' AND participant_type = 'x402_native_agent' AND integration_mode = 'x402_zk_prepaid_adapter'/i);
+    expect(ddl).toMatch(/slot = 'C' AND participant_type = 'x402_native_agent' AND integration_mode = 'x402_zk_prepaid_adapter'/i);
+    expect(ddl).toMatch(/slot = 'C' AND participant_type = 'coding_agent' AND integration_mode = 'openai_compatible_sidecar'/i);
+  });
 });
 
 describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', () => {
@@ -234,9 +261,53 @@ describe.skipIf(!dbTestsEnabled)('migrations (integration, requires Postgres)', 
     await pool.end();
   });
 
-  it('applies migrations idempotently and creates all isolated schemas', async () => {
-    const first = await runMigrations(pool, MIGRATIONS_DIR);
-    expect(first.applied.length).toBeGreaterThan(0);
+  it('migrates legacy activation rows, applies migrations idempotently, and creates all isolated schemas', async () => {
+    // Build a legacy install through migration 0017, seed its one-row-per-slot
+    // state, then apply 0018 through the normal runner. This exercises the
+    // rename and backfill against real Postgres rows instead of only checking
+    // the migration text.
+    const legacyMigrationsDir = mkdtempSync(join(tmpdir(), 'zk-credits-legacy-migrations-'));
+    try {
+      for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith('.sql') && name < '0018_activation_attempts.sql')) {
+        writeFileSync(join(legacyMigrationsDir, file), readFileSync(join(MIGRATIONS_DIR, file)));
+      }
+      const legacy = await runMigrations(pool, legacyMigrationsDir);
+      expect(legacy.applied).toContain('0017_activation_windows.sql');
+      await pool.query(`
+        INSERT INTO control_plane.pilot_invites (invite_id, code_hash, github_account_id, expires_at)
+        VALUES
+          ($1, $2, '4242', now() + interval '7 days'),
+          ($3, $4, '9001', now() + interval '7 days')`,
+      [`inv_${'a'.repeat(16)}`, 'a'.repeat(64), `inv_${'b'.repeat(16)}`, 'b'.repeat(64)]);
+      await pool.query(`
+        INSERT INTO control_plane.activation_windows
+          (slot, invite_id, participant_type, integration_mode, started_at, baseline_committed_claims, evidence, evidence_digest, committed_claims_after)
+        VALUES
+          ('A', $1, 'coding_agent', 'openai_compatible_sidecar', '2026-09-21T03:00:00Z', 4, NULL, NULL, NULL),
+          ('B', $2, 'x402_native_agent', 'x402_zk_prepaid_adapter', '2026-09-21T04:00:00Z', 7, '{"schemaVersion":2}'::jsonb, $3, 9)`,
+      [`inv_${'a'.repeat(16)}`, `inv_${'b'.repeat(16)}`, 'c'.repeat(64)]);
+
+      const migrated = await runMigrations(pool, MIGRATIONS_DIR);
+      expect(migrated.applied).toEqual(['0018_activation_attempts.sql']);
+      const attempts = await pool.query(`
+        SELECT slot, attempt_number, invite_id, invite_request_id, status, funding_outcome,
+               evidence, evidence_digest, committed_claims_after
+          FROM control_plane.activation_attempts ORDER BY slot`);
+      expect(attempts.rows).toHaveLength(2);
+      expect(attempts.rows[0]).toMatchObject({
+        slot: 'A', attempt_number: 1, invite_request_id: null,
+        status: 'open', funding_outcome: 'unknown', evidence: null, evidence_digest: null,
+      });
+      expect(attempts.rows[1]).toMatchObject({
+        slot: 'B', attempt_number: 1, invite_request_id: null,
+        status: 'submitted', funding_outcome: 'unknown', evidence: { schemaVersion: 2 }, evidence_digest: 'c'.repeat(64),
+        committed_claims_after: '9',
+      });
+      const inviteKey = await pool.query('SELECT creation_request_id FROM control_plane.pilot_invites ORDER BY invite_id');
+      expect(inviteKey.rows).toEqual([{ creation_request_id: null }, { creation_request_id: null }]);
+    } finally {
+      rmSync(legacyMigrationsDir, { recursive: true, force: true });
+    }
 
     const second = await runMigrations(pool, MIGRATIONS_DIR);
     expect(second.applied).toEqual([]); // idempotent — nothing re-applied

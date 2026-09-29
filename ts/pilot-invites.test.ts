@@ -107,4 +107,47 @@ describe('pilot invites', () => {
     expect(await invites.inspect(open.inviteId)).toMatchObject({ state: 'expired' });
     expect(await invites.inspect('inv_missing_invite')).toBeUndefined();
   });
+
+  it('recovers an invite insert with an uncertain response by its creation request id', async () => {
+    const store = new MemoryInviteStore();
+    const insert = store.insert.bind(store);
+    store.insert = async (record) => {
+      await insert(record);
+      throw new Error('connection dropped after commit');
+    };
+    const invites = new PilotInviteService({
+      store,
+      capabilities: { async issue() { return { fundingToken: 'detached', expiresAt: NOW + 1_000 }; } },
+      now: () => NOW,
+    });
+    const creationRequestId = 'activation-request-0001';
+    const issued = await invites.issue({ githubAccountId: GITHUB_ID, creationRequestId });
+
+    expect(await invites.inspectCreationRequest(creationRequestId)).toMatchObject({ inviteId: issued.inviteId, state: 'open' });
+    await expect(invites.redeem({ code: issued.code, githubAccountId: GITHUB_ID })).resolves.toMatchObject({ fundingToken: 'detached' });
+    await expect(invites.issue({ githubAccountId: GITHUB_ID, creationRequestId }))
+      .rejects.toThrow(/invite_creation_request_already_resolved/u);
+    expect(await store.list()).toHaveLength(1);
+  });
+
+  it('keeps an invite outcome unknown when neither the insert nor its reconciliation read is conclusive', async () => {
+    const store = new MemoryInviteStore();
+    store.insert = async () => { throw new Error('connection dropped before commit'); };
+    const getByRequest = store.getByCreationRequestId.bind(store);
+    let lookupCount = 0;
+    store.getByCreationRequestId = async (requestId) => {
+      lookupCount += 1;
+      if (lookupCount === 1) return getByRequest(requestId); // no existing request before insert
+      throw new Error('database unavailable during reconciliation');
+    };
+    const invites = new PilotInviteService({
+      store,
+      capabilities: { async issue() { return { fundingToken: 'detached', expiresAt: NOW + 1_000 }; } },
+      now: () => NOW,
+    });
+
+    await expect(invites.issue({ githubAccountId: GITHUB_ID, creationRequestId: 'activation-request-0002' }))
+      .rejects.toThrow(/invite_outcome_unknown/u);
+    expect(await store.list()).toHaveLength(0);
+  });
 });

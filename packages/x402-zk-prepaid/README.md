@@ -5,9 +5,11 @@ credit at a time. The scheme is designed for the Base Sepolia `PrivateCreditBond
 deployment and uses a Groth16 proof as an authorization envelope. It does not
 broadcast a blockchain transaction for each API request.
 
-Part of the invite-only, unpaid, experimental Base Sepolia pilot. Credits are
-founder-provisioned test credits, and the circuit is experimental and not
-independently audited.
+Part of the invite-only experimental Base Sepolia pilot. Product calls use
+founder-provisioned test credits and have no product payment step. The circuit
+is experimental and not independently audited. External research participants
+in slots A and C receive $25 for a 30-minute session regardless of setup
+success; this is not product revenue or willingness-to-pay evidence.
 
 This is a custom adapter, not general x402 or Bazaar compatibility. Generic
 x402 clients and facilitators do not discover it unless they register the
@@ -109,18 +111,43 @@ are not persisted by this package.
 
 The supported clients are the project sidecar and an x402-native agent that
 deliberately registers this adapter; an unmodified generic x402 client is not
-supported. For direct HTTP clients, use the request-aware client so the signal
-includes the actual request:
+supported. For direct HTTP clients, use the request-aware local runtime so the
+proof is created from the actual request. After `zk-credits setup codex` has
+installed the pinned artifacts and verified the local credential, an agent
+can use the sidecar package's `zk-credits/x402` entry point:
 
 ```ts
-const client = createZkPrepaidClient({
-  createPayload: ({ requirements, method, url, body }) => sidecar.createPayment({ requirements, method, url, body }),
+import { createLocalX402Agent } from 'zk-credits/x402';
+
+const runtime = await createLocalX402Agent({
+  credentialPassword: await readPasswordFromHiddenLocalPrompt(),
 });
-const response = await client.fetch('https://api.example.test/v1/chat/completions', {
-  method: 'POST',
-  body: JSON.stringify({ model: 'openai/gpt-4o-mini', messages: [] }),
-});
+try {
+  const response = await runtime.client.fetch(
+    'https://zk-credits-gateway.onrender.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'deepseek/deepseek-v4-flash',
+        messages: [{ role: 'user', content: taskChosenByOperator }],
+      }),
+    },
+  );
+  await displayResponseLocally(await response.json());
+} finally {
+  await runtime.close();
+}
 ```
+
+`readPasswordFromHiddenLocalPrompt`, `taskChosenByOperator`, and
+`displayResponseLocally` belong to the host agent. Keep the password in local
+memory and do not include task text or results in evidence. The runtime also
+returns an authenticated loopback `metricsUrl` for the same aggregate local
+snapshots used by sidecar onboarding. The included `zk-credits x402-agent`
+command is a small founder starter; slot C integrates the adapter into their
+own agent. See the
+[x402 operator guide](../../docs/onboarding/base-zk-credits-x402-agent.md).
 
 For official x402 v2 instances, use the registration helpers:
 

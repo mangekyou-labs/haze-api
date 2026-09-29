@@ -182,7 +182,6 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 # STAGES: author this section. One stage() per step the human takes.
 # ──────────────────────────────────────────────────────────────────────────
-
 ENV_FILE="${ZK_CREDITS_OPERATOR_ENV:-.env.operator.local}"
 WIZARD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 if [[ -f "$WIZARD_DIR/launch-guardrails.sh" ]]; then
@@ -193,36 +192,17 @@ else
   exit 1
 fi
 
-# Keys this wizard owns. Anything else already in the operator env is refused.
-OPERATOR_KEYS=(
-  ZK_CREDITS_CREDENTIAL_PATH ZK_CREDITS_CREDENTIAL_PASSWORD ZK_CREDITS_ARTIFACT_DIR
-  ZK_CREDITS_HOME ZK_CREDITS_SIDECAR_PORT ZK_CREDITS_GATEWAY_URL
-  ZK_CREDITS_OPERATOR_SLOT ZK_CREDITS_OPERATOR_TYPE ZK_CREDITS_INTEGRATION_MODE
-  ZK_CREDITS_ONBOARDING_URL ZK_CREDITS_CALL_STARTED_AT
-)
-
-# The pinned release. Nothing else is supported, and a mismatch is a failed
-# activation rather than a warning.
-PINNED_SIDECAR_VERSION='0.2.0'
+PINNED_SIDECAR_VERSION='0.2.7'
 PINNED_ADAPTER_VERSION='0.1.0'
 PINNED_SHARED_VERSION='0.1.0'
-PINNED_ARTIFACT_RELEASE='private-credit-spend-bn254-dev-sepolia-v1'
-PINNED_NETWORK='eip155:84532'
-PINNED_DOMAIN='84532'
-
+PINNED_ARTIFACT_RELEASE='private-credit-spend-bn254-dev-sepolia-v2'
 OPERATOR_HOME="${ZK_CREDITS_HOME:-$HOME/.zk-credits}"
 TOKEN_PATH="$OPERATOR_HOME/loopback-token"
-
 SLOT=''
 PARTICIPANT_TYPE=''
 INTEGRATION_MODE=''
-GATEWAY_URL=''
-ONBOARDING_URL=''
-METRICS_BEFORE=''
-CALL_STARTED_AT=0
 ASSISTANCE=0
 
-# sidecar_metrics_json prints the whole authenticated loopback snapshot.
 sidecar_metrics_json() {
   local token
   [[ -f "$TOKEN_PATH" ]] || return 1
@@ -231,41 +211,20 @@ sidecar_metrics_json() {
     "http://127.0.0.1:${ZK_CREDITS_SIDECAR_PORT:-3210}/metrics"
 }
 
-# require_slot_* enforce the deterministic cohort assignment.
-slot_participant_type() { case "$1" in A|C) printf 'coding_agent' ;; B) printf 'x402_native_agent' ;; *) return 1 ;; esac; }
-slot_integration_mode() { case "$1" in A|C) printf 'openai_compatible_sidecar' ;; B) printf 'x402_zk_prepaid_adapter' ;; *) return 1 ;; esac; }
+slot_participant_type() { case "$1" in A) printf 'coding_agent' ;; B|C) printf 'x402_native_agent' ;; *) return 1 ;; esac; }
+slot_integration_mode() { case "$1" in A) printf 'openai_compatible_sidecar' ;; B|C) printf 'x402_zk_prepaid_adapter' ;; *) return 1 ;; esac; }
 
-sha256_of() {
-  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
-  else sha256sum "$1" | awk '{print $1}'; fi
-}
+TOTAL_STAGES=5
+banner "Base ZK Credits: first-use activation"
 
-TOTAL_STAGES=10
-
-banner "Operator activation: Base Sepolia x402 zk-prepaid pilot"
-
-WIZARD_STARTED_AT=$(date +%s)
-
-# ── Stage 1: preconditions ────────────────────────────────────────────────
-stage "Preconditions: this machine owns the credential"
-say "Your credential secret, its password, and your proving artifacts never"
-say "leave this machine. Nothing here is shared with the project team."
-note "Infrastructure material is the founder's and must not be present here:"
-note "deployer or sponsor keys, the database URL, admin tokens, provider keys."
-if ! gw_refuse_deployer_vars; then
-  warn "unset those variables (they belong to the founder) and re-run"; exit 1
-fi
-if ! gw_require_ignored "$ENV_FILE"; then exit 1; fi
-if ! gw_require_private_mode "$ENV_FILE"; then exit 1; fi
-if ! gw_refuse_stray_keys "$ENV_FILE" "${OPERATOR_KEYS[@]}"; then exit 1; fi
-printf '  %s✓%s %s is ignored and mode 600\n' "$GREEN" "$RESET" "$ENV_FILE"
-
-# ── Stage 2: slot and local toolchain ─────────────────────────────────────
-stage "Your slot and the pinned local toolchain"
-say "The cohort has three slots. A and C drive an OpenAI-compatible coding"
-say "agent; B is an existing x402-native agent that registers the adapter."
+stage "Consent and your assigned slot"
+say "A is an external Codex developer; B is the founder using the starter"
+say "x402 agent; C is an external x402 operator integrating their own agent."
+say "Only A and C count toward market validation. B is a technical activation."
+say "External A and C receive $25 for a 30-minute research session, whether"
+say "setup succeeds or fails. That honorarium is not product revenue or intent."
 while true; do
-  ask SLOT "Your slot (A, B, or C):"
+  ask SLOT "Your assigned slot (A, B, or C):"
   SLOT=$(printf '%s' "${SLOT:-}" | tr '[:lower:]' '[:upper:]')
   if [[ "$SLOT" =~ ^[ABC]$ ]]; then break; fi
   warn "the slot must be A, B, or C"
@@ -273,221 +232,131 @@ done
 PARTICIPANT_TYPE=$(slot_participant_type "$SLOT")
 INTEGRATION_MODE=$(slot_integration_mode "$SLOT")
 note "slot $SLOT → $PARTICIPANT_TYPE via $INTEGRATION_MODE"
-write_env ZK_CREDITS_OPERATOR_SLOT "$SLOT"
-write_env ZK_CREDITS_OPERATOR_TYPE "$PARTICIPANT_TYPE"
-write_env ZK_CREDITS_INTEGRATION_MODE "$INTEGRATION_MODE"
+if [[ "$SLOT" == A || "$SLOT" == C ]]; then
+  if ! confirm "Do you consent to the 30-minute usability session and aggregate activation evidence?"; then
+    warn "consent is required; stop here and contact the founder"
+    exit 1
+  fi
+else
+  if ! confirm "Do you consent to an internal technical activation with aggregate evidence?"; then
+    warn "consent is required; stop here"
+    exit 1
+  fi
+fi
+note "Time active human actions from the first setup instruction through the"
+note "first counted call. Pause during downloads, proof generation, and provider wait."
 
-say "Now check the pinned versions. Mixing versions fails at settlement."
+stage "Confirm the agent-led local setup"
+say "The founder grants private bundle repository access and sends your invite."
+say "Slot A follows docs/onboarding/base-zk-credits-codex-first-use.md."
+say "Slots B and C follow docs/onboarding/base-zk-credits-x402-agent.md."
+step "The agent checks GitHub CLI authentication, installs zk-credits@$PINNED_SIDECAR_VERSION, downloads and verifies the immutable proving bundle, and runs local setup."
+step "You handle GitHub sign-in, the hidden local recovery-password prompt, consent, and your own task."
+if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+  warn "GitHub CLI is not signed in; finish gh auth login locally, then restart this wizard"
+  exit 1
+fi
+if ! gh repo view mangekyou-labs/zk-credits-base-sepolia-v2-bundle >/dev/null 2>&1; then
+  warn "the private proving-bundle repository is not readable; ask the founder to grant access"
+  exit 1
+fi
 node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
 if [[ "$node_major" -lt 20 ]]; then warn "Node >= 20 is required"; exit 1; fi
-printf '  %s✓%s Node %s\n' "$GREEN" "$RESET" "$(node -v)"
 installed_sidecar=$(npm ls -g --depth=0 --json zk-credits 2>/dev/null \
   | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{process.stdout.write(JSON.parse(d).dependencies?.["zk-credits"]?.version??"")}catch{process.stdout.write("")}})')
 if [[ "$installed_sidecar" != "$PINNED_SIDECAR_VERSION" ]]; then
-  warn "zk-credits is ${installed_sidecar:-not installed}; the pilot requires $PINNED_SIDECAR_VERSION"
-  warn "  npm install --global zk-credits@$PINNED_SIDECAR_VERSION"
+  warn "zk-credits is ${installed_sidecar:-not installed}; install exactly $PINNED_SIDECAR_VERSION from npm"
   exit 1
 fi
-printf '  %s✓%s zk-credits %s\n' "$GREEN" "$RESET" "$installed_sidecar"
-
-# ── Stage 3: artifact directory and hashes ────────────────────────────────
-stage "Pinned proving artifacts"
-say "Set ZK_CREDITS_ARTIFACT_DIR to the directory delivered through your invite."
-ask ZK_CREDITS_ARTIFACT_DIR "Path to the proving bundle:"
-if ! gw_require_match "$ZK_CREDITS_ARTIFACT_DIR" '^/.+' "ZK_CREDITS_ARTIFACT_DIR"; then exit 1; fi
-if [[ ! -d "$ZK_CREDITS_ARTIFACT_DIR" ]]; then warn "no such directory"; exit 1; fi
-write_env ZK_CREDITS_ARTIFACT_DIR "$ZK_CREDITS_ARTIFACT_DIR"
-
-MANIFEST="$(dirname "$WIZARD_DIR")/packages/zk-credits-sidecar/circuits/manifest.json"
-if [[ ! -f "$MANIFEST" ]]; then
-  MANIFEST=$(npm root -g)/zk-credits/circuits/manifest.json
-fi
-if [[ ! -f "$MANIFEST" ]]; then
-  warn "could not find the pinned manifest; pass the bundle that shipped with your invite"
-  ask MANIFEST "Path to manifest.json:"
-  if ! gw_require_match "$MANIFEST" '^/.+' "manifest path"; then exit 1; fi
-fi
-
-# Compare every delivered artifact against the manifest digest.
-mismatch=0
-while IFS=$'\t' read -r file expected; do
-  [[ -z "$file" ]] && continue
-  actual=$(sha256_of "$ZK_CREDITS_ARTIFACT_DIR/$file" 2>/dev/null || echo '')
-  if [[ "$actual" != "$expected" ]]; then
-    warn "$file does not match the pinned digest"
-    mismatch=1
-  else
-    printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$file"
-  fi
-done < <(node -e '
-  const fs = require("fs");
-  const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  for (const a of m.artifacts ?? []) console.log(`${a.file}\t${a.sha256}`);
-' "$MANIFEST")
-if [[ "$mismatch" -ne 0 ]]; then
-  warn "a mismatched artifact is a proof failure; the sidecar refuses to prove"
+if ! confirm "Did local setup report the pinned bundle hashes, witness, and known-root checks passed?"; then
+  warn "finish local setup successfully before making any call"
   exit 1
 fi
+printf '  %s✓%s gh access, Node %s, and zk-credits %s verified\n' "$GREEN" "$RESET" "$(node -v)" "$installed_sidecar"
 
-# ── Stage 4: gateway readiness and network values ─────────────────────────
-stage "Gateway readiness and the pinned Base network"
-say "The sidecar only ever talks to the project gateway, and only on Base"
-say "Sepolia (eip155:84532)."
-ask ZK_CREDITS_GATEWAY_URL "Gateway base URL (https://…):"
-if ! gw_require_https_url "$ZK_CREDITS_GATEWAY_URL" "ZK_CREDITS_GATEWAY_URL"; then exit 1; fi
-GATEWAY_URL="$ZK_CREDITS_GATEWAY_URL"
-write_env ZK_CREDITS_GATEWAY_URL "$GATEWAY_URL"
-
-note "A free instance suspends, so the first request may take a moment."
-for attempt in $(seq 1 12); do
-  if curl -fsS --max-time 30 "$GATEWAY_URL/health" >/dev/null 2>&1; then break; fi
-  if [[ "$attempt" -eq 12 ]]; then warn "the gateway did not become live"; exit 1; fi
-  note "  attempt $attempt/12; retrying in 5s"
-  sleep 5
-done
-printf '  %s✓%s /health live\n' "$GREEN" "$RESET"
-
-supported=$(curl -fsS --max-time 30 "$GATEWAY_URL/x402/facilitator/supported")
-for expect in 'zk-prepaid' "$PINNED_NETWORK" "$PINNED_DOMAIN"; do
-  if ! printf '%s' "$supported" | grep -q "$expect"; then
-    warn "the gateway does not advertise $expect"; exit 1
-  fi
-done
-printf '  %s✓%s gateway advertises zk-prepaid on %s (domain %s)\n' "$GREEN" "$RESET" "$PINNED_NETWORK" "$PINNED_DOMAIN"
-
-# ── Stage 5: onboarding and invite redemption ─────────────────────────────
-stage "GitHub onboarding: redeem your single-use invite"
-say "Your invite is bound to one GitHub account and can be redeemed once."
-say "You will create the credential and back it up in your browser. The"
-say "credential secret and its password are never sent to the project."
-ask ONBOARDING_URL "Onboarding URL from your invite:"
-if ! gw_require_https_url "$ONBOARDING_URL" "onboarding URL"; then exit 1; fi
-write_env ZK_CREDITS_ONBOARDING_URL "$ONBOARDING_URL"
-open_url "$ONBOARDING_URL"
-step "Sign in with the GitHub account the invite names."
-step "Redeem the invite."
-step "Create the credential, then download the encrypted backup."
-step "Store the backup and its password on this machine only."
-while true; do
-  ask ZK_CREDITS_CREDENTIAL_PATH "Path to the downloaded credential backup:"
-  if gw_require_match "$ZK_CREDITS_CREDENTIAL_PATH" '^/.+' "credential path" && [[ -f "$ZK_CREDITS_CREDENTIAL_PATH" ]]; then break; fi
-  warn "that path does not exist yet"
-done
-chmod 600 "$ZK_CREDITS_CREDENTIAL_PATH" 2>/dev/null || true
-write_env ZK_CREDITS_CREDENTIAL_PATH "$ZK_CREDITS_CREDENTIAL_PATH"
-note "Do not paste the password here or share it. The sidecar prompts locally."
-
-# ── Stage 6: fresh snapshot and the discarded warm-up ─────────────────────
-stage "Fresh sidecar snapshot, then one discarded warm-up"
-say "The first proof in a process compiles the circuit and is much slower."
-say "Your activation is measured as deltas between counter snapshots, so the"
-say "warm-up is proved rather than assumed: exactly one cold exchange here,"
-say "and exactly one counted exchange after it."
-step "In another terminal, start the sidecar:"
-note "  eval \"\$(zk-credits env)\" ; zk-credits serve"
-step "Make no call yet. This stage reads the counters first."
-pause "Press Enter once the sidecar is running and has served nothing."
-
+stage "Start your own agent with fresh local metrics"
+say "Use one fresh local runtime for the warm-up and counted call. Make no"
+say "other request during the two snapshots."
+if [[ "$SLOT" == A ]]; then
+  step "In a terminal run: zk-credits codex, then leave Codex waiting for a task."
+elif [[ "$SLOT" == B ]]; then
+  step "In a terminal run: zk-credits x402-agent"
+  step "Enter the recovery password at its hidden local prompt, then leave the agent waiting for a task."
+else
+  step "Start your own x402 agent using createLocalX402Agent from the integration guide."
+  step "Keep its authenticated loopback metrics runtime open while your own agent waits for a task."
+fi
+pause "Press Enter when the local agent is waiting and has made no request."
 if ! METRICS_FRESH=$(sidecar_metrics_json); then
-  warn "could not read $TOKEN_PATH; is the sidecar running?"
-  warn "start it with: zk-credits serve"
+  warn "could not read authenticated loopback metrics; make sure the local agent is running"
   exit 1
 fi
 export METRICS_FRESH
-note "fresh snapshot recorded"
+note "fresh local snapshot captured"
 
-step "Now run one throwaway call through your agent."
-pause "Press Enter once the warm-up call has finished."
-
+stage "One discarded warm-up, then one counted own-agent call"
+say "Make exactly one throwaway task through your agent. It is discarded"
+say "from evidence. Wait for its complete response, then capture counters."
+pause "Press Enter after exactly one warm-up exchange has completed."
 if ! METRICS_AFTER_WARMUP=$(sidecar_metrics_json); then
-  warn "could not read the counters after the warm-up"
-  exit 1
+  warn "could not read metrics after the warm-up"; exit 1
 fi
 export METRICS_AFTER_WARMUP
-note "The warm-up may have consumed a test credit. That is expected and is"
-note "never part of your evidence."
-
-# Checked here as well as by the founder, so a retried or shared warm-up is
-# caught while you can still discard it instead of after you have sent it.
 if ! node "$WIZARD_DIR/operator-evidence.mjs" warmup; then
-  warn "the warm-up is not one clean cold exchange; restart the sidecar and retry"
+  warn "the warm-up window is not one clean cold exchange; restart with a fresh runtime"
   exit 1
 fi
-printf '  %s✓%s the warm-up window holds exactly one clean cold exchange\n' "$GREEN" "$RESET"
-
-# ── Stage 7: activation baseline ──────────────────────────────────────────
-stage "Baseline metrics (the snapshot taken after the warm-up)"
-say "This is the activation baseline. Everything after it is your counted"
-say "exchange, and nothing before it can be counted."
-note "baseline recorded"
-CALL_STARTED_AT=$(date +%s)
-
-# ── Stage 8: the real activation call ─────────────────────────────────────
-stage "Your real call, from your existing agent loop"
-say "Now make one real call the way you normally work: your own agent, your"
-say "own prompt, your own machine. Not a script and not a retry of a retry."
-if [[ "$SLOT" == "B" ]]; then
-  step "Register @zk-credits/x402-zk-prepaid@$PINNED_ADAPTER_VERSION in your agent."
-  step "Then run one normal task through it."
-else
-  step "Run one normal task through your coding agent."
-fi
-pause "Press Enter once that call has completed."
-
-# ── Stage 9: compute the deltas and write the bundle ──────────────────────
-stage "Redacted evidence bundle"
-say "Only aggregate counters leave this machine. No prompt, response, proof,"
-say "public signal, nullifier, credential, or invite token is ever recorded."
-while true; do
-  ask ASSISTANCE "How many times did the founder help you? (0 if none):"
-  if gw_require_block "$ASSISTANCE" "assistance count"; then break; fi
-  warn "give a whole number"
-done
-
-ATTEST_LOCAL='false'; ATTEST_CREDENTIAL='false'; ATTEST_NO_RECOVERY='false'; ATTEST_OWNERSHIP='false'
-confirm "Did you run the agent yourself, on this machine?" && ATTEST_LOCAL='true' || warn "note: this will fail qualification"
-confirm "Did your credential and password stay on this machine?" && ATTEST_CREDENTIAL='true' || warn "note: this will fail qualification"
-confirm "Was any manual recovery needed for the credential?" && warn "manual recovery means this activation cannot qualify" || ATTEST_NO_RECOVERY='true'
-confirm "Is this slot yours alone, separate from every other operator?" && ATTEST_OWNERSHIP='true' || warn "note: this will fail qualification"
-
-BUNDLE_DIR="${ZK_CREDITS_EVIDENCE_DIR:-$PWD}"
-BUNDLE="$BUNDLE_DIR/zk-credits-activation-evidence-$SLOT.json"
-# Onboarding time is wall-clock from the first stage to the real call.
-ONBOARDING_MS=$(( (CALL_STARTED_AT - WIZARD_STARTED_AT) * 1000 ))
-if [[ "$ONBOARDING_MS" -lt 0 ]]; then ONBOARDING_MS=0; fi
-
-# The counted window is measured the same way the warm-up was: a second
-# snapshot, then a delta. A contaminated window is refused here rather than
-# sent to the founder.
+printf '  %s✓%s exactly one discarded cold warm-up\n' "$GREEN" "$RESET"
+say "Now make exactly one counted call using a real task you choose in your"
+say "own agent. Slot C must use your own x402 integration."
+pause "Press Enter after that custom task has received its complete response."
 if ! METRICS_AFTER_HOT=$(sidecar_metrics_json); then
-  warn "could not read the counters after your call"; exit 1
+  warn "could not read metrics after the counted call"; exit 1
 fi
 export METRICS_AFTER_HOT
 if ! node "$WIZARD_DIR/operator-evidence.mjs" hot; then
-  warn "your counted exchange is not one clean exchange"
-  warn "the most common cause is a retry, or another call sharing this sidecar"
+  warn "the counted window is not exactly one clean exchange; do not submit it"
   exit 1
 fi
-printf '  %s✓%s the counted window holds exactly one clean exchange\n' "$GREEN" "$RESET"
+printf '  %s✓%s exactly one counted own-agent exchange\n' "$GREEN" "$RESET"
 
-export SLOT PARTICIPANT_TYPE INTEGRATION_MODE ASSISTANCE ONBOARDING_MS BUNDLE
-export PINNED_SIDECAR_VERSION PINNED_ADAPTER_VERSION PINNED_SHARED_VERSION
-export PINNED_ARTIFACT_RELEASE
+stage "Review and share redacted activation evidence"
+while true; do
+  ask HUMAN_ACTION_SECONDS "Active human setup seconds (pause during machine/provider waits):"
+  if [[ "${HUMAN_ACTION_SECONDS:-}" =~ ^[0-9]+$ ]] && (( HUMAN_ACTION_SECONDS <= 86400 )); then break; fi
+  warn "enter whole seconds from 0 to 86400"
+done
+HUMAN_ACTION_MS=$(( HUMAN_ACTION_SECONDS * 1000 ))
+if (( HUMAN_ACTION_SECONDS > 300 )); then
+  note "This exceeds the five-minute target and is recorded as friction;"
+  note "it does not disqualify a valid protocol exchange."
+fi
+while true; do
+  ask ASSISTANCE "How many times did the founder help? (0 if none):"
+  if gw_require_block "$ASSISTANCE" "assistance count"; then break; fi
+  warn "enter a whole number"
+done
+ATTEST_LOCAL='false'; ATTEST_CREDENTIAL='false'; ATTEST_NO_RECOVERY='false'; ATTEST_OWNERSHIP='false'
+confirm "Did you run the agent yourself on this machine?" && ATTEST_LOCAL='true' || warn "this activation will not qualify without this"
+confirm "Did your credential export and password stay on this machine?" && ATTEST_CREDENTIAL='true' || warn "this activation will not qualify without this"
+confirm "Was no exceptional manual credential recovery needed?" && ATTEST_NO_RECOVERY='true' || warn "this activation will not qualify"
+confirm "Are you the distinct operator assigned this slot?" && ATTEST_OWNERSHIP='true' || warn "this activation will not qualify"
+
+BUNDLE_DIR="${ZK_CREDITS_EVIDENCE_DIR:-$PWD}"
+BUNDLE="$BUNDLE_DIR/zk-credits-activation-evidence-$SLOT.json"
+export SLOT PARTICIPANT_TYPE INTEGRATION_MODE ASSISTANCE HUMAN_ACTION_MS BUNDLE
+export PINNED_SIDECAR_VERSION PINNED_ADAPTER_VERSION PINNED_SHARED_VERSION PINNED_ARTIFACT_RELEASE
 export ATTEST_LOCAL ATTEST_CREDENTIAL ATTEST_NO_RECOVERY ATTEST_OWNERSHIP
-
 if ! node "$WIZARD_DIR/operator-evidence.mjs" bundle; then
   warn "the evidence bundle could not be written"; exit 1
 fi
-
-# ── Stage 10: final scan and hand-off ─────────────────────────────────────
-stage "Final scan and hand-off"
 if ! gw_scan_for_secrets "$BUNDLE"; then
-  warn "the bundle is not clean; do not send it"; exit 1
+  warn "the bundle did not pass the local secret scan; do not send it"; exit 1
 fi
-printf '  %s✓%s the bundle carries no key, token, connection string, or address\n' "$GREEN" "$RESET"
-say "Send only this file to the founder. Nothing else leaves this machine."
-note "The founder validates it with: npm run activation:evidence -- --slot $SLOT --file <bundle>"
-note "Keep your credential, its password, and your artifacts here. The project"
-note "team must never handle them."
+say "Share only the activation evidence file with the founder. The $25 research"
+say "honorarium is paid separately and is never recorded as product revenue or intent."
+note "Evidence contains aggregate counters and setup duration, never task text,"
+note "response content, credential, proof, nullifier, request signal, or identity join."
+note "Close the local agent after evidence and metrics have been captured."
 
 finish

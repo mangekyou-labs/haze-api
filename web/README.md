@@ -1,12 +1,16 @@
 # ZK API Credits — web app
 
-Next.js App Router app for the invite-only, unpaid, experimental Base Sepolia
+Next.js App Router app for the invite-only, experimental Base Sepolia research
 pilot: GitHub sign-in, invite redemption, local credential creation and backup,
-founder-provisioned test credits, and local credential recovery.
+founder-provisioned test credits, and local credential recovery. External slots
+A and C receive a fixed $25 honorarium for a 30-minute session regardless of
+setup success. It is not product revenue or willingness-to-pay evidence.
 
 There is no payment step in this app: no card, no wallet flow, no paid plan,
 and no recurring charge. Credits are founder-provisioned test credits. The
-circuit is experimental and not independently audited.
+circuit is experimental and not independently audited. Product calls have no
+payment step. For valid spends, the payment proof is designed for payer and
+credential unlinkability; the model provider still receives requests.
 
 ## Getting started
 

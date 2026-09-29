@@ -17,6 +17,7 @@ export const DEFAULT_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PilotInviteRecord {
   inviteId: string;
+  creationRequestId: string | null;
   codeHash: string;
   githubAccountId: string;
   createdAt: number;
@@ -41,6 +42,7 @@ export interface InviteStore {
   insert(record: PilotInviteRecord): Promise<void>;
   get(inviteId: string): Promise<PilotInviteRecord | undefined>;
   getByCodeHash(codeHash: string): Promise<PilotInviteRecord | undefined>;
+  getByCreationRequestId(creationRequestId: string): Promise<PilotInviteRecord | undefined>;
   /** Atomic single-use claim. Returns false when already redeemed, revoked, or expired. */
   markRedeemed(inviteId: string, at: number): Promise<boolean>;
   revoke(inviteId: string, at: number): Promise<boolean>;
@@ -65,6 +67,9 @@ export class MemoryInviteStore implements InviteStore {
   private readonly invites = new Map<string, PilotInviteRecord>();
 
   async insert(record: PilotInviteRecord): Promise<void> {
+    if (record.creationRequestId && await this.getByCreationRequestId(record.creationRequestId)) {
+      throw new Error('duplicate invite creation request id');
+    }
     this.invites.set(record.inviteId, { ...record });
   }
 
@@ -76,6 +81,13 @@ export class MemoryInviteStore implements InviteStore {
   async getByCodeHash(codeHash: string): Promise<PilotInviteRecord | undefined> {
     for (const record of this.invites.values()) {
       if (record.codeHash === codeHash) return { ...record };
+    }
+    return undefined;
+  }
+
+  async getByCreationRequestId(creationRequestId: string): Promise<PilotInviteRecord | undefined> {
+    for (const record of this.invites.values()) {
+      if (record.creationRequestId === creationRequestId) return { ...record };
     }
     return undefined;
   }
@@ -99,11 +111,12 @@ export class MemoryInviteStore implements InviteStore {
   }
 }
 
-const INVITE_COLUMNS = 'invite_id, code_hash, github_account_id, created_at, expires_at, redeemed_at, revoked_at';
+const INVITE_COLUMNS = 'invite_id, creation_request_id, code_hash, github_account_id, created_at, expires_at, redeemed_at, revoked_at';
 
 function toRecord(row: Record<string, unknown>): PilotInviteRecord {
   return {
     inviteId: String(row.invite_id),
+    creationRequestId: row.creation_request_id === null || row.creation_request_id === undefined ? null : String(row.creation_request_id),
     codeHash: String(row.code_hash),
     githubAccountId: String(row.github_account_id),
     createdAt: new Date(row.created_at as string | Date).getTime(),
@@ -120,8 +133,8 @@ export class PostgresInviteStore implements InviteStore {
   async insert(record: PilotInviteRecord): Promise<void> {
     await this.pool.query(
       `INSERT INTO control_plane.pilot_invites (${INVITE_COLUMNS})
-       VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), to_timestamp($5 / 1000.0), NULL, NULL)`,
-      [record.inviteId, record.codeHash, record.githubAccountId, record.createdAt, record.expiresAt],
+       VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0), NULL, NULL)`,
+      [record.inviteId, record.creationRequestId, record.codeHash, record.githubAccountId, record.createdAt, record.expiresAt],
     );
   }
 
@@ -137,6 +150,14 @@ export class PostgresInviteStore implements InviteStore {
     const result = await this.pool.query(
       `SELECT ${INVITE_COLUMNS} FROM control_plane.pilot_invites WHERE code_hash = $1`,
       [codeHash],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : undefined;
+  }
+
+  async getByCreationRequestId(creationRequestId: string): Promise<PilotInviteRecord | undefined> {
+    const result = await this.pool.query(
+      `SELECT ${INVITE_COLUMNS} FROM control_plane.pilot_invites WHERE creation_request_id = $1`,
+      [creationRequestId],
     );
     return result.rows[0] ? toRecord(result.rows[0]) : undefined;
   }
@@ -191,24 +212,47 @@ export class PilotInviteService {
     this.inviteTtlMs = options.inviteTtlMs ?? DEFAULT_INVITE_TTL_MS;
   }
 
-  async issue(input: { githubAccountId: string; ttlMs?: number }): Promise<{ inviteId: string; code: string; expiresAt: number }> {
+  async issue(input: { githubAccountId: string; ttlMs?: number; creationRequestId?: string }): Promise<{ inviteId: string; code: string; expiresAt: number }> {
     const githubAccountId = (input.githubAccountId ?? '').trim();
     if (!githubAccountId || githubAccountId.length > 255) throw new Error('invalid_github_account');
     const ttlMs = input.ttlMs ?? this.inviteTtlMs;
     if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) throw new Error('invalid_invite_ttl');
+    const creationRequestId = input.creationRequestId;
+    if (creationRequestId !== undefined && !/^[A-Za-z0-9_-]{16,128}$/u.test(creationRequestId)) {
+      throw new Error('invalid_invite_creation_request_id');
+    }
+    if (creationRequestId && await this.store.getByCreationRequestId(creationRequestId)) {
+      throw new Error(`invite_creation_request_already_resolved:${creationRequestId}`);
+    }
     const now = this.now();
     const code = randomBytes(32).toString('base64url');
     const inviteId = `inv_${randomBytes(16).toString('base64url')}`;
     const expiresAt = now + ttlMs;
-    await this.store.insert({
+    const record: PilotInviteRecord = {
       inviteId,
+      creationRequestId: creationRequestId ?? null,
       codeHash: hashInviteCode(code),
       githubAccountId,
       createdAt: now,
       expiresAt,
       redeemedAt: null,
       revokedAt: null,
-    });
+    };
+    try {
+      await this.store.insert(record);
+    } catch (error) {
+      if (!creationRequestId) throw error;
+      // The database may have committed before the connection failed. Query
+      // by the stable request id and compare the stored digest with the code
+      // still held in this process before deciding whether it is safe to show.
+      let resolved: PilotInviteRecord | undefined;
+      try { resolved = await this.store.getByCreationRequestId(creationRequestId); }
+      catch { throw new Error(`invite_outcome_unknown:${creationRequestId}`); }
+      if (!resolved) throw new Error(`invite_outcome_unknown:${creationRequestId}`);
+      if (resolved.inviteId !== inviteId || resolved.codeHash !== record.codeHash) {
+        throw new Error(`invite_creation_request_conflict:${creationRequestId}`);
+      }
+    }
     return { inviteId, code, expiresAt };
   }
 
@@ -216,6 +260,11 @@ export class PilotInviteService {
     const record = await this.store.get(inviteId);
     if (!record) return undefined;
     return { ...this.statusOf(record) };
+  }
+
+  async inspectCreationRequest(creationRequestId: string): Promise<PilotInviteStatus | undefined> {
+    const record = await this.store.getByCreationRequestId(creationRequestId);
+    return record ? { ...this.statusOf(record) } : undefined;
   }
 
   async revoke(inviteId: string): Promise<boolean> {

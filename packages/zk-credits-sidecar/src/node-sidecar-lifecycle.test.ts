@@ -8,6 +8,7 @@ import { writeLoopbackToken } from './sidecar-state.js';
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, {
     recursive: true,
     force: true,
@@ -44,12 +45,16 @@ describe('Node sidecar lifecycle adapter', () => {
 
   it('starts the current CLI on the configured port with state and log isolation', async () => {
     const startDetachedProcess = vi.fn(async () => undefined);
+    const password = 'local-only-test-password';
+    vi.stubEnv('ZK_CREDITS_CREDENTIAL_PASSWORD', 'environment-password-must-not-cross');
+    vi.stubEnv('ORACLE_WALLET', 'unrelated-secret-must-not-cross');
     const lifecycle = createNodeSidecarLifecycle({
       loopbackBaseUrl: 'http://127.0.0.1:4567',
       stateDirectory: '/private/zk-state',
       tokenPath: '/private/zk-state/loopback-token',
       logPath: '/private/zk-state/sidecar.log',
       cliEntryPath: '/opt/zk-credits/dist/cli.js',
+      readCredentialPassword: async () => password,
     }, {
       fetchHealth: async () => new Response(null, { status: 503 }),
       startDetachedProcess,
@@ -58,15 +63,21 @@ describe('Node sidecar lifecycle adapter', () => {
 
     await lifecycle.startDetached();
 
-    expect(startDetachedProcess).toHaveBeenCalledWith({
-      executable: process.execPath,
-      args: ['/opt/zk-credits/dist/cli.js', 'serve', '--port', '4567'],
-      env: expect.objectContaining({
-        ZK_CREDITS_HOME: '/private/zk-state',
-        ZK_CREDITS_SIDECAR_PORT: '4567',
-      }),
-      logPath: '/private/zk-state/sidecar.log',
+    const specification = startDetachedProcess.mock.calls[0]?.[0];
+    expect(specification?.executable).toBe(process.execPath);
+    expect(specification?.args).toEqual([
+      '/opt/zk-credits/dist/cli.js', 'serve', '--port', '4567', '--credential-password-stdin',
+    ]);
+    expect(specification?.env).toMatchObject({
+      ZK_CREDITS_HOME: '/private/zk-state',
+      ZK_CREDITS_SIDECAR_PORT: '4567',
     });
+    expect(specification?.stdin).toBe(password);
+    expect(specification?.logPath).toBe('/private/zk-state/sidecar.log');
+    const childEnvironment = specification?.env;
+    expect(childEnvironment).not.toHaveProperty('ZK_CREDITS_CREDENTIAL_PASSWORD');
+    expect(childEnvironment).not.toHaveProperty('ORACLE_WALLET');
+    expect(specification?.stdin).toBe(password);
   });
 
   it('rejects a different process that happens to return HTTP 200', async () => {

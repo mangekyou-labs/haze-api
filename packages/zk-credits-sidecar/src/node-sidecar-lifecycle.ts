@@ -9,6 +9,7 @@ export interface DetachedSidecarProcess {
   args: readonly string[];
   env: NodeJS.ProcessEnv;
   logPath: string;
+  stdin?: string;
 }
 
 export interface NodeSidecarLifecycleOptions {
@@ -17,12 +18,32 @@ export interface NodeSidecarLifecycleOptions {
   tokenPath: string;
   logPath: string;
   cliEntryPath: string;
+  readCredentialPassword?: () => Promise<string>;
 }
 
 export interface NodeSidecarLifecycleRuntime {
   fetchHealth(url: string): Promise<Response>;
   startDetachedProcess(specification: DetachedSidecarProcess): Promise<void>;
   wait(milliseconds: number): Promise<void>;
+}
+
+const CHILD_ENVIRONMENT_KEYS = [
+  'HOME', 'PATH', 'TMP', 'TEMP', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ',
+  'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT',
+  'ZK_CREDITS_CREDENTIAL_PATH', 'ZK_CREDITS_ARTIFACT_DIR', 'ZK_CREDITS_WITNESS_PATH',
+  'ZK_CREDITS_GATEWAY_URL', 'BASE_RPC_URL', 'BASE_PRIVATE_CREDIT_BOND_ADDRESS',
+  'BASE_DEPLOYMENT_BLOCK', 'BASE_CONFIRMATIONS',
+] as const;
+
+function sidecarEnvironment(stateDirectory: string, port: string): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const key of CHILD_ENVIRONMENT_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  environment.ZK_CREDITS_HOME = stateDirectory;
+  environment.ZK_CREDITS_SIDECAR_PORT = port;
+  return environment;
 }
 
 async function startDetachedProcess(specification: DetachedSidecarProcess): Promise<void> {
@@ -33,12 +54,16 @@ async function startDetachedProcess(specification: DetachedSidecarProcess): Prom
     const child = spawn(specification.executable, specification.args, {
       detached: true,
       env: specification.env,
-      stdio: ['ignore', log.fd, log.fd],
+      stdio: [specification.stdin === undefined ? 'ignore' : 'pipe', log.fd, log.fd],
     });
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve);
       child.once('error', reject);
     });
+    if (specification.stdin !== undefined && child.stdin) {
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(specification.stdin);
+    }
     child.unref();
   } finally {
     await log.close();
@@ -74,15 +99,14 @@ export function createNodeSidecarLifecycle(
       }
     },
     async startDetached(): Promise<void> {
+      if (!options.readCredentialPassword) throw new Error('Credential password prompt is unavailable');
+      const password = await options.readCredentialPassword();
       await runtime.startDetachedProcess({
         executable: process.execPath,
-        args: [options.cliEntryPath, 'serve', '--port', url.port],
-        env: {
-          ...process.env,
-          ZK_CREDITS_HOME: options.stateDirectory,
-          ZK_CREDITS_SIDECAR_PORT: url.port,
-        },
+        args: [options.cliEntryPath, 'serve', '--port', url.port, '--credential-password-stdin'],
+        env: sidecarEnvironment(options.stateDirectory, url.port),
         logPath: options.logPath,
+        stdin: password,
       });
     },
     readToken: () => readLoopbackToken(options.tokenPath),

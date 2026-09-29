@@ -78,11 +78,11 @@ export const LAUNCH_VARS: readonly LaunchEnvVar[] = [
   { name: 'BASE_TREASURY_ADDRESS', label: 'treasury address', shape: 'address', requiredFor: 'deploy' },
   { name: 'BASE_REFUND_VAULT', label: 'refund vault address', shape: 'address', requiredFor: 'deploy' },
   { name: 'BASE_SPONSOR_PRIVATE_KEY', label: 'bounded runtime sponsor key', shape: 'private_key', requiredFor: 'deploy' },
-  { name: 'BASE_SPEND_VERIFIER_ADDRESS', label: 'reviewed SpendVerifier adapter address', shape: 'address', requiredFor: 'deploy' },
+  { name: 'BASE_SPEND_VERIFIER_ADDRESS', label: 'deployed v2 SpendVerifier adapter address', shape: 'address', requiredFor: 'deploy', optional: true },
   { name: 'BASESCAN_API_KEY', label: 'BaseScan verification key', shape: 'api_token', requiredFor: 'deploy', optional: true },
 
   // These are launcher-managed outputs. Hosting is deliberately deferred
-  // until the four CREATE receipts and the post-deploy invariant checks have
+  // until the six CREATE receipts and the post-deploy invariant checks have
   // completed and all deployment outputs have been written atomically.
   { name: 'BASE_SPONSOR_ADDRESS', label: 'derived sponsor address', shape: 'address', requiredFor: 'hosting' },
   { name: 'BASE_POSEIDON_T2_ADDRESS', label: 'deployed Poseidon T2 address', shape: 'address', requiredFor: 'hosting' },
@@ -145,6 +145,7 @@ export const GENERATED_SECRET_VARS = [
 /** Values produced by launch-pilot after on-chain reconciliation, never wizard inputs. */
 export const LAUNCH_OUTPUT_VARS = [
   'BASE_SPONSOR_ADDRESS',
+  'BASE_SPEND_VERIFIER_ADDRESS',
   'BASE_POSEIDON_T2_ADDRESS',
   'BASE_POSEIDON_T3_ADDRESS',
   'BASE_POSEIDON_T4_ADDRESS',

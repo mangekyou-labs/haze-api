@@ -21,6 +21,9 @@ import {
 } from '@/lib/credits';
 import { verifyActivatedCredential, type RecoveryCapsuleFile } from '@zk-credits/shared/base';
 
+const CODEX_FIRST_USE_GUIDE =
+  'https://github.com/mangekyou-labs/haze-api/blob/main/docs/onboarding/base-zk-credits-codex-first-use.md';
+
 type Step = 'invite' | 'capsule' | 'backup' | 'fund' | 'active';
 
 interface Activation {
@@ -192,7 +195,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
           index="01"
           title="Redeem your pilot invite"
           state={step === 'invite' ? 'current' : 'done'}
-          description="Founder-issued, single-use, and bound to your GitHub account. The pilot is unpaid and experimental."
+          description="Founder-issued, single-use, and bound to your GitHub account. Product calls use founder-provisioned test credits; the pilot is experimental."
         />
         {step === 'invite' && (
           <div className="mt-4 space-y-3">
@@ -354,25 +357,28 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Local setup</p>
-        <h2 className="mt-2 text-lg font-semibold text-zinc-100">Point your proxy at the activated credential</h2>
-        <pre className="mt-3 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-xs leading-5 text-zinc-300">
-{`export ZK_CREDITS_CREDENTIAL_PATH=/absolute/path/to/zk-credits-credential.json
-export ZK_CREDITS_CREDENTIAL_PASSWORD='your backup password'
-export ZK_CREDITS_GATEWAY_URL=${gatewayBaseUrl}
-zk-credits setup`}
-        </pre>
-        <p className="mt-3 text-sm text-zinc-400">
-          The sidecar decrypts the credential locally and proves each prepaid
-          request; an x402-native agent that registers the custom zk-prepaid
-          adapter can present the same proof. Pilot telemetry does not collect
-          prompts, responses, secrets, proofs, nullifiers, request signals, or
-          payer/spend-plane joins, and the gateway and the upstream provider
-          can still observe request content and traffic metadata.
+        <h2 className="mt-2 text-lg font-semibold text-zinc-100">Let Codex prepare local setup</h2>
+        <p className="mt-2 text-sm text-zinc-400">
+          The founder has granted access to the private proving-bundle repository. Give Codex the single instruction in the first-use guide:
+          it checks GitHub CLI sign-in and access, installs the pinned release, downloads and verifies the bundle, and runs setup.
+          You sign in if needed, enter your recovery password at the hidden local prompt, give consent, and choose your task.
+        </p>
+        <a
+          href={CODEX_FIRST_USE_GUIDE}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 inline-flex min-h-10 items-center rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-cyan-200 underline underline-offset-4 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+        >
+          Open the one-instruction Codex guide
+        </a>
+        <p className="mt-2 text-sm text-zinc-400">
+          Gateway: <a className="font-mono text-cyan-300 underline underline-offset-4" href={gatewayBaseUrl} rel="noreferrer" target="_blank">{gatewayBaseUrl}</a>
         </p>
         <p className="mt-2 text-sm text-zinc-500">
-          Invite-only, unpaid, experimental pilot on Base Sepolia. The circuit
-          is experimental and not independently audited, nothing here is
-          production-ready, and generic x402 clients are unsupported.
+          Invite-only Base Sepolia research pilot. The circuit is experimental and unaudited; generic x402 clients are unsupported.
+        </p>
+        <p className="mt-2 text-xs leading-5 text-zinc-500">
+          For valid spends, the proof is designed for payer and credential unlinkability. Pilot telemetry does not collect prompts, responses, secrets, proofs, nullifiers, request signals, or payer/spend-plane joins. The model provider still receives each request; the gateway and the upstream provider can still observe request content and traffic metadata.
         </p>
       </section>
 

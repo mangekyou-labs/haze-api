@@ -1,5 +1,5 @@
 /**
- * Durable launch controls for the invite-only unpaid pilot.
+ * Durable launch controls for the invite-only research pilot.
  *
  * Two independent capabilities share one module because both must be decided
  * inside the same transaction that admits a dispatch:

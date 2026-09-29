@@ -6,8 +6,14 @@ export function SiteFooter() {
     >
       <div className="mx-auto max-w-6xl space-y-2 px-6 text-xs leading-relaxed text-zinc-500">
         <p>
-          Base Sepolia &middot; invite-only unpaid pilot &middot; OpenRouter inference
+          Base Sepolia &middot; invite-only research pilot &middot; OpenRouter inference
           &mdash; experimental, testnet only, and not independently audited.
+        </p>
+        <p>
+          External slots A and C receive a fixed $25 honorarium for a 30-minute
+          session, regardless of setup success. It is research compensation,
+          not product revenue or evidence of willingness to pay. Product calls
+          use founder-provisioned test credits and have no product payment step.
         </p>
         <p>
           Supported clients: the project sidecar for{' '}
@@ -18,10 +24,11 @@ export function SiteFooter() {
           standard exact rail are unsupported.
         </p>
         <p>
-          Pilot telemetry does not collect prompts, responses, secrets, proofs,
-          nullifiers, request signals, or payer/spend-plane joins. The gateway
-          and the upstream provider can still observe request content and
-          traffic metadata.
+          For valid spends, the payment proof is designed for payer and
+          credential unlinkability. Pilot telemetry does not collect prompts,
+          responses, secrets, proofs, nullifiers, request signals, or
+          payer/spend-plane joins. The gateway and the upstream provider can
+          still observe request content and traffic metadata.
         </p>
         <p>
           Honest caveats: development proving material is for Sepolia; one

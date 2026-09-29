@@ -1,5 +1,5 @@
 /**
- * Founder CLI for the invite-only unpaid pilot.
+ * Founder CLI for the invite-only research pilot.
  *
  *   npm run invite:issue -- --github-id <id> [--days 7]
  *   npm run invite:inspect -- <inviteId>
@@ -8,6 +8,10 @@
  *   npm run launch:pause -- --reason <text>
  *   npm run launch:resume
  *   npm run activation:start -- --slot A --github-id <id>
+ *   npm run activation:retry -- --slot A --same-operator
+ *   npm run activation:retry -- --slot A --github-id <replacement-id>
+ *   npm run activation:abort -- --slot A [--attempt <n>] [--funding-outcome funded|not-funded]
+ *   npm run activation:reconcile -- --slot A [--attempt <n>] [--funding-outcome funded|not-funded]
  *   npm run activation:rehearse
  *   npm run activation:assist -- --slot A
  *   npm run activation:evidence -- --slot A --file <bundle.json>
@@ -51,6 +55,9 @@ const USAGE = `usage:
   launch:pause -- --reason <text>
   launch:resume
   activation:start -- --slot <A|B|C> --github-id <github account id>
+  activation:retry -- --slot <A|B|C> (--same-operator | --github-id <replacement account id>)
+  activation:abort -- --slot <A|B|C> [--attempt <n>] [--funding-outcome funded|not-funded]
+  activation:reconcile -- --slot <A|B|C> [--attempt <n>] [--funding-outcome funded|not-funded]
   activation:rehearse
   activation:assist -- --slot <A|B|C>
   activation:evidence -- --slot <A|B|C> --file <redacted bundle path>
@@ -184,7 +191,9 @@ async function main(): Promise<void> {
           gatewayUrl: process.env.PUBLIC_GATEWAY_URL ?? 'http://127.0.0.1:3001',
           adminToken: process.env.BILLING_INTERNAL_TOKEN ?? '',
         }),
-        issueInvite: (githubAccountId) => invites.issue({ githubAccountId }),
+        issueInvite: ({ githubAccountId, creationRequestId }) => invites.issue({ githubAccountId, creationRequestId }),
+        inspectInvite: (inviteId) => invites.inspect(inviteId),
+        inspectInviteRequest: (creationRequestId) => invites.inspectCreationRequest(creationRequestId),
         revokeInvite: (inviteId) => invites.revoke(inviteId),
       },
     }));

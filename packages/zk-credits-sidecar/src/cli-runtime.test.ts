@@ -7,6 +7,7 @@ function dependencies(overrides: Partial<CliCommandDependencies> = {}): CliComma
     readToken: async () => 'zk-local-token',
     write: () => undefined,
     isCredentialConfigured: async () => true,
+    validateSetupPrerequisites: async () => undefined,
     configureCodex: async () => undefined,
     ensureSidecar: async () => 'zk-local-token',
     isCodexProfileInstalled: async () => true,
@@ -43,6 +44,32 @@ describe('CLI commands', () => {
     expect(ensureSidecar).toHaveBeenCalledOnce();
     expect(write.mock.calls.flat().join('\n')).toContain('Run: zk-credits codex');
     expect(write.mock.calls.flat().join('\n')).not.toContain('private-token');
+  });
+
+  it('does not leave Codex configured when the sidecar cannot start', async () => {
+    const events: string[] = [];
+    await expect(runCliCommand(['setup', 'codex'], dependencies({
+      configureCodex: async () => { events.push('configure-codex'); },
+      ensureSidecar: async () => {
+        events.push('start-sidecar');
+        throw new Error('sidecar failed to start');
+      },
+    }))).rejects.toThrow('sidecar failed to start');
+    expect(events).toEqual(['start-sidecar']);
+  });
+
+  it('reports missing local proving inputs before starting the sidecar', async () => {
+    const ensureSidecar = vi.fn(async () => 'must-not-start');
+    const configureCodex = vi.fn(async () => undefined);
+    await expect(runCliCommand(['setup', 'codex'], dependencies({
+      validateSetupPrerequisites: async () => {
+        throw new Error('Get the pinned proving bundle from your pilot contact, then set ZK_CREDITS_ARTIFACT_DIR.');
+      },
+      ensureSidecar,
+      configureCodex,
+    }))).rejects.toThrow('Get the pinned proving bundle from your pilot contact');
+    expect(ensureSidecar).not.toHaveBeenCalled();
+    expect(configureCodex).not.toHaveBeenCalled();
   });
 
   it('reports credential and sidecar state without starting the sidecar', async () => {

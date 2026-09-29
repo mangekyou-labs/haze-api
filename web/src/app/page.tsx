@@ -33,16 +33,22 @@ export default function Home() {
         />
         <div className="relative mx-auto max-w-6xl px-6 pb-20 pt-24 text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/80 px-3 py-1 font-mono text-xs text-zinc-300">
-            Base Sepolia &middot; invite-only unpaid pilot &middot; experimental x402 v2 zk-prepaid
+            Base Sepolia &middot; invite-only research pilot &middot; experimental x402 v2 zk-prepaid
           </span>
 
           <h1 className="mx-auto mt-6 max-w-3xl text-5xl font-bold tracking-tight text-white sm:text-6xl">
             ZK API Credits
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-zinc-400">
-            Invite-only, unpaid, experimental pilot for private prepaid API
+            Invite-only, experimental pilot for private prepaid API
             credits on Base Sepolia. Founder-provisioned test credits, no card
-            or wallet flow, and no recurring charge.
+            or wallet flow, and no product payment step.
+          </p>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+            External slots A and C receive $25 for a 30-minute research session
+            regardless of setup success. First use targets five minutes of
+            active human setup. The honorarium is not product revenue or
+            willingness-to-pay evidence.
           </p>
 
           <div className="mt-10 flex justify-center gap-4">
@@ -100,10 +106,12 @@ export default function Home() {
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
               <h2 className="font-semibold text-zinc-100">Privacy boundary</h2>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                Pilot telemetry does not collect prompts, responses, secrets,
-                proofs, nullifiers, request signals, or payer/spend-plane joins.
-                The gateway and the upstream provider can still observe request
-                content and traffic metadata.
+                For valid spends, the proof is designed for payer and
+                credential unlinkability. Pilot telemetry does not collect
+                prompts, responses, secrets, proofs, nullifiers, request
+                signals, or payer/spend-plane joins. The gateway and the
+                upstream provider can still observe request content and traffic
+                metadata.
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">

@@ -32,10 +32,15 @@ export const BASE_CONFIRMATIONS = 3;
 /** Poseidon libraries the bond needs, deployed before it. */
 export const POSEIDON_LIBRARIES = ['PoseidonT2', 'PoseidonT3', 'PoseidonT4'] as const;
 
-export const CONTRACT_DEPLOY_ORDER = [...POSEIDON_LIBRARIES, 'PrivateCreditBond'] as const;
+export const CONTRACT_DEPLOY_ORDER = [
+  'Groth16Verifier',
+  'SpendVerifier',
+  ...POSEIDON_LIBRARIES,
+  'PrivateCreditBond',
+] as const;
 export type ContractName = (typeof CONTRACT_DEPLOY_ORDER)[number];
 
-/** The reviewed B11 adapter and the generated verifier it must wrap. */
+/** The existing v1 contracts remain deployed and continue to serve the v1 bond. */
 export const EXISTING_B11_CONTRACTS = {
   verifier: '0xC66CC4866f945Ce39c207729CF136fd03d58207E',
   adapter: '0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD',
@@ -371,13 +376,13 @@ function unknownDeployment(reason: string): DeploymentReconciliation {
   return { kind: 'unknown', reason };
 }
 
-/** Reconciles the complete four-transaction Foundry artifact. */
+/** Reconciles every CREATE in the v2 Foundry deployment artifact. */
 export async function reconcileDeploymentArtifact(
   intents: readonly BroadcastIntent[],
   artifact: FoundryRunArtifact,
   chain: ChainReader,
 ): Promise<DeploymentReconciliation> {
-  if (intents.length !== CONTRACT_DEPLOY_ORDER.length) return unknownDeployment('four deployment intents are required');
+  if (intents.length !== CONTRACT_DEPLOY_ORDER.length) return unknownDeployment(`${CONTRACT_DEPLOY_ORDER.length} deployment intents are required`);
   if (artifact.transactions.length !== CONTRACT_DEPLOY_ORDER.length) return unknownDeployment(`Foundry artifact has ${artifact.transactions.length} transactions; expected ${CONTRACT_DEPLOY_ORDER.length}`);
 
   if (chain.chainId) {
@@ -515,8 +520,8 @@ export function assertRoleAddresses(values: { sponsor: string; treasury: string;
   if (unique.size !== names.length) throw new Error('sponsor, treasury, and refund vault addresses must be distinct');
 }
 
-export function assertVerifierLinkage(observed: string, expected: string = EXISTING_B11_CONTRACTS.verifier): void {
-  if (observed.toLowerCase() !== expected.toLowerCase()) throw new Error(`SpendVerifier wraps ${observed}; expected reviewed verifier ${expected}`);
+export function assertVerifierLinkage(observed: string, expected: string): void {
+  if (observed.toLowerCase() !== expected.toLowerCase()) throw new Error(`SpendVerifier wraps ${observed}; expected verifier ${expected}`);
 }
 
 /** The deterministic empty depth-20 root used by PrivateCreditBond.currentRoot. */

@@ -1,13 +1,15 @@
 # zk-credits
 
-Invite-only, unpaid, experimental pilot on Base Sepolia (`eip155:84532`) for
-private prepaid API credits with the custom x402 v2 `zk-prepaid` scheme.
+Invite-only, experimental pilot on Base Sepolia (`eip155:84532`) for private
+prepaid API credits with the custom x402 v2 `zk-prepaid` scheme. Product calls
+use founder-provisioned test credits and have no product payment step.
 
 - **Access is invite-only.** A founder issues a single-use invite bound to one
   GitHub account. There is no open registration.
-- **The pilot is unpaid.** Every credential receives founder-provisioned test
-  credits. There is no payment step, no card or wallet flow, no paid plan, no
-  plan selection, and no recurring charge.
+- **External research sessions are compensated.** Slots A and C receive a
+  fixed $25 honorarium for a 30-minute session regardless of setup success.
+  This is not product revenue or willingness-to-pay evidence; measure product
+  payment intent separately.
 - **Everything is experimental and testnet-only.** The circuit has not been
   independently audited, and none of this is production software.
 
@@ -32,6 +34,14 @@ Not supported: generic x402 clients, unmodified agents, public facilitators,
 Bazaar, MCP, the standard `exact` rail, and any production or audited-privacy
 claim. A generic x402 client that does not register the adapter fails closed
 with an unsupported-scheme result.
+
+The local sidecar includes a narrow Codex Responses bridge: supported text and
+function-tool requests translate to the fixed non-streaming Chat Completions
+service class, then return as Responses events. This is not a general Responses
+gateway. For a first-use walkthrough see
+[`docs/onboarding/base-zk-credits-codex-first-use.md`](docs/onboarding/base-zk-credits-codex-first-use.md);
+x402 operators can use
+[`docs/onboarding/base-zk-credits-x402-agent.md`](docs/onboarding/base-zk-credits-x402-agent.md).
 
 See `packages/zk-credits-sidecar/README.md` for the supported client install
 path and `packages/x402-zk-prepaid/README.md` for adapter registration.
@@ -78,18 +88,21 @@ limits, the release matrix, and the `Deploy Smoke` probes are recorded in
 
 ## Provisioning and activating
 
-Two wizards cover the two planes, and neither crosses into the other:
+The founder launch wizard, internal demo wizard, and operator wizard cover
+separate steps of the rollout:
 
 | Wizard | Runs on | Captures |
 | --- | --- | --- |
 | `scripts/launch-wizard.sh` | the founder's machine | infrastructure values into `.env.launch.local` |
 | `scripts/operator-wizard.sh` | each operator's machine | local values into `.env.operator.local` |
+| `scripts/founder-demo-wizard.sh` | the founder's machine | redacted record of the uncounted Base Sepolia demo |
 
-Both source `scripts/launch-guardrails.sh`, which refuses operator variables in
-the launch env and deployer, sponsor, database, admin-token, and provider
-variables in the operator env, and refuses to write into a tracked, unignored,
-or world-readable file. `bash scripts/guardrails.test.sh` exercises those
-boundaries.
+The launch and operator wizards source `scripts/launch-guardrails.sh`, which
+refuses operator variables in the launch env and deployer, sponsor, database,
+admin-token, and provider variables in the operator env, and refuses to write
+into a tracked, unignored, or world-readable file. `bash scripts/guardrails.test.sh`
+exercises those boundaries. The founder demo wizard runs before external
+launch and records the demo as internal and uncounted.
 
 The launch env is the only place infrastructure secrets live. The refund and
 treasury vault is configured **by address**; its private key is never supplied
@@ -102,17 +115,29 @@ One slot per operator, assigned once:
 
 | Slot | Participant | Integration |
 | --- | --- | --- |
-| A | coding-agent operator | OpenAI-compatible sidecar |
-| B | existing x402-native agent | `@zk-credits/x402-zk-prepaid` adapter |
-| C | coding-agent operator | OpenAI-compatible sidecar |
+| A | External Codex developer | Codex through the local sidecar |
+| B | Founder | Founder task-running x402 agent and adapter |
+| C | External x402 operator | Their own agent and the adapter |
 
-First, the launch env and published versions must already exist, then each
-operator runs their own wizard. The founder drives the four commands below: the
-first prewarms the free instance, requires a fully ready `/ready`, records the
-baseline aggregate committed-claim count, and issues exactly one invite. The
-last validates the operator's redacted bundle, re-reads the aggregate status,
-and confirms the committed count increased across the window — comparing two
-global integers, so no read creates an identifier join.
+Slots A and C are the only market-validation participants. B is a technical
+activation only. Run A first; its qualifying activation starts the 14-day UTC
+window. Run a fresh B after A, then C. Each counted exchange has exactly one
+discarded warm-up and one custom `zk-prepaid` task call. Continue only when
+both A and C make a real call on another calendar day and show credible
+product payment intent before the window closes. A five-minute human-action
+target applies to first use; longer setup is recorded as friction, not a
+protocol failure.
+
+External sessions last 30 minutes and receive the fixed $25 honorarium even
+when setup or the call fails. Keep that research payment separate from product
+revenue and payment intent.
+
+The founder drives the four commands below: the first prewarms the free
+instance, requires a fully ready `/ready`, records the baseline aggregate
+committed-claim count, and issues exactly one invite. The last validates the
+operator's redacted bundle, re-reads aggregate status, and confirms the
+committed count increased across the window — comparing two global integers,
+so no read creates an identifier join.
 
 ```sh
 cd ts
@@ -129,9 +154,11 @@ a credential identifier, an identity, a remaining balance, or a spend-plane
 identifier. `ts/activation-evidence.ts` holds the schema and the privacy
 denylist; only a bundle that validates may be committed.
 
-The two-week readout clock starts at the first qualifying activation. A failed
-or non-qualifying attempt is recorded as an aggregate failure and does not
-count toward the three.
+The redacted bundle contains no prompts, responses, credentials, proofs,
+nullifiers, request signals, or identity-to-spend joins. For valid spends, the
+payment proof is designed for payer and credential unlinkability. The model
+provider still receives each request, and the gateway and provider can observe
+request content and traffic metadata.
 
 ## Local credential proxy
 
@@ -139,17 +166,27 @@ The sidecar reads an encrypted browser export and generates the BN254 Groth16
 proof locally. It then follows x402 v2 over the gateway:
 
 ```sh
-export ZK_CREDITS_CREDENTIAL_PATH=/path/to/credential.zkcred
-export ZK_CREDITS_CREDENTIAL_PASSWORD='use-a-local-secret'
-export ZK_CREDITS_ARTIFACT_DIR=/path/to/pinned-artifacts
-export ZK_CREDITS_WITNESS_PATH=/path/to/witness.json
-zk-credits serve --gateway http://127.0.0.1:3001 --port 3210
+npm install --global zk-credits@0.2.7
+export ZK_CREDITS_CREDENTIAL_PATH="$HOME/Downloads/zk-credits-credential.json"
+export ZK_CREDITS_GATEWAY_URL="https://zk-credits-gateway.onrender.com"
+export BASE_RPC_URL="https://sepolia.base.org"
+zk-credits setup codex
 ```
 
-`ZK_CREDITS_ARTIFACT_DIR` holds the frozen proving artifacts whose SHA-256
-digests are pinned in `packages/zk-credits-sidecar/circuits/manifest.json`.
-The bytes are installed out of band; a missing, relocated, or altered
-artifact fails closed before any prove.
+Setup prompts for the credential backup password without echo. Before the
+session, the founder grants access to the pinned proving-bundle repository
+`mangekyou-labs/zk-credits-base-sepolia-v2-bundle`. Codex checks local GitHub
+CLI authentication and repository access, installs the pinned release,
+downloads and verifies the bundle, and runs local setup. The human handles
+GitHub sign-in if needed, enters the recovery password locally, gives consent,
+and chooses their own task. See the one-instruction
+[Codex first-use guide](docs/onboarding/base-zk-credits-codex-first-use.md).
+Setup downloads the immutable release pinned in
+`packages/zk-credits-sidecar/circuits/manifest.json`,
+checks its release identity and file digests, synchronizes the V2 witness from
+public Base events, and asks the gateway to recognize the resulting root. The
+bundle, witness, and event cache stay on the local machine; V2 setup does not
+accept a manually supplied witness file.
 
 `POST /v1/chat/completions` is protected by the experimental custom x402
 scheme `zk-prepaid`. A missing or stale `PAYMENT-SIGNATURE` receives a 402
@@ -157,7 +194,12 @@ with base64 `PAYMENT-REQUIRED`; the sidecar retries with a proof-bound
 signature. Settlement is a durable escrow claim, not a per-request chain
 transaction, so `PAYMENT-RESPONSE.transaction` is intentionally empty.
 
-The reusable implementation is in `packages/x402-zk-prepaid/`. It is not
+The reusable implementation is in `packages/x402-zk-prepaid/`. The sidecar
+exports `createLocalX402Agent` from `zk-credits/x402`, so an operator can use
+the same local proof engine, request-aware adapter, and authenticated local
+aggregate metrics in their own agent. `zk-credits x402-agent` is a small
+task-running starter for founder demos and local rehearsal; slot C integrates
+the adapter into their own agent. It is not
 automatically supported by generic x402 clients: integrations must register
 this custom scheme and use the published requirements/payload format. See
 `docs/ai/design/2026-09-18-feature-base-zk-credits.md` for the protocol

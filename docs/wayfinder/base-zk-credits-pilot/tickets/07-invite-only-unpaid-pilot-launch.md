@@ -1,5 +1,11 @@
 # B22 — External invite-only unpaid x402-agent pilot execution tracker
 
+> **Superseded on 2026-09-29.** Use the revised
+> [A/B/C pilot map](../map.md) and its
+> [issue drafts](../issue-drafts/README.md) for the active cohort, honorarium,
+> setup target, qualification rules, and issue plan. This file is retained as
+> historical context for the prior three-operator pilot proposal.
+
 Type: task
 Status: external pilot pending — this local tracker is broader than current GitHub issue #26
 Blocked by: Pilot correctness and release verification (resolved); Invite-only unpaid pilot copy freeze (resolved)

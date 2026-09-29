@@ -26,9 +26,10 @@ export default async function SignInPage() {
             Sign in
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
-            Invite-only, unpaid, experimental pilot on Base Sepolia. GitHub
-            sign-in is required; there is no payment step, no card, and no
-            wallet flow, and the circuit is not independently audited.
+            Invite-only experimental pilot on Base Sepolia. GitHub sign-in is
+            required; product calls use test credits and have no payment step.
+            External research sessions have a separate $25 honorarium; the
+            circuit is not independently audited.
           </p>
 
           <form

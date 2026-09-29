@@ -53,7 +53,7 @@ export function RecoverCredentialForm() {
         starts funding.
       </p>
       <p className="mt-3 text-xs leading-5 text-zinc-500">
-        Invite-only, unpaid, experimental Base Sepolia pilot. The circuit is
+        Invite-only, experimental Base Sepolia pilot. The circuit is
         not independently audited, there is no payment step, and recovery
         never uploads your export, password, or credential.
       </p>

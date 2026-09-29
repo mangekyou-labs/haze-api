@@ -5,6 +5,7 @@ export interface CliCommandDependencies {
   readToken(): Promise<string>;
   write(line: string): void;
   isCredentialConfigured(): Promise<boolean>;
+  validateSetupPrerequisites(): Promise<void>;
   configureCodex(model?: string): Promise<void>;
   ensureSidecar(): Promise<string>;
   isCodexProfileInstalled(): Promise<boolean>;
@@ -35,8 +36,9 @@ export async function runCliCommand(
     case 'setup': {
       const model = setupModel(args);
       if (!await dependencies.isCredentialConfigured()) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH before running zk-credits setup');
-      await dependencies.configureCodex(model);
+      await dependencies.validateSetupPrerequisites();
       await dependencies.ensureSidecar();
+      await dependencies.configureCodex(model);
       dependencies.write('ZK Credits is ready for Codex.');
       dependencies.write('Run: zk-credits codex');
       return 0;

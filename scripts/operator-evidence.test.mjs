@@ -166,7 +166,7 @@ test('refuses an uncaptured or malformed counter read instead of guessing', () =
   assert.match(run('warmup', { METRICS_FRESH: 'not json', METRICS_AFTER_WARMUP: json(metrics(1)) }).output, /is not valid JSON/u);
 });
 
-test('writes a version-2 bundle carrying all three snapshots and no warm-up contamination', () => {
+test('writes a version-3 bundle carrying human action time and all three snapshots', () => {
   const directory = mkdtempSync(join(tmpdir(), 'zk-evidence-'));
   const bundle = join(directory, 'evidence.json');
   try {
@@ -174,11 +174,11 @@ test('writes a version-2 bundle carrying all three snapshots and no warm-up cont
       SLOT: 'A',
       PARTICIPANT_TYPE: 'coding_agent',
       INTEGRATION_MODE: 'openai_compatible_sidecar',
-      PINNED_SIDECAR_VERSION: '0.2.0',
+      PINNED_SIDECAR_VERSION: '0.2.7',
       PINNED_ADAPTER_VERSION: '0.1.0',
       PINNED_SHARED_VERSION: '0.1.0',
-      PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v1',
-      ONBOARDING_MS: '1800000',
+      PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v2',
+      HUMAN_ACTION_MS: '1800000',
       ASSISTANCE: '0',
       ATTEST_LOCAL: 'true',
       ATTEST_CREDENTIAL: 'true',
@@ -192,7 +192,8 @@ test('writes a version-2 bundle carrying all three snapshots and no warm-up cont
     assert.equal(result.code, 0, result.output);
 
     const evidence = JSON.parse(readFileSync(bundle, 'utf8'));
-    assert.equal(evidence.schemaVersion, 2);
+    assert.equal(evidence.schemaVersion, 3);
+    assert.equal(evidence.humanActionDurationMs, 1_800_000);
     assert.deepEqual(Object.keys(evidence.counters), ['beforeWarmup', 'afterWarmup', 'afterHotExchange']);
     assert.equal(evidence.counters.beforeWarmup.exchange.exchangeSuccesses, 0);
     assert.equal(evidence.counters.afterWarmup.proving.hotProveSamples, 0);
@@ -220,11 +221,11 @@ test('writes a bundle whose own attestation survives the secret-field check', ()
       SLOT: 'B',
       PARTICIPANT_TYPE: 'x402_native_agent',
       INTEGRATION_MODE: 'x402_zk_prepaid_adapter',
-      PINNED_SIDECAR_VERSION: '0.2.0',
+      PINNED_SIDECAR_VERSION: '0.2.7',
       PINNED_ADAPTER_VERSION: '0.1.0',
       PINNED_SHARED_VERSION: '0.1.0',
-      PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v1',
-      ONBOARDING_MS: '600000',
+      PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v2',
+      HUMAN_ACTION_MS: '600000',
       ASSISTANCE: '0',
       ATTEST_LOCAL: 'true',
       ATTEST_CREDENTIAL: 'true',
@@ -255,11 +256,11 @@ test('refuses a bundle that smuggles a differently named credential field', () =
       SLOT: 'A',
       PARTICIPANT_TYPE: 'coding_agent',
       INTEGRATION_MODE: 'openai_compatible_sidecar',
-      PINNED_SIDECAR_VERSION: '0.2.0',
+      PINNED_SIDECAR_VERSION: '0.2.7',
       PINNED_ADAPTER_VERSION: '0.1.0',
       PINNED_SHARED_VERSION: '0.1.0',
-      PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v1',
-      ONBOARDING_MS: '1000',
+      PINNED_ARTIFACT_RELEASE: 'private-credit-spend-bn254-dev-sepolia-v2',
+      HUMAN_ACTION_MS: '1000',
       ASSISTANCE: '0',
       ATTEST_LOCAL: 'true',
       ATTEST_CREDENTIAL: 'true',
@@ -276,8 +277,8 @@ test('refuses a bundle that smuggles a differently named credential field', () =
     assert.equal(result.code, 0, result.output);
     const evidence = JSON.parse(readFileSync(join(directory, 'evidence.json'), 'utf8'));
     assert.equal(Object.keys(evidence).sort().join(','), [
-      'activatedAt', 'assistanceCount', 'attestations', 'counters', 'integrationMode',
-      'kind', 'onboardingDurationMs', 'participantType', 'schemaVersion', 'slot', 'versions',
+      'activatedAt', 'assistanceCount', 'attestations', 'counters', 'humanActionDurationMs',
+      'integrationMode', 'kind', 'participantType', 'schemaVersion', 'slot', 'versions',
     ].join(','));
   } finally {
     rmSync(directory, { recursive: true, force: true });

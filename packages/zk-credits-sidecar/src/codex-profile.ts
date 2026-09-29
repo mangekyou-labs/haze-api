@@ -41,6 +41,7 @@ export function renderCodexProfile(options: CodexProfileOptions): string {
   const model = options.model?.trim() || DEFAULT_CODEX_MODEL;
   return [
     `model = ${tomlString(model)}`,
+    'model_reasoning_effort = "none"',
     'model_provider = "zk_credits"',
     '',
     '[model_providers.zk_credits]',
@@ -88,7 +89,7 @@ export function codexModelsResponse(): object {
       apply_patch_tool_type: 'freeform',
       web_search_tool_type: 'text',
       truncation_policy: { mode: 'tokens', limit: 10_000 },
-      supports_parallel_tool_calls: true,
+      supports_parallel_tool_calls: false,
       supports_image_detail_original: false,
       context_window: 128_000,
       max_context_window: 128_000,

@@ -680,7 +680,8 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
 
   /**
    * Guards control-plane calls. Real checkout and Stripe billing routes were
-   * removed from the unpaid pilot runtime; only invite redemption remains.
+   * removed from the no-product-payment pilot runtime; only invite
+   * redemption remains.
    */
   function internalAuthorized(req: Request): boolean {
     const configured = options.internalServiceToken ?? process.env.BILLING_INTERNAL_TOKEN;

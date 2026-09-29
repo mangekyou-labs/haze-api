@@ -1,11 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { METRIC_NAMES } from '../metrics.js';
+import { BASE_METRIC_NAMES, METRIC_NAMES } from '../metrics.js';
 import { collectTrialGate, type TrialGateOptions } from './trial-gate.js';
 import type { HttpRequest, HttpTransport } from './providers.js';
 
 const NOW = Date.UTC(2026, 8, 27, 4, 0, 0);
 const ROOT = `0x${'ab'.repeat(32)}`;
 const TOKEN = 'internal-trial-token-must-not-be-reported';
+const COMPATIBILITY_PIN = {
+  network: 'eip155:84532',
+  chainId: 84532,
+  circuitId: 'private-credit-spend-bn254-dev',
+  verifyingKeyId: 'private-credit-spend-vk-dev-sepolia-v2',
+  verificationKeySha256: 'c'.repeat(64),
+  bondAddress: '0x1111111111111111111111111111111111111111',
+  deploymentBlock: '47372040',
+  deploymentDomain: '84532',
+  spendVerifierAddress: '0x2222222222222222222222222222222222222222',
+  groth16VerifierAddress: '0x3333333333333333333333333333333333333333',
+};
+
+function compatibilityBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    status: 'pass',
+    network: COMPATIBILITY_PIN.network,
+    chainId: COMPATIBILITY_PIN.chainId,
+    circuitId: COMPATIBILITY_PIN.circuitId,
+    verifyingKeyId: COMPATIBILITY_PIN.verifyingKeyId,
+    verificationKeySha256: COMPATIBILITY_PIN.verificationKeySha256,
+    bondAddress: COMPATIBILITY_PIN.bondAddress,
+    deploymentBlock: COMPATIBILITY_PIN.deploymentBlock,
+    deploymentDomain: COMPATIBILITY_PIN.deploymentDomain,
+    onchainDeploymentDomain: COMPATIBILITY_PIN.deploymentDomain,
+    bondSpendVerifierAddress: COMPATIBILITY_PIN.spendVerifierAddress,
+    groth16VerifierAddress: COMPATIBILITY_PIN.groth16VerifierAddress,
+    bytecodePresent: true,
+    ...overrides,
+  };
+}
 
 function readyBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const checks = ['launchControl', 'database', 'baseRoot', 'baseRpc', 'verifierAssets', 'provider']
@@ -15,6 +46,7 @@ function readyBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     launchControl: 'enabled',
     checks,
     generatedAt: new Date(NOW - 1_000).toISOString(),
+    v2Compatibility: compatibilityBody(),
     ...overrides,
   };
 }
@@ -67,6 +99,7 @@ function fixture(options: {
       adminToken: options.adminToken ?? TOKEN,
       transport,
       now: () => NOW,
+      expectedV2Compatibility: COMPATIBILITY_PIN,
     },
   };
 }
@@ -80,6 +113,7 @@ describe('internal trial gate', () => {
       result: 'pass',
       localPreflight: 'pass',
       gatewayReadiness: 'pass',
+      v2Compatibility: 'pass',
       provider: 'pass',
       adminAuthentication: 'authenticated',
       adminStatus: 'pass',
@@ -112,6 +146,29 @@ describe('internal trial gate', () => {
     expect(serialized).not.toContain('dailyHeadroomMicroUsd');
   });
 
+  it('requires every core counter from the older gateway schema', async () => {
+    const metrics = Object.fromEntries(BASE_METRIC_NAMES
+      .filter((name) => name !== 'claim_committed')
+      .map((name) => [name, 0]));
+    const { gateOptions } = fixture({ admin: adminBody({ metrics }) });
+    const gate = await collectTrialGate(gateOptions);
+
+    expect(gate.adminStatus).toBe('invalid');
+    expect(gate.result).toBe('fail');
+    expect(gate.counters.metrics.claim_committed).toBeNull();
+    expect(gate.counters.metrics.payment_validation_header).toBeNull();
+  });
+
+  it('rejects a malformed diagnostic counter when the gateway provides it', async () => {
+    const metrics = { ...Object.fromEntries(METRIC_NAMES.map((name) => [name, 0])), payment_validation_header: '0' };
+    const { gateOptions } = fixture({ admin: adminBody({ metrics }) });
+    const gate = await collectTrialGate(gateOptions);
+
+    expect(gate.adminStatus).toBe('invalid');
+    expect(gate.result).toBe('fail');
+    expect(gate.counters.metrics.payment_validation_header).toBeNull();
+  });
+
   it('fails closed when launch control is paused', async () => {
     const { gateOptions } = fixture({
       readyStatus: 503,
@@ -122,6 +179,22 @@ describe('internal trial gate', () => {
     expect(gate.result).toBe('fail');
     expect(gate.gatewayReadiness).toBe('failed');
     expect(gate.launchControl).toBe('paused');
+  });
+
+  it('fails closed when the gateway advertises a different verifier or deployment pin', async () => {
+    const { gateOptions } = fixture({
+      ready: readyBody({ v2Compatibility: compatibilityBody({ groth16VerifierAddress: '0x4444444444444444444444444444444444444444' }) }),
+    });
+    const gate = await collectTrialGate(gateOptions);
+    expect(gate.v2Compatibility).toBe('mismatch');
+    expect(gate.result).toBe('fail');
+  });
+
+  it('fails closed when the gateway has not deployed V2 compatibility metadata', async () => {
+    const { gateOptions } = fixture({ ready: readyBody({ v2Compatibility: undefined }) });
+    const gate = await collectTrialGate(gateOptions);
+    expect(gate.v2Compatibility).toBe('unavailable');
+    expect(gate.result).toBe('fail');
   });
 
   it('marks an old admin snapshot stale', async () => {

@@ -11,7 +11,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { ZK_PREPAID_LIFECYCLE_FAILURES, type ZkPrepaidLifecycleFailure } from '@zk-credits/x402-zk-prepaid';
@@ -73,7 +73,7 @@ function evidence(slot: OperatorSlot): ActivationEvidence {
     integrationMode: assignment.integrationMode,
     versions: { ...PINNED_ACTIVATION_VERSIONS, artifactRelease: PINNED_ARTIFACT_RELEASE },
     activatedAt: '2026-09-21T04:00:00.000Z',
-    onboardingDurationMs: 1_800_000,
+    humanActionDurationMs: 1_800_000,
     counters: {
       // A fresh sidecar, then the discarded cold warm-up, then the single
       // counted exchange: two clean lifecycles in total.
@@ -112,8 +112,12 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
     lockClient = await pool.connect();
     await lockClient.query('SELECT pg_advisory_lock($1)', [DB_TEST_LOCK]);
     await runMigrations(pool, MIGRATIONS_DIR);
-    await pool.query('TRUNCATE control_plane.activation_windows');
+    await pool.query('TRUNCATE control_plane.activation_attempts');
     ledger = new PostgresActivationLedger(pool);
+  });
+
+  beforeEach(async () => {
+    await pool.query('TRUNCATE control_plane.activation_attempts');
   });
 
   afterAll(async () => {
@@ -122,18 +126,20 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
     await pool.end();
   });
 
-  it('opens one window per slot and holds no identity or spend-plane column', async () => {
-    const opened = await ledger.openWindow({
+  it('retains attempts, permits a resolved retry, and holds no identity or spend-plane column', async () => {
+    const pending = await ledger.openWindow({
       slot: 'A',
-      inviteId: 'inv_4242',
+      inviteRequestId: 'request_A_0000000001',
       participantType: SLOT_ASSIGNMENT.A.participantType,
       integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
       startedAt: '2026-09-21T03:00:00.000Z',
       baselineCommittedClaims: 7,
     });
-    expect(opened).toMatchObject({ slot: 'A', baselineCommittedClaims: 7, assistanceCount: 0, evidenceDigest: null });
+    expect(pending).toMatchObject({ slot: 'A', attemptNumber: 1, status: 'invite_pending', inviteId: null, baselineCommittedClaims: 7, assistanceCount: 0, evidenceDigest: null });
+    const opened = await ledger.attachInvite('A', 1, `inv_${'a'.repeat(16)}`);
+    expect(opened.status).toBe('open');
 
-    const rows = await pool.query('SELECT * FROM control_plane.activation_windows');
+    const rows = await pool.query('SELECT * FROM control_plane.activation_attempts');
     expect(rows.rowCount).toBe(1);
     const columns = Object.keys(rows.rows[0]!);
     for (const forbidden of ['github_account_id', 'email', 'login', 'commitment', 'nullifier', 'request_signal', 'code_hash', 'token_hash']) {
@@ -141,22 +147,36 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
     }
     expect(columns).toContain('invite_id');
 
-    // A slot is assigned once: the primary key refuses a replacement.
+    // An active attempt blocks all new activation starts.
     await expect(ledger.openWindow({
       slot: 'A',
-      inviteId: 'inv_other',
+      inviteRequestId: 'request_A_0000000002',
       participantType: SLOT_ASSIGNMENT.A.participantType,
       integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
       startedAt: '2026-09-21T05:00:00.000Z',
       baselineCommittedClaims: 9,
     })).rejects.toThrow();
+
+    await ledger.abort('A', 1, 'not_funded');
+    const retry = await ledger.openWindow({
+      slot: 'A',
+      inviteRequestId: 'request_A_0000000002',
+      participantType: SLOT_ASSIGNMENT.A.participantType,
+      integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
+      startedAt: '2026-09-21T06:00:00.000Z',
+      baselineCommittedClaims: 9,
+    });
+    expect(retry).toMatchObject({ attemptNumber: 2, status: 'invite_pending', baselineCommittedClaims: 9 });
+    await ledger.attachInvite('A', 2, `inv_${'b'.repeat(16)}`);
+    expect(await ledger.attempts()).toHaveLength(2);
+    expect(await ledger.windows()).toHaveLength(1);
   });
 
   it('enforces the deterministic cohort assignment in the database', async () => {
     // B is the x402-native slot, so the sidecar assignment must be refused.
     await expect(ledger.openWindow({
       slot: 'B',
-      inviteId: 'inv_b',
+      inviteRequestId: 'request_B_0000000001',
       participantType: 'coding_agent',
       integrationMode: 'openai_compatible_sidecar',
       startedAt: '2026-09-21T03:00:00.000Z',
@@ -165,6 +185,13 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
   });
 
   it('accumulates assistance and refuses a slot with no window', async () => {
+    await ledger.openWindow({
+      slot: 'A', inviteRequestId: 'request_A_0000000001',
+      participantType: SLOT_ASSIGNMENT.A.participantType,
+      integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
+      startedAt: '2026-09-21T03:00:00.000Z', baselineCommittedClaims: 7,
+    });
+    await ledger.attachInvite('A', 1, `inv_${'a'.repeat(16)}`);
     const first = await ledger.recordAssistance('A', 1);
     expect(first.assistanceCount).toBe(1);
     const second = await ledger.recordAssistance('A', 2);
@@ -173,11 +200,21 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
   });
 
   it('round-trips the validated redacted bundle and its aggregate comparison', async () => {
-    const stored = await ledger.storeEvidence('A', evidence('A'), DIGEST, 9);
+    await ledger.openWindow({
+      slot: 'A', inviteRequestId: 'request_A_0000000001',
+      participantType: SLOT_ASSIGNMENT.A.participantType,
+      integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
+      startedAt: '2026-09-21T03:00:00.000Z', baselineCommittedClaims: 7,
+    });
+    await ledger.attachInvite('A', 1, `inv_${'a'.repeat(16)}`);
+    await ledger.recordAssistance('A', 3);
+    const bundle = evidence('A');
+    bundle.assistanceCount = 3;
+    const stored = await ledger.storeEvidence('A', 1, bundle, DIGEST, 9, true, 'funded', []);
     expect(stored.evidenceDigest).toBe(DIGEST);
     expect(stored.committedClaimsAfter).toBe(9);
 
-    const row = await pool.query('SELECT evidence, evidence_digest, committed_claims_after FROM control_plane.activation_windows WHERE slot = $1', ['A']);
+    const row = await pool.query('SELECT evidence, evidence_digest, committed_claims_after FROM control_plane.activation_attempts WHERE slot = $1 AND attempt_number = 1', ['A']);
     expect(row.rows[0].evidence_digest).toBe(DIGEST);
     expect(Number(row.rows[0].committed_claims_after)).toBe(9);
     // The JSONB bundle is exactly the aggregate evidence, with no extra key.
@@ -190,7 +227,7 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
       'counters',
       'integrationMode',
       'kind',
-      'onboardingDurationMs',
+      'humanActionDurationMs',
       'participantType',
       'schemaVersion',
       'slot',
@@ -202,13 +239,32 @@ describe.skipIf(!dbTestsEnabled)('activation windows (integration, requires Post
     expect(counters.beforeWarmup.proving.hotProveSamples).toBe(0);
     expect(counters.afterHotExchange.exchange.exchangeSuccesses).toBe(2);
 
-    const reopened = await ledger.window('A');
-    expect(reopened).toMatchObject({ slot: 'A', evidenceDigest: DIGEST, committedClaimsAfter: 9, assistanceCount: 3 });
-    expect(await ledger.windows()).toHaveLength(1);
+    const completed = (await ledger.attempts())[0]!;
+    expect(completed).toMatchObject({ slot: 'A', status: 'qualified', evidenceDigest: DIGEST, committedClaimsAfter: 9, assistanceCount: 3 });
+    expect(await ledger.windows()).toHaveLength(0);
+
+    await ledger.openWindow({
+      slot: 'A', inviteRequestId: 'request_A_0000000002',
+      participantType: SLOT_ASSIGNMENT.A.participantType,
+      integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
+      startedAt: '2026-09-21T05:00:00.000Z', baselineCommittedClaims: 9,
+    });
+    await ledger.attachInvite('A', 2, `inv_${'b'.repeat(16)}`);
+    await expect(ledger.storeEvidence('A', 2, bundle, DIGEST, 11, false, 'unknown', ['duplicate']))
+      .rejects.toThrow();
+    expect((await ledger.attempts())[0]!.evidenceDigest).toBe(DIGEST);
   });
 
   it('refuses a malformed evidence digest', async () => {
-    await expect(ledger.storeEvidence('A', evidence('A'), 'not-a-digest', 9)).rejects.toThrow();
+    await ledger.openWindow({
+      slot: 'A', inviteRequestId: 'request_A_0000000001',
+      participantType: SLOT_ASSIGNMENT.A.participantType,
+      integrationMode: SLOT_ASSIGNMENT.A.integrationMode,
+      startedAt: '2026-09-21T03:00:00.000Z', baselineCommittedClaims: 7,
+    });
+    await ledger.attachInvite('A', 1, `inv_${'a'.repeat(16)}`);
+    await expect(ledger.storeEvidence('A', 1, evidence('A'), 'not-a-digest', 9, false, 'unknown', ['bad']))
+      .rejects.toThrow();
   });
 
   it('reports an unopened slot as absent', async () => {

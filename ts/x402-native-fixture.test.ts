@@ -61,7 +61,7 @@ function gatewayOptions() {
       treasuryAddress: '0x00000000000000000000000000000000000000b2',
       deploymentDomain: '84532',
       circuitId: 'private-credit-spend-bn254-dev',
-      verifyingKeyId: 'private-credit-spend-vk-dev',
+      verifyingKeyId: 'private-credit-spend-vk-dev-sepolia-v2',
     },
     provider: new MockProviderAdapter(),
     allowUnverifiedProofs: true,

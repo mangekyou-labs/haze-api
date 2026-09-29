@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  codexModelsResponse,
   codexProfilePath,
   isCodexProfileInstalled,
   renderCodexProfile,
@@ -26,6 +27,12 @@ async function temporaryCodexHome(): Promise<string> {
 }
 
 describe('Codex profile configuration', () => {
+  it('does not advertise parallel tool calls for the pinned provider route', () => {
+    expect(codexModelsResponse()).toMatchObject({
+      models: [{ supports_parallel_tool_calls: false }],
+    });
+  });
+
   it('uses CODEX_HOME when set and otherwise follows the user home', () => {
     expect(resolveCodexHome({ CODEX_HOME: '/private/codex' }, '/Users/test')).toBe('/private/codex');
     expect(resolveCodexHome({}, '/Users/test')).toBe('/Users/test/.codex');
@@ -62,5 +69,17 @@ describe('Codex profile configuration', () => {
     expect(await readFile(baseConfigPath, 'utf8')).toBe('model = "existing-model"\n');
     expect((await stat(profilePath)).mode & 0o777).toBe(0o600);
     await expect(isCodexProfileInstalled(codexHome)).resolves.toBe(true);
+  });
+
+  it('writes a profile that overrides a user reasoning default for the supported model', async () => {
+    const codexHome = await temporaryCodexHome();
+    await writeFile(join(codexHome, 'config.toml'), 'model_reasoning_effort = "medium"\n');
+
+    const profilePath = await writeCodexProfile({
+      codexHome,
+      loopbackBaseUrl: 'http://127.0.0.1:3210',
+    });
+
+    expect(await readFile(profilePath, 'utf8')).toContain('model_reasoning_effort = "none"');
   });
 });

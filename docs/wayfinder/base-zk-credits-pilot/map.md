@@ -1,173 +1,178 @@
-# Wayfinder map: invite-only unpaid x402-agent pilot on Base Sepolia
+# Wayfinder map: Base ZK Credits founder and external pilot
 
-Status: strategy amended — hand off to implementation
+Status: revised cohort — map and ticket updates published to GitHub
 Created: 2026-09-20
-Amended: 2026-09-20
-Scope: unpaid pilot launch and two-week market validation; paid production work is deferred
+Amended: 2026-09-29
+Scope: simplify first use, run a founder x402 demo, and validate two external operators over 14 UTC days
 
 ## Destination
 
-Ship an invite-only, unpaid, experimental Base Sepolia pilot to three real
-coding-agent or multi-agent operators, including adapter-enabled x402 agents,
-then make an explicit market-validation decision after two weeks.
+Make first use practical for Web2 developers: the founder prepares an invite,
+Codex receives one instruction, and the target is five minutes of human action
+through the first counted call. Downloads, installs, proof generation, and
+provider response wait are measured separately from active human time.
 
-The launch must preserve the custom x402 v2 `zk-prepaid` scheme and existing
-wire format, sidecar-local hash-pinned proving and self-verification, the
-self-hosted facilitator and isolated claim store, and the narrow promise of
-payer/credential unlinkability for ordinary valid spends. Every counted real
-call must complete the actual challenge, local proof, `PAYMENT-SIGNATURE`,
-facilitator settlement, and `PAYMENT-RESPONSE` exchange.
+The revised cohort is three serialized slots:
 
-The first cohort is three **unpaid pilot participants**:
+| Slot | Operator | Path | Counts as |
+| --- | --- | --- | --- |
+| A | External Codex developer | Codex through the local sidecar | Technical activation and market validation |
+| B | Founder | Founder x402 agent with the project adapter | Technical activation only |
+| C | External x402 operator | Their own agent with the project adapter | Technical activation and market validation |
 
-- at least one coding-agent operator using the OpenAI-compatible sidecar;
-- at least one **adapter-enabled x402 agent** deliberately registering the
-  project `zk-prepaid` adapter; and
-- a third participant using either supported path.
+Pay each external operator a fixed **$25 research honorarium for a 30-minute
+session**, whether setup succeeds or fails. Record product willingness to pay
+separately. The honorarium never counts as product revenue or payment intent.
 
-Start the two-week clock when the first participant is activated. Continue
-only if at least two participants return with a real call on another calendar
-day and at least two show **credible payment intent**. Otherwise record an
-explicit iterate-or-stop decision and the dominant failure: demand,
-onboarding, x402 compatibility, proving latency, reliability, or pricing.
+Slot A's qualifying activation starts the 14-day UTC validation window. Run
+fresh slot B after A qualifies, then C. Continue only if **both A and C** make a
+real call on another calendar day and show credible payment intent before the
+window ends. B is a technical signal and does not count toward either market
+threshold. A longer than five-minute setup is a friction finding, not a reason
+to reject a valid protocol exchange.
 
-## Notes
+## User stories
 
-This is an amendment to the resolved paid-pilot decision record. The original
-paid destination, continuation thresholds, and resolved decision files remain
-historical context; this amendment changes the first cohort and validation
-loop without weakening the technical correctness boundary.
+### Pilot stories
 
-Every session working this map should use `wayfinder`, `domain-modeling`, and
-the repository's implementation and verification guidance. Use the [pilot
-domain glossary](CONTEXT.md) consistently in tickets and lifecycle documents.
+#### Codex developer's first call
 
-Preserve these product and protocol boundaries:
+As an external developer who has not used zk-credits, I receive repository
+access and a prepared invite, give Codex one setup instruction, complete only
+GitHub sign-in, a local recovery password, consent, and my own task, then make
+one real call. Codex checks `gh` authentication, installs the pinned release,
+downloads and verifies the private hash-pinned proving bundle, and runs local
+setup. I can tell what the provider sees and what the project records.
 
-- custom x402 v2 `zk-prepaid`, `/v1/chat/completions`, scheme-based acceptance
-  selection, `/supported`, `PAYMENT-SIGNATURE`, and `PAYMENT-RESPONSE`;
-- project sidecar/SDK and agents that deliberately register the project
-  adapter, not generic unmodified x402 agents;
-- local, hash-pinned proving and self-verification inside the operator's
-  sidecar;
-- a self-hosted facilitator and isolated claim store;
-- no generic x402 wallet claim, generic-agent claim, public facilitator,
-  Bazaar, MCP, or standard `exact` rail claim; and
-- no prompts, responses, secrets, proofs, nullifiers, request signals, or
-  payer/spend-plane joins in pilot telemetry.
+#### x402 operator's own agent loop
 
-The independent cryptographer review is a paid-traffic gate, not an unpaid
-pilot prerequisite. Cryptographic correctness remains mandatory: corrected
-artifacts, pinned hashes, a real Solidity verifier and adapter on Base
-Sepolia, timestamp-bound authorization tests, negative cases, and
-two-transcript recovery must pass before inviting participants.
+As an x402 operator, I register the versioned request-aware `zk-prepaid`
+adapter in my own agent, retain my credential and proof generation locally,
+and make a real task call through the same supported challenge and settlement
+flow. The founder can run the same adapter path with a small task-running
+starter agent.
 
-Read the existing evidence and lifecycle documents before changing protocol
-or release behavior:
+#### Historical paid-pilot stories
 
-- [Circuit and proving-system research](../../research/zk-api-credits-circuit-and-proving-system.md)
-- [x402 and Base ecosystem research](../../research/x402-base-ecosystem-fit.md)
-- [Product validation and scale research](../../research/product-validation-and-scale.md)
-- [Current requirements](../../ai/requirements/2026-09-18-feature-base-zk-credits.md)
-- [Current design](../../ai/design/2026-09-18-feature-base-zk-credits.md)
-- [Current testing plan](../../ai/testing/2026-09-18-feature-base-zk-credits.md)
-- [Current implementation plan](../../ai/planning/2026-09-18-feature-base-zk-credits.md)
+The original paid stories remain the later production destination, not
+acceptance criteria for this research cohort:
 
-Security facts remain intentionally local. The root compiled artifacts are
-still negative Circom 0.5 fixtures with the rejected share equation; the new
-Circom 2 compile is not yet a shippable verifier path; historical timestamps
-must not bypass expiry; and no generated Solidity verifier and adapter have
-been proven end to end. These are pilot correctness blockers. Do not activate
-participants or call the circuit privacy-preserving until they are closed.
+1. As a multi-agent or split-key coding-agent operator, I can pay the live SKU,
+   install the sidecar locally, and make real calls whose payment proofs do not
+   identify me or my other credentials.
+2. As that operator, I can retry an exact committed request and receive its
+   stored replay without spending a second credit.
+3. As a reporter, I can submit two valid conflicting transcripts and slash
+   the bond 50/50 without a live 402.
+4. As the map owner, I can stop continuation toward production if any
+   destination line is missed, without qualitative override.
 
-## Strategy amendment
+## Product and privacy contract
 
-The original map selected a paid design-partner pilot. The fast-shipping route
-now makes the first cohort unpaid and invite-only:
+- The paid user stories above remain historical context. This cohort is
+  invite-only and uses founder-provisioned Base Sepolia credits.
+- The project has a narrow Codex Responses bridge on the local sidecar. It
+  translates the supported Codex text/function-tool request shape into the
+  existing fixed Chat Completions service class and converts the committed
+  result back to Responses events. It is not a generic Responses gateway.
+- For valid spends, the payment proof is designed for payer and credential
+  unlinkability. The model provider still receives the request. Do not claim
+  prompt confidentiality, provider blindness, network anonymity, or broad
+  user anonymity.
+- The circuit is experimental and not independently audited. Generic,
+  unmodified x402 agents are unsupported; an agent must deliberately register
+  the project `zk-prepaid` adapter.
+- Both onboarding paths use the same authenticated local aggregate snapshots
+  and redacted activation evidence. Evidence contains no prompts, responses,
+  credentials, proofs, nullifiers, request signals, or identity-to-spend join.
+- Every counted call requires one discarded warm-up and one counted custom
+  `zk-prepaid` exchange with local proof and self-check,
+  `PAYMENT-SIGNATURE`, facilitator settlement, `PAYMENT-RESPONSE`, and a
+  two-claim aggregate gateway delta.
 
-- founder-provisioned test credits replace real checkout; GitHub sign-in,
-  credential backup, and Base Sepolia status remain in onboarding;
-- Stripe lifecycle work, refunds, disputes, paid checkout, independent
-  cryptographer review, and formal benchmarks remain open but are labeled
-  `deferred:post-validation` and detached from this active map;
-- the pilot validates behavior in two weeks rather than waiting for twelve
-  interviews, 1,000-call thresholds, two-agent deployment thresholds, or
-  renewal thresholds;
-- the validation ledger records onboarding time, client type, adapter
-  failures, proving latency, proof failures, founder assistance, repeated
-  usage, objections, returns, and credible payment intent; and
-- the product copy must say invite-only, unpaid, experimental, Base Sepolia,
-  and limited to custom-adapter x402 agents. It must not claim generic x402
-  compatibility, production readiness, or audited privacy.
+## Existing work and source issues
 
-## Decisions so far
+- [Pilot map #25](https://github.com/mangekyou-labs/haze-api/issues/25) now
+  contains this destination, stories, boundaries, and ticket plan.
+- [B8 x402 and sidecar integration #11](https://github.com/mangekyou-labs/haze-api/issues/11)
+  is the integration source for the request-aware adapter and first-call path.
+- [B9 onboarding #12](https://github.com/mangekyou-labs/haze-api/issues/12)
+  is the source for invite redemption, credential recovery, and local setup.
+- [B23 serialized activations #27](https://github.com/mangekyou-labs/haze-api/issues/27)
+  now defines A/B/C, the serialized qualification sequence, and slot evidence.
+- [B13 readout #16](https://github.com/mangekyou-labs/haze-api/issues/16)
+  now defines the 14-day UTC window and external-only market criteria.
+- The original paid-pilot destination, thresholds, and decision files remain
+  historical context. The 2026-09-28 internal Base Sepolia trial remains an
+  uncounted technical rehearsal; see
+  [internal trial evidence](../../evidence/base-sepolia-internal-trial.md).
 
-The links below are the resolved paid-pilot decision files and tickets. They
-are preserved as historical context; this amendment supersedes only their
-paid cohort and market-validation thresholds.
+The existing code already supports request-aware `zk-prepaid` payload creation
+through the local proof engine and a bounded Codex Responses bridge on the
+loopback sidecar. Generic Responses gateway support is outside scope.
 
-- [Classify the first Codex gateway verification rejection](https://github.com/mangekyou-labs/haze-api/issues/28): the 08:20Z run has 11 aggregate verifier rejections, its exact category remains unknown, and offline `invalid_payload_fields` is a reproduced candidate; see the [trial record](../../evidence/base-sepolia-internal-trial.md#gateway-rejection-classification-and-version-provenance-2026-09-28-1127z).
-- [Name the pilot destination and validation boundary](decisions/001-pilot-destination.md): the historical paid Base Sepolia design-partner destination and its payer/credential unlinkability boundary.
-- [Choose the first production proving-system direction](decisions/002-proving-system-direction.md): retain Circom 2 plus BN254 Groth16 for v1 and defer ceremony until artifacts are frozen.
-- [Define the pilot credit unit and economic safety envelope](tickets/01-credit-unit-and-economics.md): the bounded service-class and success-only claim semantics retained for the unpaid pilot's test credits.
-- [Choose the pilot x402 interoperability posture](tickets/02-x402-interoperability.md): custom `zk-prepaid` requiring the project adapter; `amount`/`asset` name the credit asset, not the bond.
-- [Freeze the pilot proof and authorization boundary](tickets/03-proof-and-authorization-boundary.md): hidden slot-blinding shares, six-signal ABI, gateway-issued `issuedAt`, and the correctness evidence retained; the independent review is deferred for this cohort.
-- [Define pilot activation and continuation evidence](tickets/04-validation-evidence.md): the historical paid-partner funnel and thresholds retained for later comparison, not an unpaid-pilot gate.
-- [Choose the pilot prover topology and operational SLOs](tickets/06-prover-topology-and-slos.md): sidecar-only Groth16 prove+self-verify, hash-pinned local keys, and no remote, browser, or helper path.
-- [Review the reconciled pilot design and implementation plan](tickets/05-reconcile-pilot-docs.md): the approved lifecycle set and negative-fixture rule remain the implementation baseline.
-- [Separate the invite control plane from detached funding provisioning](decisions/003-detached-funding-provisioning.md): single-use hashed invites bound to a GitHub account in `control_plane`, detached 30-minute funding capabilities bound to one commitment in `pilot_provisioning`, no foreign key and no durable join, and a two-stage version-2 export where the recovery capsule is re-imported before funding and only then wrapped with the gateway's authoritative activation metadata.
-- [Freeze the active pilot copy to the truthful unpaid contract](https://github.com/mangekyou-labs/haze-api/issues/24): invite-only, unpaid, experimental, Base Sepolia; the project sidecar or an x402-native agent registering the custom `zk-prepaid` adapter only; founder-provisioned test credits; the pilot telemetry and provider-observation boundary; and no commerce terms on any active surface.
+## Ticket plan
 
-## Active execution frontier
+The nine new tickets and two amendments are published in GitHub; local body
+snapshots are in the issue-drafts directory. Each body links to its applicable
+story and the relevant B9 onboarding #12 and/or B8 integration #11 source.
+New tickets and B23 #27 are children of #25; the blocking edges are recorded
+below.
 
-GitHub issue #26 has a narrower current scope than the original external-pilot
-tracker: it covers two internal Base Sepolia exchanges using one local
-credential. The broader three-operator launch remains tracked in the local
-[external pilot execution tracker](tickets/07-invite-only-unpaid-pilot-launch.md).
-Internal trial calls do not satisfy external activation evidence or start the
-B13 validation clock.
+| # | Ticket | Blocked by | Label |
+| --- | --- | --- | --- |
+| 1 — [#29](https://github.com/mangekyou-labs/haze-api/issues/29) | Codex first use | — | `ready-for-agent` |
+| 2 — [#30](https://github.com/mangekyou-labs/haze-api/issues/30) | x402 agent first use | — | `ready-for-agent` |
+| 3 — [#31](https://github.com/mangekyou-labs/haze-api/issues/31) | Founder-aware evidence | — | `ready-for-agent` |
+| 4 — [#32](https://github.com/mangekyou-labs/haze-api/issues/32) | Release and launch preparation | #29, #30, #31 | `ready-for-agent` |
+| 5 — [#33](https://github.com/mangekyou-labs/haze-api/issues/33) | Founder demo kit and wizard | #30, #31 | `ready-for-agent` |
+| 6 — [#34](https://github.com/mangekyou-labs/haze-api/issues/34) | Recruit A and C | — | `ready-for-human` |
+| 7 — [#35](https://github.com/mangekyou-labs/haze-api/issues/35) | Prepare founder grant demo | #33 | `ready-for-human` |
+| 8 — [#36](https://github.com/mangekyou-labs/haze-api/issues/36) | Authorize release and hosted pilot | #32, #35 | `ready-for-human` |
+| 9 — [#27](https://github.com/mangekyou-labs/haze-api/issues/27) | B23 serialized activations | #34, #36 | `ready-for-human` |
+| 10 — [#37](https://github.com/mangekyou-labs/haze-api/issues/37) | External follow-up | A checkpoint in #27 | `ready-for-human` |
+| 11 — [#16](https://github.com/mangekyou-labs/haze-api/issues/16) | B13 readout | #27, #37, completed 14-day window | `ready-for-human` |
 
-The active GitHub child issues are:
+## Grant route check (2026-09-29)
 
-- [B6 — Isolated claim store, facilitator, gateway reservation lifecycle](https://github.com/mangekyou-labs/haze-api/issues/9) — closed and unchanged.
-- [B8 — Sidecar proving and OpenAI-compatible request path](https://github.com/mangekyou-labs/haze-api/issues/11) — adds the adapter-enabled x402-agent exchange.
-- [B9 — Invite-only unpaid onboarding](https://github.com/mangekyou-labs/haze-api/issues/12) — implemented 2026-09-20: invite/capability planes, founder CLI, detached funding endpoints, five-step web onboarding, two-stage export, and the removal of checkout, orders, Stripe webhooks, and wallet linking from the pilot runtime.
-- [B11 — Pilot correctness and release verification](https://github.com/mangekyou-labs/haze-api/issues/14) — resolved 2026-09-21 at `b5ad4c0`: the verifier (`0xC66CC4866f945Ce39c207729CF136fd03d58207E`) and the adapter (`0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD`) are deployed and BaseScan-verified on Base Sepolia, and the fixture transcript verifies onchain — see [Base Sepolia B11 evidence](../../ai/testing/2026-09-18-feature-base-zk-credits.md#base-sepolia-b11-evidence-2026-09-21). The independent review and paid traffic remain B12.
-- [B21 — Invite-only unpaid pilot copy freeze](https://github.com/mangekyou-labs/haze-api/issues/24) — resolved 2026-09-21: root README, installation guides, landing metadata and page, footer, sign-in, onboarding, dashboard, and recovery are frozen to the invite-only unpaid pilot contract, with a copy-contract test and landing Playwright spec enforcing it — see [B21 copy-freeze evidence](../../ai/testing/2026-09-18-feature-base-zk-credits.md#local-b21-evidence-2026-09-21). B22's copy dependency is clear.
-- [B22 — Internal Base Sepolia x402 integration trial](https://github.com/mangekyou-labs/haze-api/issues/26) — current issue #26 scope is one internal Codex sidecar exchange and one separately registered `zk-prepaid` adapter exchange, each recorded independently. The fresh machine-readable launcher gate passed at 2026-09-27T07:08:19Z. The trial remains paused before exchange because the local credential is missing and the Codex profile's Responses request is rejected by the sidecar and exceeds the gateway's 16,000-byte service-class input ceiling. See [the internal trial record](../../evidence/base-sepolia-internal-trial.md). Internal calls do not count as external activations. The earlier launch-control, hosting, package publication, and launch automation checkpoints remain documented in [B22 launch-control evidence](../../ai/testing/2026-09-18-feature-base-zk-credits.md#local-b22-launch-control-evidence-2026-09-21), [hosted and release evidence](../../ai/testing/2026-09-18-feature-base-zk-credits.md#b22-hosted-launch-checkpoint-evidence-2026-09-23), and [deployment evidence](../../ai/deployment/2026-09-18-feature-base-zk-credits.md#b22-hosted-checkpoint-evidence-2026-09-23).
-- Broader external B22 pilot — authenticated access and three serialized real operator activations remain pending in the [local external pilot execution tracker](tickets/07-invite-only-unpaid-pilot-launch.md). These criteria are separate from issue #26 and remain prerequisites for starting B13's two-week clock.
-- [B13 — Two-week x402-agent market-validation readout](https://github.com/mangekyou-labs/haze-api/issues/16) — blocked by the broader external operator pilot, not by the internal exchanges tracked in issue #26.
+Base's official [Ecosystem Fund documentation](https://docs.base.org/get-started/base-ecosystem-fund)
+links to a live [application form](https://www.base.org/ecosystem-fund/apply)
+for pre-seed or seed investment, and identifies payments and AI agents among
+its areas. This is an investment application, not a Builder Grant. The separate
+[Base Batches 004](https://www.base.org/batches) route accepts pre-product to
+post-MVP teams focused on Base, but its 2026-09-10 deadline has passed. The
+founder demo ticket must check eligibility against the live Ecosystem Fund
+criteria before any submission. Do not claim a grant application or funding
+request was filed unless it was actually submitted.
 
-## Not yet specified
+The demo runs before external launch and is **uncounted**. Slot B is a fresh,
+separately measured x402 run after A qualifies; it is not the grant demo.
 
-Post-validation pricing, paid conversion, independent review, formal
-benchmarks, and any mainnet or ceremony decision depend on the two-week
-readout. Do not split those questions into active tickets before the pilot
-produces evidence.
+## Runway and decisions
 
-## Deferred post-validation
-
-These remain open for later work and do not block the unpaid pilot:
-
-- Stripe sponsorship, refunds, disputes, and paid checkout ([B7](https://github.com/mangekyou-labs/haze-api/issues/10)).
-- Full Stellar/evaluation archival ([B10](https://github.com/mangekyou-labs/haze-api/issues/13)).
-- Independent cryptographer review and paid-traffic approval ([B12](https://github.com/mangekyou-labs/haze-api/issues/15)).
-- Formal [B14 unit-economics](https://github.com/mangekyou-labs/haze-api/issues/17),
-  [B15 load](https://github.com/mangekyou-labs/haze-api/issues/18),
-  [B16 proof-latency](https://github.com/mangekyou-labs/haze-api/issues/19),
-  [B17 storage-growth](https://github.com/mangekyou-labs/haze-api/issues/20),
-  [B18 claim-store](https://github.com/mangekyou-labs/haze-api/issues/21),
-  [B19 event-cursor/slash-revocation](https://github.com/mangekyou-labs/haze-api/issues/22),
-  and [B20 slashing-path](https://github.com/mangekyou-labs/haze-api/issues/23)
-  benchmarks.
+- Founder launch wizard keeps its secret, hosted-service, deployment, cap,
+  readiness, and release checks.
+- Operator wizard is limited to consent and local recovery, agent-led setup,
+  one throwaway warm-up, one own-agent call, and redacted evidence review.
+- Pregrant access to the private bundle repository. Codex checks local GitHub
+  CLI authentication, installs the pinned release, downloads and verifies the
+  bundle, and runs setup. The human signs in, supplies the local recovery
+  password, gives consent, and chooses the task.
+- Prepare and review a version-matched package candidate, then verify clean
+  registry installs before invitations. Publishing and hosted launch remain
+  behind the founder authorization ticket.
+- Measure active human setup time and assistance. Keep model/provider wait and
+  unattended machine work separate.
+- Store external market interview evidence separately from product activation
+  evidence; do not add participant identity to the spend plane or join the two
+  datasets.
 
 ## Out of scope
 
-- Base mainnet deployment and production ceremony execution.
-- Generic x402 compatibility, public facilitators, Bazaar, MCP,
-  `/v1/responses`, Anthropic translation, and a standard `exact` rail.
-- Prompt confidentiality, provider blindness, network anonymity, or broad
-  claims of user anonymity.
-- Paid traffic or production readiness before a later paid-traffic gate.
-- Arbitrary providers, arbitrary models, variable-cost refund accounting, and
-  unbounded token usage.
+- Mainnet, paid product checkout, paid production traffic, or an independent
+  cryptographer review as a prerequisite to this experimental testnet cohort.
+- Generic x402 compatibility, standard `exact` payment, public facilitators,
+  Bazaar, MCP, Anthropic requests, or a generic Responses gateway endpoint.
+- Provider blindness or request confidentiality. The model provider receives
+  the request as part of inference.
+- Treating the $25 research honorarium as revenue or willingness to pay.

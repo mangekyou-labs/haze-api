@@ -23,6 +23,23 @@
       "sha256": "4844820509c32722c0c867f028a713df8a1b6478ff7376a80861e7dcbc9c51fc"
     }
   ],
+  "release": {
+    "repository": "mangekyou-labs/zk-credits-base-sepolia-v2-bundle",
+    "tag": "v2.0.0",
+    "releaseId": 397705951,
+    "assetName": "base-sepolia-v2.tar.gz",
+    "sha256": "dc60b3109b3d907e2b9e8c4253fb52e77400d763eb443968e8de3af6b7e0b709"
+  },
+  "deployment": {
+    "chainId": 84532,
+    "bondAddress": "0xcc1909dD30485d6D9a46e3d33cf04C1378b586Ab",
+    "deploymentBlock": "47372040",
+    "deploymentDomain": "84532",
+    "circuitId": "private-credit-spend-bn254-dev",
+    "verifyingKeyId": "private-credit-spend-vk-dev-sepolia-v2",
+    "spendVerifierAddress": "0x37663bC461AB8EccD3b7D69Bde7eeF13D489723e",
+    "groth16VerifierAddress": "0x5870117EA7ACb28B3f36fb64284b77c4eD2B7148"
+  },
   "publicSignals": ["root", "timestamp", "domain", "requestSignal", "nullifier", "share"],
   "provingMaterial": "Development-only Sepolia artifacts, with one local phase-2 contribution. Complete an external production ceremony before mainnet."
 }

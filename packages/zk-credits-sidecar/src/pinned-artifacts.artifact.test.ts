@@ -84,7 +84,7 @@ async function fundedFixture() {
         assetTransferMethod: 'prepaid-claim',
         paymentFlow: 'escrow',
         circuit: 'private-credit-spend-bn254-dev',
-        verifyingKey: 'private-credit-spend-vk-dev',
+        verifyingKey: 'private-credit-spend-vk-dev-sepolia-v2',
         deploymentDomain: credential.deploymentDomain,
         contract: '0x00000000000000000000000000000000000000a1',
         requirementsVersion: 'zk-prepaid-v1',

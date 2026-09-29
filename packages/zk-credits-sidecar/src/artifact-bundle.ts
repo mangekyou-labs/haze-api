@@ -40,6 +40,25 @@ export interface PinnedArtifact {
   sha256: string;
 }
 
+export interface PinnedArtifactRelease {
+  repository: string;
+  tag: string;
+  releaseId: number;
+  assetName: string;
+  sha256: string;
+}
+
+export interface PinnedDeployment {
+  chainId: number;
+  bondAddress: string;
+  deploymentBlock: string;
+  deploymentDomain: string;
+  circuitId: string;
+  verifyingKeyId: string;
+  spendVerifierAddress: string;
+  groth16VerifierAddress: string;
+}
+
 export interface CircuitManifest {
   version: number;
   scheme: string;
@@ -52,6 +71,8 @@ export interface CircuitManifest {
     verificationKey: string;
   };
   artifacts: PinnedArtifact[];
+  release?: PinnedArtifactRelease;
+  deployment?: PinnedDeployment;
 }
 
 export interface PinnedArtifactBundle {
@@ -68,6 +89,8 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 /** A pinned artifact is a bare file name, never a path or a remote location. */
 const SAFE_FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const REMOTE_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u;
+const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/u;
+const RELEASE_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -94,6 +117,7 @@ export function parseCircuitManifest(value: unknown): CircuitManifest {
   if (value.version !== 1) throw new ArtifactBundleError('artifact_manifest_malformed', 'Unsupported circuit manifest version');
   if (!isRecord(value.circuit)) throw new ArtifactBundleError('artifact_manifest_malformed', 'Circuit manifest is missing the circuit block');
   const circuit = value.circuit;
+  const network = requiredString(value, 'network');
   const depth = circuit.depth;
   if (!Number.isSafeInteger(depth) || (depth as number) <= 0) {
     throw new ArtifactBundleError('artifact_manifest_malformed', 'Circuit depth must be a positive integer');
@@ -114,7 +138,7 @@ export function parseCircuitManifest(value: unknown): CircuitManifest {
   const resolved: CircuitManifest = {
     version: 1,
     scheme: requiredString(value, 'scheme'),
-    network: requiredString(value, 'network'),
+    network,
     circuit: {
       id: requiredString(circuit, 'id'),
       depth: depth as number,
@@ -123,7 +147,12 @@ export function parseCircuitManifest(value: unknown): CircuitManifest {
       verificationKey: pinnedFile(circuit.verificationKey, 'verificationKey'),
     },
     artifacts,
+    ...(value.release === undefined ? {} : { release: parseRelease(value.release) }),
+    ...(value.deployment === undefined ? {} : { deployment: parseDeployment(value.deployment, requiredString(circuit, 'id')) }),
   };
+  if (resolved.deployment && network !== 'eip155:84532') {
+    throw new ArtifactBundleError('artifact_manifest_malformed', 'Pinned V2 deployment must use Base Sepolia');
+  }
   const pinned = new Set(artifacts.map((artifact) => artifact.file));
   for (const role of ARTIFACT_HASHES) {
     const file = resolved.circuit[role];
@@ -132,6 +161,60 @@ export function parseCircuitManifest(value: unknown): CircuitManifest {
     }
   }
   return resolved;
+}
+
+function parseRelease(value: unknown): PinnedArtifactRelease {
+  if (!isRecord(value)
+    || typeof value.repository !== 'string'
+    || !RELEASE_REPOSITORY_PATTERN.test(value.repository)
+    || typeof value.tag !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.tag)
+    || !Number.isSafeInteger(value.releaseId)
+    || (value.releaseId as number) <= 0
+    || typeof value.assetName !== 'string'
+    || !SAFE_FILE_PATTERN.test(value.assetName)
+    || value.assetName.includes('..')
+    || typeof value.sha256 !== 'string'
+    || !SHA256_PATTERN.test(value.sha256)) {
+    throw new ArtifactBundleError('artifact_manifest_malformed', 'Circuit manifest release pin is malformed');
+  }
+  return {
+    repository: value.repository,
+    tag: value.tag,
+    releaseId: value.releaseId as number,
+    assetName: value.assetName,
+    sha256: value.sha256,
+  };
+}
+
+function parseDeployment(value: unknown, circuitId: string): PinnedDeployment {
+  if (!isRecord(value)
+    || value.chainId !== 84532
+    || typeof value.bondAddress !== 'string'
+    || !ADDRESS_PATTERN.test(value.bondAddress)
+    || typeof value.deploymentBlock !== 'string'
+    || !/^\d+$/u.test(value.deploymentBlock)
+    || typeof value.deploymentDomain !== 'string'
+    || value.deploymentDomain !== '84532'
+    || value.circuitId !== circuitId
+    || typeof value.verifyingKeyId !== 'string'
+    || value.verifyingKeyId.length === 0
+    || typeof value.spendVerifierAddress !== 'string'
+    || !ADDRESS_PATTERN.test(value.spendVerifierAddress)
+    || typeof value.groth16VerifierAddress !== 'string'
+    || !ADDRESS_PATTERN.test(value.groth16VerifierAddress)) {
+    throw new ArtifactBundleError('artifact_manifest_malformed', 'Circuit manifest V2 deployment pin is malformed');
+  }
+  return {
+    chainId: 84532,
+    bondAddress: value.bondAddress,
+    deploymentBlock: value.deploymentBlock,
+    deploymentDomain: value.deploymentDomain,
+    circuitId,
+    verifyingKeyId: value.verifyingKeyId,
+    spendVerifierAddress: value.spendVerifierAddress,
+    groth16VerifierAddress: value.groth16VerifierAddress,
+  };
 }
 
 /** Loads the manifest shipped inside this package unless the caller supplies one. */

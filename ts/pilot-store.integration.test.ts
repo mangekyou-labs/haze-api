@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { Pool } from 'pg';
 import { runMigrations } from './db/migrate.js';
 import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
-import { PilotFundingService, PostgresFundingCapabilityStore, hashFundingToken } from './pilot-funding.js';
+import { FundingPreBroadcastError, PilotFundingService, PostgresFundingCapabilityStore, hashFundingToken } from './pilot-funding.js';
 
 const MIGRATIONS_DIR = resolve(import.meta.dirname, 'db', 'migrations');
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgres://localhost:5432/zk_credits_test';
@@ -59,7 +59,7 @@ describe.skipIf(!dbTestsEnabled)('pilot planes (integration, requires Postgres)'
       deploymentDomain: '84532',
       sponsor: {
         async fundCommitment(commitment: string) {
-          if (sponsorFails) throw new Error('sponsor_unavailable');
+          if (sponsorFails) throw new FundingPreBroadcastError('sponsor_unavailable');
           sponsorCalls.push(commitment);
           return { transactionHash: '0xtx', expiryAt: Date.now() + 1000 };
         },
@@ -133,6 +133,21 @@ describe.skipIf(!dbTestsEnabled)('pilot planes (integration, requires Postgres)'
     const recovered = await funding.fund({ fundingToken, commitment: OTHER_COMMITMENT });
     expect(recovered.transactionHash).toBe('0xtx');
     expect(sponsorCalls).toEqual([OTHER_COMMITMENT]);
+  });
+
+  it('holds an uncertain attempt in Postgres and fences stale failure writes', async () => {
+    const store = new PostgresFundingCapabilityStore(pool);
+    const issued = await funding.issueCapability();
+    const tokenHash = hashFundingToken(issued.fundingToken);
+    const commitment = '123456789';
+    const claimed = await store.claim({ tokenHash, commitment, at: Date.now() });
+    expect(claimed.claimed).toBe(true);
+    const record = claimed.record!;
+    await store.markUnknown({ capabilityId: record.capabilityId, commitment, attemptStartedAt: record.attemptStartedAt!, reason: 'receipt_timeout' });
+    expect((await store.claim({ tokenHash, commitment, at: Date.now() + 180_000 })).claimed).toBe(false);
+    await store.complete({ capabilityId: record.capabilityId, commitment, transactionHash: '0xconfirmed', bundleExpiry: Date.now() + 1000, at: Date.now() });
+    await expect(store.fail({ capabilityId: record.capabilityId, commitment, attemptStartedAt: record.attemptStartedAt!, reason: 'stale' })).rejects.toThrow('funding_state_conflict');
+    expect((await store.findByTokenHash(tokenHash))?.state).toBe('funded');
   });
 
   it('never accepts a revoked or expired code after the fact', async () => {

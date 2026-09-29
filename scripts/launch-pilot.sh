@@ -5,12 +5,12 @@
 #   scripts/launch-pilot.sh --check      read-only preflight
 #   scripts/launch-pilot.sh --status     read-only local and remote reconciliation
 #   scripts/launch-pilot.sh --trial-gate read-only JSON entry gate for B22's internal trial
+#   scripts/launch-pilot.sh --deploy-v2 guarded development verifier/bond deployment
 #   scripts/launch-pilot.sh --render-attribution configure one Render setting, then stop
 #   scripts/launch-pilot.sh              start or resume from the last checkpoint
 #
-# The shell layer does three things and nothing else: it refuses an environment
-# from the wrong plane, it hands the protected founder env file to the Node
-# state machine, and it keeps the exit code. Everything about ordering,
+# The shell layer refuses an environment from the wrong plane, hands the
+# protected founder env file to the Node state machine, and keeps the exit code. Everything about ordering,
 # checkpoints, and reconciliation lives in `ts/launch/cli.ts`, where it is
 # covered by tests.
 #

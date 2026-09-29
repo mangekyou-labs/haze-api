@@ -238,7 +238,6 @@ ask_validated_secret() {
 TOTAL_STAGES=9
 
 BASE_SEPOLIA_USDC_ADDRESS='0x036CbD53842c5426634e7929541eC2318f3dCF7e'
-BASE_REVIEWED_SPEND_VERIFIER_ADDRESS='0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD'
 
 banner "Founder launch: Base Sepolia pilot infrastructure"
 
@@ -294,9 +293,8 @@ ask BASE_DEPLOYER_PASSWORD_FILE "Absolute path to the Foundry keystore password 
 if ! gw_require_password_file "$BASE_DEPLOYER_PASSWORD_FILE" "BASE_DEPLOYER_PASSWORD_FILE"; then exit 1; fi
 write_env BASE_DEPLOYER_PASSWORD_FILE "$BASE_DEPLOYER_PASSWORD_FILE"
 
-write_env BASE_SPEND_VERIFIER_ADDRESS "$BASE_REVIEWED_SPEND_VERIFIER_ADDRESS"
-note "The reviewed SpendVerifier adapter is fixed at $BASE_REVIEWED_SPEND_VERIFIER_ADDRESS."
-note "The launcher verifies that it wraps the reviewed verifier before deployment."
+note "The v2 launcher deploys a new Groth16 verifier and SpendVerifier adapter."
+note "The existing v1 verifier and adapter stay deployed for the original bond."
 
 ask_secret BASESCAN_API_KEY "Optional BaseScan API key (Enter to defer verification):"
 if [[ -n "$BASESCAN_API_KEY" ]]; then
@@ -405,7 +403,7 @@ note "Do not enable ENABLE_DEV_LOGIN, Stripe, or any legacy Stellar route there.
 stage "CI: defer provider wiring until deployment outputs exist"
 say "This wizard is configuration-only. It does not create provider resources"
 say "or write GitHub variables, and it never broadcasts a contract."
-note "After launch-pilot reconciles all four contracts, it atomically writes"
+note "After launch-pilot --deploy-v2 reconciles all six contracts, it atomically writes"
 note "the bond address, deployment block, sponsor address, and confirmations."
 note "Only then may hosting, GitHub-variable, and pilot-activation stages proceed."
 

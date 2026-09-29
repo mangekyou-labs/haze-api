@@ -6,7 +6,7 @@ import { createPublicClient, createWalletClient, decodeEventLog, http, toHex, ty
 import { privateKeyToAccount } from 'viem/accounts';
 import { Attribution } from 'ox/erc8021';
 
-/** Sponsor-side bond operations used by unpaid pilot funding. */
+/** Sponsor-side bond operations used to fund pilot test-credit bundles. */
 export interface BaseBondSponsor {
   fundBundle(commitment: string, tierId: number): Promise<{ transaction: string; expiryAt?: number }>;
   reconcileBundle(commitment: string): Promise<{ transaction: string; expiryAt: number } | undefined>;

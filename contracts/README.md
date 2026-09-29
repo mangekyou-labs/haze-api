@@ -1,7 +1,8 @@
 # Base private-credit bond
 
 `PrivateCreditBond` is the immutable, non-upgradeable Base Sepolia escrow
-registry for the invite-only, unpaid, experimental pilot. It holds only the
+registry for the invite-only experimental pilot, whose product calls use
+founder-provisioned test credits. It holds only the
 refundable USDC bond funded by the pilot sponsor; participants never deposit
 funds. It does not know GitHub accounts, card or bank details, prompts,
 responses, or secrets. The circuit that authorizes spends is experimental and
@@ -42,25 +43,34 @@ scripts/launch-wizard.sh
 scripts/launch-pilot.sh --check
 ```
 
-The launch-native inputs are `BASE_RPC_URL`, decimal
+The development v2 launcher is available through:
+
+```sh
+scripts/launch-pilot.sh --deploy-v2
+```
+
+It requires `BASE_RPC_URL`, decimal
 `BASE_DEPLOYMENT_DOMAIN=84532`, Circle's Base Sepolia USDC
 `0x036CbD53842c5426634e7929541eC2318f3dCF7e`,
 `BASE_DEPLOYER_KEYSTORE_ACCOUNT`, an absolute regular non-symlinked
 `BASE_DEPLOYER_PASSWORD_FILE` with mode `0600`,
-`BASE_SPONSOR_PRIVATE_KEY`, `BASE_TREASURY_ADDRESS`, `BASE_REFUND_VAULT`,
-the reviewed adapter `BASE_SPEND_VERIFIER_ADDRESS`, and optionally
-`BASESCAN_API_KEY`. The launcher derives `BASE_SPONSOR_ADDRESS` and verifies
-that the adapter wraps `0xC66CC4866f945Ce39c207729CF136fd03d58207E`.
+`BASE_SPONSOR_PRIVATE_KEY`, `BASE_TREASURY_ADDRESS`, `BASE_REFUND_VAULT`, and
+optionally `BASESCAN_API_KEY`. The launcher derives `BASE_SPONSOR_ADDRESS`,
+checks the existing v1 verifier and adapter remain available, and deploys a
+new v2 verifier and adapter for the replacement bond. The original v1
+contracts and bond remain intact.
 
-After a no-broadcast simulation, it predicts and displays all four CREATE
+After a no-broadcast simulation, it predicts and displays all six v2 CREATE
 addresses and asks for fresh authorization before showing the operator a
 dotenv-wrapped, keystore-backed `forge script ... --broadcast` command. The
 launcher never handles or prints the password and never executes that command.
 Resume only after the operator runs it; `run-latest.json` is reconciled against
 signer, nonce, order, predicted address, receipts, and bytecode before the
-bond's nine immutables and initial root are checked. Deployment outputs are
-written atomically only after that succeeds; explorer verification is a
-separate retryable step.
+bond's nine immutables, v2 adapter-to-verifier link, and initial root are
+checked. Deployment outputs are written atomically only after that succeeds;
+explorer verification is a separate retryable step. The older
+`DeployBaseSepolia.s.sol` script documents the original v1 four-CREATE
+sequence and is not used by `--deploy-v2`.
 
 Mainnet requires an external audit, production proving ceremony, protected
 sponsor/treasury keys, and recovery drills before any broadcast.

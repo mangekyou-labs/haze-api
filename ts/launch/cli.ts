@@ -25,7 +25,7 @@
 
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   LAUNCH_ENV_PATH,
@@ -43,7 +43,7 @@ import {
 } from './environment.js';
 import { redact } from './redact.js';
 import { LaunchStateStore, type StepDetail, type StepRecord, type StepStatus } from './state.js';
-import { collectTrialGate } from './trial-gate.js';
+import { collectTrialGate, loadTrialGateCompatibilityPin } from './trial-gate.js';
 import {
   RELEASE_PACKAGES,
   assertReleaseReady,
@@ -95,6 +95,11 @@ import {
 const execFileAsync = promisify(execFile);
 
 export const LAUNCH_STATE_PATH = '.launch-state.local.json';
+export const LAUNCH_STATE_V2_PATH = '.launch-state-v2.local.json';
+
+function v2LaunchStatePath(primaryPath: string = LAUNCH_STATE_PATH): string {
+  return resolve(dirname(resolve(primaryPath)), LAUNCH_STATE_V2_PATH);
+}
 
 export interface CommandResult {
   code: number;
@@ -195,8 +200,8 @@ function manualStep(options: {
   };
 }
 
-const DEPLOY_SCRIPT = 'script/DeployBaseSepolia.s.sol:DeployBaseSepolia';
-const DEPLOY_ARTIFACT_PATH = 'contracts/broadcast/DeployBaseSepolia.s.sol/84532/run-latest.json';
+const DEPLOY_SCRIPT = 'script/DeployBaseSepoliaV2.s.sol:DeployBaseSepoliaV2';
+const DEPLOY_ARTIFACT_PATH = 'contracts/broadcast/DeployBaseSepoliaV2.s.sol/84532/run-latest.json';
 
 function deploymentArtifactPath(context: LaunchContext): string {
   const configured = context.env.BASE_DEPLOYMENT_ARTIFACT ?? DEPLOY_ARTIFACT_PATH;
@@ -253,7 +258,7 @@ function broadcastCommand(context: LaunchContext, resume = false): string {
   const suffix = resume ? ' --resume' : '';
   return dotenvCommand(
     envPath,
-    `cd contracts && forge script ${DEPLOY_SCRIPT} --account "$BASE_DEPLOYER_KEYSTORE_ACCOUNT" --password-file "$BASE_DEPLOYER_PASSWORD_FILE" --rpc-url "$BASE_RPC_URL" --broadcast${suffix}`,
+    `cd contracts && LC_ALL=C LANG=C forge script ${DEPLOY_SCRIPT} --account "$BASE_DEPLOYER_KEYSTORE_ACCOUNT" --password-file "$BASE_DEPLOYER_PASSWORD_FILE" --rpc-url "$BASE_RPC_URL" --broadcast${suffix}`,
   );
 }
 
@@ -296,7 +301,7 @@ async function resolveCall(context: LaunchContext, chain: ChainReader, address: 
   return result.stdout;
 }
 
-function resolvedInputLines(context: LaunchContext, signer: string, sponsor: string, artifactPath: string): string[] {
+function resolvedInputLines(context: LaunchContext, signer: string, sponsor: string, artifactPath: string, v2Adapter: string): string[] {
   const env = context.env;
   return [
     `    resolved chain: Base Sepolia (${PILOT_CHAIN_ID}) via ${rpcDisplay(env.BASE_RPC_URL ?? '')}`,
@@ -306,7 +311,8 @@ function resolvedInputLines(context: LaunchContext, signer: string, sponsor: str
     `    resolved sponsor address: ${sponsor}`,
     `    resolved treasury: ${env.BASE_TREASURY_ADDRESS ?? '<missing>'}`,
     `    resolved refund vault: ${env.BASE_REFUND_VAULT ?? '<missing>'}`,
-    `    resolved SpendVerifier adapter: ${env.BASE_SPEND_VERIFIER_ADDRESS ?? EXISTING_B11_CONTRACTS.adapter}`,
+    `    resolved v2 SpendVerifier adapter: ${v2Adapter}`,
+    `    existing v1 SpendVerifier adapter (unchanged): ${EXISTING_B11_CONTRACTS.adapter}`,
     `    resolved BaseScan verification: ${(env.BASESCAN_API_KEY ?? '').length > 0 ? 'configured' : 'deferred'}`,
     `    deployment artifact: ${artifactPath}`,
   ];
@@ -401,7 +407,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         'A new package publishes directly; npm staged publishing only covers packages that already exist.',
         '  npm view @zk-credits/shared@0.1.0 dist.integrity',
         '  npm view @zk-credits/x402-zk-prepaid@0.1.0 dist.integrity',
-        '  npm view zk-credits@0.2.0 dist.integrity',
+        '  npm view zk-credits@0.2.7 dist.integrity',
       ],
     }),
     manualStep({
@@ -476,14 +482,14 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
       instructions: [
         'The sidecar is publishable only now that its dependencies resolve from the registry.',
         '  cd packages/zk-credits-sidecar && npm publish --access public',
-        'The pinned pilot set is then: zk-credits 0.2.0, adapter 0.1.0, shared 0.1.0.',
+        'The pinned pilot set is then: zk-credits 0.2.7, adapter 0.1.0, shared 0.1.0.',
       ],
     }),
 
     {
       name: 'deploy:preflight',
       stage: 'deploy',
-      description: 'the RPC, keystore, roles, USDC, and reviewed verifier are independently validated',
+      description: 'the RPC, keystore, roles, USDC, and existing v1 deployment are independently validated',
       async execute(context) {
         const rpcUrl = context.env.BASE_RPC_URL ?? '';
         const chain = context.chain(rpcUrl);
@@ -502,10 +508,6 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
             treasury: context.env.BASE_TREASURY_ADDRESS ?? '',
             refundVault: context.env.BASE_REFUND_VAULT ?? '',
           });
-          const configuredAdapter = context.env.BASE_SPEND_VERIFIER_ADDRESS ?? '';
-          if (configuredAdapter.toLowerCase() !== EXISTING_B11_CONTRACTS.adapter.toLowerCase()) {
-            return { status: 'failed', note: `BASE_SPEND_VERIFIER_ADDRESS must be the reviewed adapter ${EXISTING_B11_CONTRACTS.adapter}` };
-          }
           const usdc = context.env.BASE_USDC_ADDRESS ?? '';
           const usdcCode = await chain.code(usdc);
           if (!deployedCode(usdcCode)) return { status: 'failed', note: `USDC at ${usdc} has no bytecode on this RPC` };
@@ -519,16 +521,16 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
             if (!deployedCode(code)) return { status: 'failed', note: `the reviewed B11 ${label} at ${contract} has no bytecode on this RPC` };
           }
           const linkedVerifier = parseAbiAddress(
-            await resolveCall(context, chain, configuredAdapter, abiSelector('verifier()'), 'verifier()(address)', rpcUrl),
+            await resolveCall(context, chain, EXISTING_B11_CONTRACTS.adapter, abiSelector('verifier()'), 'verifier()(address)', rpcUrl),
             'SpendVerifier.verifier',
           );
-          assertVerifierLinkage(linkedVerifier);
+          assertVerifierLinkage(linkedVerifier, EXISTING_B11_CONTRACTS.verifier);
           const outputPath = context.envPath ?? LAUNCH_ENV_PATH;
           await writeLaunchEnvValuesAtomically(outputPath, { BASE_SPONSOR_ADDRESS: sponsor });
           context.env.BASE_SPONSOR_ADDRESS = sponsor;
           context.print(`    deployer ${deployer}, pending nonce ${pendingNonce}, balance ${balance} wei`);
           context.print(`    USDC ${usdc} has bytecode and 6 decimals`);
-          context.print(`    reviewed SpendVerifier adapter ${configuredAdapter} wraps ${linkedVerifier}`);
+          context.print(`    existing v1 adapter ${EXISTING_B11_CONTRACTS.adapter} wraps ${linkedVerifier}; it will remain unchanged`);
           return {
             status: 'succeeded',
             detail: {
@@ -537,7 +539,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
               pendingNonce,
               sponsorAddress: sponsor,
               usdcAddress: usdc,
-              spendVerifierAddress: configuredAdapter,
+              spendVerifierAddress: EXISTING_B11_CONTRACTS.adapter,
               verifierAddress: linkedVerifier,
             } as StepDetail,
           };
@@ -549,7 +551,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
     {
       name: 'deploy:simulation',
       stage: 'deploy',
-      description: 'run the four-contract deployment as a no-broadcast Foundry simulation',
+      description: 'run the six-contract v2 deployment as a no-broadcast Foundry simulation',
       async execute(context) {
         const rpcUrl = context.env.BASE_RPC_URL ?? '';
         const account = context.env.BASE_DEPLOYER_KEYSTORE_ACCOUNT ?? '';
@@ -561,7 +563,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
           '--rpc-url', rpcUrl,
         ], {
           cwd: 'contracts',
-          env: { ...process.env, ...context.env },
+          env: { ...process.env, ...context.env, LC_ALL: 'C', LANG: 'C' },
         });
         if (result.code !== 0) return { status: 'failed', note: 'the no-broadcast Foundry simulation failed' };
         context.print('    no-broadcast simulation succeeded; no transaction was sent');
@@ -571,7 +573,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
     {
       name: 'deploy:contracts',
       stage: 'deploy',
-      description: 'reconcile the operator broadcast and persist deployment outputs only after all four contracts are proven',
+      description: 'reconcile the v2 broadcast and persist outputs only after all six contracts are proven',
       irreversible: true,
       async execute(context) {
         const rpcUrl = context.env.BASE_RPC_URL ?? '';
@@ -601,7 +603,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
               ? 'deployment artifact is present but unreadable; inspect it before retrying: ' + (artifactResult.error ?? 'unreadable artifact')
               : 'deployment artifact is unavailable after the broadcast command was exposed: ' + (artifactResult.error ?? 'unreadable artifact');
             context.print('    ' + reason);
-            for (const line of resolvedInputLines(context, intents[0]!.signer, context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''), artifactPath)) context.print(line);
+            for (const line of resolvedInputLines(context, intents[0]!.signer, context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''), artifactPath, intents[1]!.predictedAddress)) context.print(line);
             if (!await context.confirm('Authorize exposing the guarded forge --resume command?')) {
               return {
                 status: 'unknown',
@@ -624,7 +626,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
             };
           }
           const sponsor = context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? '');
-          for (const line of resolvedInputLines(context, intents[0]!.signer, sponsor, artifactPath)) context.print(line);
+          for (const line of resolvedInputLines(context, intents[0]!.signer, sponsor, artifactPath, intents[1]!.predictedAddress)) context.print(line);
           for (const intent of intents) context.print('    ' + intent.contract + ': ' + intent.predictedAddress + ' (nonce ' + intent.nonce + ')');
           if (!await context.confirm('Authorize exposing the keystore-backed broadcast command?')) {
             return {
@@ -648,7 +650,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         if (reconciliation.kind !== 'confirmed') {
           const reason = reconciliation.reason ?? 'deployment artifact is not reconciled';
           context.print('    ' + reason);
-          for (const line of resolvedInputLines(context, intents[0]!.signer, context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''), artifactPath)) context.print(line);
+          for (const line of resolvedInputLines(context, intents[0]!.signer, context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''), artifactPath, intents[1]!.predictedAddress)) context.print(line);
           if (!await context.confirm('Authorize exposing the guarded forge --resume command?')) {
             return {
               status: 'unknown',
@@ -675,21 +677,22 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
             sponsor: context.env.BASE_SPONSOR_ADDRESS ?? deriveAddressFromPrivateKey(context.env.BASE_SPONSOR_PRIVATE_KEY ?? ''),
             refundVault: context.env.BASE_REFUND_VAULT ?? '',
             treasury: context.env.BASE_TREASURY_ADDRESS ?? '',
-            poseidonT2: deployments[0]!.address,
-            poseidonT3: deployments[1]!.address,
-            poseidonT4: deployments[2]!.address,
-            spendVerifier: context.env.BASE_SPEND_VERIFIER_ADDRESS ?? EXISTING_B11_CONTRACTS.adapter,
+            poseidonT2: deployments[2]!.address,
+            poseidonT3: deployments[3]!.address,
+            poseidonT4: deployments[4]!.address,
+            spendVerifier: deployments[1]!.address,
             deploymentDomain: expectedDomain,
           });
-          const linkedVerifier = await readVerifierLinkage(chain, observed.spendVerifier);
-          assertVerifierLinkage(linkedVerifier);
+          const linkedVerifier = await readVerifierLinkage(chain, deployments[1]!.address);
+          assertVerifierLinkage(linkedVerifier, deployments[0]!.address);
           assertInitialCommitmentRoot(observed.currentRoot, await initialCommitmentRoot());
           const block = reconciliation.bondDeploymentBlock ?? bond.blockNumber;
           const outputs = {
             BASE_SPONSOR_ADDRESS: observed.sponsor,
-            BASE_POSEIDON_T2_ADDRESS: deployments[0]!.address,
-            BASE_POSEIDON_T3_ADDRESS: deployments[1]!.address,
-            BASE_POSEIDON_T4_ADDRESS: deployments[2]!.address,
+            BASE_SPEND_VERIFIER_ADDRESS: deployments[1]!.address,
+            BASE_POSEIDON_T2_ADDRESS: deployments[2]!.address,
+            BASE_POSEIDON_T3_ADDRESS: deployments[3]!.address,
+            BASE_POSEIDON_T4_ADDRESS: deployments[4]!.address,
             BASE_BOND_ADDRESS: bond.address,
             BASE_BOND_DEPLOYMENT_BLOCK: block.toString(),
             BASE_CONFIRMATIONS: String(BASE_CONFIRMATIONS),
@@ -698,14 +701,16 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
           };
           await writeLaunchEnvValuesAtomically(context.envPath ?? LAUNCH_ENV_PATH, outputs);
           Object.assign(context.env, outputs);
-          context.print('    four contracts reconciled; bond ' + bond.address + ' at block ' + block);
+          context.print('    six v2 contracts reconciled; v2 adapter ' + deployments[1]!.address + '; bond ' + bond.address + ' at block ' + block);
           return {
             status: 'succeeded',
             detail: {
               ...deploymentIntentDetail(intents, artifactPath),
-              poseidonT2: deployments[0]!.address,
-              poseidonT3: deployments[1]!.address,
-              poseidonT4: deployments[2]!.address,
+              verifier: deployments[0]!.address,
+              spendVerifier: deployments[1]!.address,
+              poseidonT2: deployments[2]!.address,
+              poseidonT3: deployments[3]!.address,
+              poseidonT4: deployments[4]!.address,
               bond: bond.address,
               bondDeploymentBlock: block.toString(),
               sponsorAddress: observed.sponsor,
@@ -723,7 +728,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
     {
       name: 'deploy:verification',
       stage: 'deploy',
-      description: 'verify the four deployed contracts independently without redeploying',
+      description: 'verify the six v2 contracts independently without redeploying',
       async execute(context) {
         if (!(context.env.BASESCAN_API_KEY ?? '')) {
           context.print('    BaseScan key not configured; deployment is preserved and explorer verification is deferred');
@@ -731,14 +736,14 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         }
         const state = await context.state.load();
         const detail = state.steps['deploy:contracts']?.detail ?? {};
-        const addresses = [detail.poseidonT2, detail.poseidonT3, detail.poseidonT4, detail.bond]
+        const addresses = [detail.verifier, detail.spendVerifier, detail.poseidonT2, detail.poseidonT3, detail.poseidonT4, detail.bond]
           .filter((value): value is string => typeof value === 'string');
-        if (addresses.length !== 4) return { status: 'failed', note: 'deployment outputs are missing; cannot prepare explorer verification' };
+        if (addresses.length !== 6) return { status: 'failed', note: 'v2 deployment outputs are missing; cannot prepare explorer verification' };
         context.print('    ' + dotenvCommand(
           context.envPath ?? LAUNCH_ENV_PATH,
           'forge verify-contract --verifier etherscan --chain 84532 --etherscan-api-key "$BASESCAN_API_KEY" <address> <contract>',
         ));
-        if (!await context.confirm('Has explorer verification been completed for all four contracts?')) {
+        if (!await context.confirm('Has explorer verification been completed for all six v2 contracts?')) {
           return { status: 'skipped', note: 'explorer verification deferred; deployment remains preserved' };
         }
         return { status: 'succeeded', detail: { verification: 'confirmed', contracts: addresses.join(',') } as StepDetail };
@@ -1025,6 +1030,23 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
   ];
 }
 
+/**
+ * Development-only deployment lane for the replacement proving bundle.
+ * Package publication is not a prerequisite for a Sepolia contract deployment;
+ * all deployment checks, confirmations, and reconciliation checkpoints remain
+ * the same as in the full launch plan.
+ */
+export function buildV2DeploymentPlan(env: Record<string, string> = {}): LaunchStep[] {
+  const deploymentSteps = new Set([
+    'deploy:preflight',
+    'deploy:simulation',
+    'deploy:contracts',
+    'deploy:verification',
+    'deploy:approve-usdc',
+  ]);
+  return buildLaunchPlan(env).filter((step) => deploymentSteps.has(step.name));
+}
+
 export type LaunchMode = 'check' | 'status' | 'resume';
 
 export interface LaunchRunOptions {
@@ -1056,7 +1078,9 @@ export async function runCheck(context: LaunchContext, stage: LaunchStage = 'fin
   for (const name of check.forbidden) report.push(`  REFUSED   ${name} must never appear in the launch environment`);
 
   const state = await context.state.load();
-  const unknowns = Object.values(state.steps).filter((step) => step.status === 'unknown');
+  const v2State = await new LaunchStateStore({ path: v2LaunchStatePath(context.state.filePath) }).load();
+  const unknowns = [...Object.values(state.steps), ...Object.values(v2State.steps)]
+    .filter((step) => step.status === 'unknown');
   for (const step of unknowns) report.push(`  UNRESOLVED ${step.name}: ${step.note ?? 'outcome unknown'}`);
 
   const ok = check.missing.length === 0 && check.invalid.length === 0 && check.forbidden.length === 0 && unknowns.length === 0;
@@ -1172,6 +1196,8 @@ export interface LaunchCliDependencies {
   /** Overrides the chain and HTTP factories for tests. */
   chain?: (rpcUrl: string) => ChainReader;
   transport?: () => HttpTransport;
+  /** Overrides repository commands for safe launcher tests. */
+  run?: (command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }) => Promise<CommandResult>;
 }
 
 /** Builds the real context: repository commands, terminal output, real git. */
@@ -1193,6 +1219,7 @@ export function createLaunchContext(dependencies: LaunchCliDependencies = {}): L
       return await askYesNo(question);
     },
     async run(command, args, options) {
+      if (dependencies.run) return await dependencies.run(command, args, options);
       try {
         const result = await execFileAsync(command, args, {
           cwd: options?.cwd === undefined
@@ -1239,16 +1266,17 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
     return { exitCode, report };
   };
 
-  const knownFlags = ['--check', '--status', '--trial-gate', '--render-attribution', '--reviewed', '--help'];
+  const knownFlags = ['--check', '--status', '--trial-gate', '--render-attribution', '--deploy-v2', '--reviewed', '--help'];
   const unknownFlag = argv.find((arg) => arg.startsWith('-') && !knownFlags.includes(arg));
-  if (unknownFlag) return emit([`unknown flag ${unknownFlag}; use --check, --status, --trial-gate, --render-attribution, or no argument to resume`], 2);
+  if (unknownFlag) return emit([`unknown flag ${unknownFlag}; use --check, --status, --trial-gate, --render-attribution, --deploy-v2, or no argument to resume`], 2);
   if (argv.includes('--help')) {
     return emit([
-      'usage: scripts/launch-pilot.sh [--check] [--status] [--trial-gate] [--render-attribution] [--reviewed]',
+      'usage: scripts/launch-pilot.sh [--check] [--status] [--trial-gate] [--render-attribution] [--deploy-v2] [--reviewed]',
       '  --check     read-only dependency, credential, git, package, chain, and provider preflight',
       '  --status    read-only local and remote reconciliation',
       '  --trial-gate read-only JSON gate for the internal Base Sepolia trial',
       '  --render-attribution configure Builder Code on Render and stop after its checkpoint',
+      '  --deploy-v2 run only the guarded development v2 Sepolia deployment plan',
       '  --reviewed  declare the release commit reviewed (required before publishing)',
       '  (no flags)  start or resume from the last completed checkpoint',
       'There is no unattended confirmation flag and no flag that deletes a resource.',
@@ -1258,10 +1286,10 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
   const envPath = dependencies.envPath ?? process.env.ZK_CREDITS_LAUNCH_ENV ?? LAUNCH_ENV_PATH;
   const env = dependencies.env ?? {};
 
-  const specialModes = ['--check', '--status', '--trial-gate', '--render-attribution']
+  const specialModes = ['--check', '--status', '--trial-gate', '--render-attribution', '--deploy-v2']
     .filter((flag) => argv.includes(flag));
   if (specialModes.length > 1) return emit(['choose exactly one launcher mode'], 2);
-  if ((argv.includes('--trial-gate') || argv.includes('--render-attribution')) && argv.includes('--reviewed')) {
+  if ((argv.includes('--trial-gate') || argv.includes('--render-attribution') || argv.includes('--deploy-v2')) && argv.includes('--reviewed')) {
     return emit(['--reviewed cannot be combined with this launcher mode'], 2);
   }
 
@@ -1269,12 +1297,12 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
   // The gate therefore cannot create, chmod, or write launcher files.
   if (argv.includes('--trial-gate') || argv.includes('--render-attribution')) {
     const fileEnv = await readLaunchEnv(envPath).catch(() => ({}));
-    const context = createLaunchContext({
-      ...dependencies,
-      print,
-      envPath,
-      env: { ...fileEnv, ...env },
-    });
+      const context = createLaunchContext({
+        ...dependencies,
+        print,
+        envPath,
+        env: { ...fileEnv, ...env },
+      });
 
     if (argv.includes('--trial-gate')) {
       const envCheck = checkLaunchEnv(context.env, 'finalize');
@@ -1283,6 +1311,11 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
         && envCheck.forbidden.length === 0;
       try {
         if ((await context.state.unresolvedSteps()).length > 0) localPreflightPassed = false;
+        const v2State = new LaunchStateStore({
+          path: v2LaunchStatePath(dependencies.statePath ?? LAUNCH_STATE_PATH),
+          now: dependencies.now,
+        });
+        if ((await v2State.unresolvedSteps()).length > 0) localPreflightPassed = false;
       } catch {
         localPreflightPassed = false;
       }
@@ -1290,6 +1323,9 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
         localPreflightPassed,
         gatewayUrl: context.env.PUBLIC_GATEWAY_URL,
         adminToken: context.env.BILLING_INTERNAL_TOKEN,
+        expectedV2Compatibility: await loadTrialGateCompatibilityPin(
+          resolve(context.repoRoot, 'packages/zk-credits-sidecar/circuits/manifest.json'),
+        ),
         transport: dependencies.transport?.() ?? httpTransport({ timeoutMs: 10_000 }),
         now: dependencies.now,
       });
@@ -1337,9 +1373,30 @@ export async function runLaunchCli(argv: readonly string[], dependencies: Launch
   const context = createLaunchContext({
     ...dependencies,
     print,
+    statePath: argv.includes('--deploy-v2')
+      ? v2LaunchStatePath(dependencies.statePath ?? LAUNCH_STATE_PATH)
+      : dependencies.statePath,
     envPath,
     env: { ...fileEnv, ...(reviewed ? { PILOT_RELEASE_REVIEWED: 'true' } : {}), ...env },
   });
+
+  if (argv.includes('--deploy-v2')) {
+    const check = checkLaunchEnv(context.env, 'deploy');
+    const report = [
+      `environment: ${envPath} at stage deploy`,
+      `  satisfied: ${check.satisfied.length} value(s)`,
+      ...check.missing.map((variable) => `  MISSING   ${variable.name} — ${variable.label}`),
+      ...check.invalid.map((violation) => `  INVALID   ${violation.name}: ${violation.reason}`),
+      ...check.forbidden.map((name) => `  REFUSED   ${name} must never appear in the launch environment`),
+    ];
+    if (check.missing.length > 0 || check.invalid.length > 0 || check.forbidden.length > 0) {
+      report.push('v2 deployment preflight: not ready');
+      return emit(report, 1);
+    }
+    const result = await runResume({ mode: 'resume', context, plan: buildV2DeploymentPlan(context.env) });
+    for (const line of result.report) context.print(line);
+    return { exitCode: result.stoppedAt ? 1 : 0, report: result.report };
+  }
 
   if (argv.includes('--check')) {
     const result = await runCheck(context, 'finalize');

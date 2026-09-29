@@ -1,6 +1,6 @@
 {
   "name": "zk-credits",
-  "version": "0.2.0",
+  "version": "0.2.7",
   "description": "Loopback x402 zk-prepaid transport for private Base API credits.",
   "homepage": "https://feature-zk-api-credits-gadillacers-projects.vercel.app",
   "repository": {
@@ -17,6 +17,10 @@
     "zk-credits": "dist/zk-credits.js"
   },
   "exports": {
+    "./x402": {
+      "types": "./dist/local-x402-agent.d.ts",
+      "import": "./dist/local-x402-agent.js"
+    },
     "./codex": {
       "types": "./dist/codex-sdk-options.d.ts",
       "import": "./dist/codex-sdk-options.js"
@@ -46,5 +50,8 @@
     "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "underscore": "1.13.8"
   }
 }

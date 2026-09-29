@@ -126,8 +126,13 @@ fi
 
 expect_ok "wizard pins the official Base Sepolia USDC default" \
   grep -qF "BASE_SEPOLIA_USDC_ADDRESS='0x036CbD53842c5426634e7929541eC2318f3dCF7e'" "$WIZARD"
-expect_ok "wizard pins the reviewed SpendVerifier adapter" \
-  grep -qF "BASE_REVIEWED_SPEND_VERIFIER_ADDRESS='0xD3FED81c5Aa3D1c976448cAaDAa66832E7F5BCDD'" "$WIZARD"
+expect_ok "wizard leaves the v1 adapter untouched for the v2 launcher" \
+  grep -qF 'The existing v1 verifier and adapter stay deployed for the original bond.' "$WIZARD"
+if grep -qF 'BASE_REVIEWED_SPEND_VERIFIER_ADDRESS=' "$WIZARD"; then
+  fail "wizard does not pin v1 adapter as the v2 launch input"
+else
+  pass "wizard does not pin v1 adapter as the v2 launch input"
+fi
 
 if grep -Eq '^[[:space:]]+PILOT_RELEASE_REVIEWED([[:space:]]|$)' "$SCRIPT_DIR/launch-wizard.sh"; then
   pass "launch wizard owns the release review gate"
@@ -224,7 +229,7 @@ expect_fail "refuses a secret-bearing field name" gw_scan_for_secrets "$SANDBOX/
 # The real bundle shape the operator wizard writes must survive the scan. It is
 # written out in full, including the attestations, because the field-name rule
 # below matches `credentialStayedLocal` unless that key is exempted.
-printf '{"kind":"zk-credits.operator-activation-evidence","schemaVersion":2,"slot":"A","participantType":"coding_agent","integrationMode":"openai_compatible_sidecar","versions":{"sidecar":"0.2.0","adapter":"0.1.0","shared":"0.1.0","artifactRelease":"private-credit-spend-bn254-dev-sepolia-v1"},"activatedAt":"2026-09-21T04:00:00.000Z","onboardingDurationMs":1800000,"counters":{"beforeWarmup":{"exchange":{"challengesReceived":0,"failures":0,"failuresByCategory":{"transport_failed":0}},"proving":{"attempts":0,"hotProveSamples":0,"p50HotProveMs":null}},"afterWarmup":{"exchange":{"challengesReceived":1,"failures":0},"proving":{"attempts":1,"hotProveSamples":0}},"afterHotExchange":{"exchange":{"challengesReceived":2,"failures":0},"proving":{"attempts":2,"hotProveSamples":1,"p95HotProveMs":1900}}},"assistanceCount":0,"attestations":{"ranAgentLocally":true,"credentialStayedLocal":true,"noManualRecovery":true,"distinctOperatorOwnership":true}}\n' > "$SANDBOX/real.json"
+printf '{"kind":"zk-credits.operator-activation-evidence","schemaVersion":3,"slot":"A","participantType":"coding_agent","integrationMode":"openai_compatible_sidecar","versions":{"sidecar":"0.2.7","adapter":"0.1.0","shared":"0.1.0","artifactRelease":"private-credit-spend-bn254-dev-sepolia-v2"},"activatedAt":"2026-09-21T04:00:00.000Z","humanActionDurationMs":1800000,"counters":{"beforeWarmup":{"exchange":{"challengesReceived":0,"failures":0,"failuresByCategory":{"transport_failed":0}},"proving":{"attempts":0,"hotProveSamples":0,"p50HotProveMs":null}},"afterWarmup":{"exchange":{"challengesReceived":1,"failures":0},"proving":{"attempts":1,"hotProveSamples":0}},"afterHotExchange":{"exchange":{"challengesReceived":2,"failures":0},"proving":{"attempts":2,"hotProveSamples":1,"p95HotProveMs":1900}}},"assistanceCount":0,"attestations":{"ranAgentLocally":true,"credentialStayedLocal":true,"noManualRecovery":true,"distinctOperatorOwnership":true}}\n' > "$SANDBOX/real.json"
 expect_ok "accepts the wizard's own bundle shape" gw_scan_for_secrets "$SANDBOX/real.json"
 
 # The exemption is exactly one key: any other credential-named field is refused.

@@ -1,7 +1,15 @@
 {
   "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "sandcastle": "npx tsx .sandcastle/main.mts"
+  },
   "dependencies": {
+    "@ai-hero/sandcastle": "^0.12.0",
     "@zk-credits/shared": "file:packages/zk-credits-shared",
     "snarkjs": "^0.7.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "zod": "^4.6.5"
   }
 }
