@@ -94,17 +94,29 @@ export interface PilotProgress {
  * server-recorded qualification time starts the 14-day UTC window.
  */
 export function summarizePilotProgress(attempts: readonly ActivationWindow[]): PilotProgress {
-  const qualified = new Set(attempts.filter((attempt) => attempt.status === 'qualified').map((attempt) => attempt.slot));
-  const firstQualifiedA = attempts
-    .filter((attempt) => attempt.slot === 'A' && attempt.status === 'qualified' && attempt.closedAt !== null)
+  const qualifiedAttempts = attempts.filter((attempt) => attempt.status === 'qualified');
+  const matchesCurrentSlotAssignment = (attempt: ActivationWindow): boolean => {
+    const assignment = SLOT_ASSIGNMENT[attempt.slot];
+    return attempt.participantType === assignment.participantType
+      && attempt.integrationMode === assignment.integrationMode;
+  };
+  const qualifiedSlots = new Set(qualifiedAttempts.map((attempt) => attempt.slot));
+  const externalMarketSlots = new Set(qualifiedAttempts.filter((attempt) =>
+    (attempt.slot === 'A' || attempt.slot === 'C')
+    && matchesCurrentSlotAssignment(attempt),
+  ).map((attempt) => attempt.slot));
+  const firstQualifiedA = qualifiedAttempts
+    .filter((attempt) => attempt.slot === 'A'
+      && matchesCurrentSlotAssignment(attempt)
+      && attempt.closedAt !== null)
     .sort((left, right) => Date.parse(left.closedAt!) - Date.parse(right.closedAt!))[0];
   const startedAt = firstQualifiedA?.closedAt ?? null;
   const startedMs = startedAt === null ? Number.NaN : Date.parse(startedAt);
   const closesAt = Number.isFinite(startedMs) ? new Date(startedMs + 14 * 24 * 60 * 60 * 1000).toISOString() : null;
   return {
-    technicalActivations: qualified.size,
-    externalMarketActivations: Number(qualified.has('A')) + Number(qualified.has('C')),
-    founderTechnicalActivation: qualified.has('B'),
+    technicalActivations: qualifiedSlots.size,
+    externalMarketActivations: externalMarketSlots.size,
+    founderTechnicalActivation: qualifiedSlots.has('B'),
     validationWindowStartedAt: startedAt,
     validationWindowClosesAt: closesAt,
   };
@@ -422,6 +434,7 @@ function summariseEvidence(evidence: ActivationEvidence): string {
     `integration mode: ${evidence.integrationMode}`,
     `activated: ${evidence.activatedAt}`,
     `active human setup time ms: ${evidence.humanActionDurationMs}`,
+    `machine/provider wait ms: ${evidence.machineWaitDurationMs ?? 'not recorded'}`,
     `assistance count: ${evidence.assistanceCount}`,
     counterRow('before warm-up', beforeWarmup),
     exchangeLine('cold warm-up delta', warmup),

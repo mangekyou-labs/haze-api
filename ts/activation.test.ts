@@ -199,6 +199,13 @@ describe('operator activation evidence schema', () => {
     expect(validateActivationEvidence(wrongSlot, 'B').failures).toContainEqual({ path: 'slot', reason: 'slot_mismatch' });
   });
 
+  it('keeps active setup time separate from machine and provider wait', () => {
+    const evidence = { ...evidenceFor('A'), machineWaitDurationMs: 42_000 };
+    expect(validateActivationEvidence(evidence, 'A').valid).toBe(true);
+    expect(validateActivationEvidence({ ...evidence, machineWaitDurationMs: -1 }, 'A').failures)
+      .toContainEqual({ path: 'machineWaitDurationMs', reason: 'not_a_duration' });
+  });
+
   it('assigns external x402 work to C while keeping founder B technical-only', () => {
     expect(PILOT_ROLE_BY_SLOT).toEqual({
       A: 'external_codex_developer',
@@ -405,6 +412,17 @@ describe('activation qualification', () => {
       validationWindowStartedAt: '2026-09-21T04:10:00.000Z',
       validationWindowClosesAt: '2026-10-05T04:10:00.000Z',
     });
+  });
+
+  it('does not count a historically qualified sidecar C as external x402 market evidence', () => {
+    expect(summarizePilotProgress([{
+      ...window,
+      slot: 'C',
+      participantType: 'coding_agent',
+      integrationMode: 'openai_compatible_sidecar',
+      status: 'qualified',
+      closedAt: '2026-09-20T00:00:00.000Z',
+    }])).toMatchObject({ technicalActivations: 1, externalMarketActivations: 0 });
   });
 
   it('refuses an activation that was not preceded by a discarded warm-up', () => {

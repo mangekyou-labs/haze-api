@@ -150,6 +150,8 @@ export interface ActivationEvidence {
   };
   activatedAt: string;
   humanActionDurationMs: number;
+  /** Unattended download, installation, proof, and provider wait, measured separately. */
+  machineWaitDurationMs?: number;
   counters: Record<CounterSnapshotKey, ActivationCounterSnapshot>;
   assistanceCount: number;
   attestations: ActivationAttestations;
@@ -232,7 +234,7 @@ function checkUnknownKeys(value: Record<string, unknown>, allowed: readonly stri
 
 const EVIDENCE_KEYS = [
   'kind', 'schemaVersion', 'slot', 'participantType', 'integrationMode',
-  'versions', 'activatedAt', 'humanActionDurationMs', 'counters',
+  'versions', 'activatedAt', 'humanActionDurationMs', 'machineWaitDurationMs', 'counters',
   'assistanceCount', 'attestations',
 ] as const;
 
@@ -411,6 +413,7 @@ export function validateActivationEvidence(value: unknown, expectedSlot?: Operat
 
   if (!isIsoTimestamp(value.activatedAt)) failures.push({ path: 'activatedAt', reason: 'not_an_iso_timestamp' });
   if (!isCount(value.humanActionDurationMs)) failures.push({ path: 'humanActionDurationMs', reason: 'not_a_duration' });
+  if (value.machineWaitDurationMs !== undefined && !isCount(value.machineWaitDurationMs)) failures.push({ path: 'machineWaitDurationMs', reason: 'not_a_duration' });
   if (!isCount(value.assistanceCount)) failures.push({ path: 'assistanceCount', reason: 'not_a_count' });
 
   if (!isRecord(value.counters)) failures.push({ path: 'counters', reason: 'not_an_object' });
@@ -479,7 +482,7 @@ export function activationEvidenceJsonSchema(): Record<string, unknown> {
     title: 'zk-credits operator activation evidence',
     type: 'object',
     additionalProperties: false,
-    required: [...EVIDENCE_KEYS],
+    required: EVIDENCE_KEYS.filter((key) => key !== 'machineWaitDurationMs'),
     properties: {
       kind: { const: ACTIVATION_EVIDENCE_KIND },
       schemaVersion: { const: ACTIVATION_EVIDENCE_SCHEMA_VERSION },
@@ -499,6 +502,7 @@ export function activationEvidenceJsonSchema(): Record<string, unknown> {
       },
       activatedAt: { type: 'string', format: 'date-time', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$' },
       humanActionDurationMs: count,
+      machineWaitDurationMs: count,
       counters: {
         type: 'object',
         additionalProperties: false,
