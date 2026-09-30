@@ -1,7 +1,8 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import {
@@ -34,7 +35,8 @@ import { createBasePaymentFactory } from '../packages/zk-credits-sidecar/src/bas
 import { BaseSlotLedger } from '../packages/zk-credits-sidecar/src/slot-ledger.js';
 import { parseCircuitManifest } from '../packages/zk-credits-sidecar/src/artifact-bundle.js';
 import { createPinnedBaseProofGenerator } from '../packages/zk-credits-sidecar/src/proof-coordinator.js';
-import type { ProofWorkerResult } from '../packages/zk-credits-sidecar/src/proof-child.js';
+
+const { ModuleKind, ScriptTarget, transpileModule } = createRequire(import.meta.url)('typescript') as typeof import('typescript');
 
 const clockValue = 1_700_000_000_000;
 const clock = () => clockValue;
@@ -220,6 +222,17 @@ describe('Base zk-prepaid gateway', () => {
     expect(keyDigest).toBe(keyPin?.sha256);
     expect(keyDigest).toBe(readinessPin?.verificationKeySha256);
 
+    // Compile only the two production workers beside the gateway dependencies.
+    // A clean gateway checkout need not build or install the entire sidecar.
+    const workerDirectory = await mkdtemp(join(repositoryRoot, 'ts/node_modules/.proof-test-'));
+    await writeFile(join(workerDirectory, 'package.json'), JSON.stringify({ type: 'module' }));
+    for (const name of ['proof-child', 'proof-verification-child']) {
+      const source = await readFile(join(repositoryRoot, `packages/zk-credits-sidecar/src/${name}.ts`), 'utf8');
+      const { outputText } = transpileModule(source, {
+        compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 },
+      });
+      await writeFile(join(workerDirectory, `${name}.js`), outputText);
+    }
     const previousVerifierPath = process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
     process.env.ZK_PREPAID_VERIFYING_KEY_PATH = verificationKeyPath;
     try {
@@ -264,17 +277,9 @@ describe('Base zk-prepaid gateway', () => {
         artifactDirectory,
         manifest,
         now: clock,
-        workerFactory: (workerRequest) => ({
-          result: import('snarkjs').then(async ({ groth16 }) => {
-            const result = await groth16.fullProve(
-              workerRequest.input,
-              workerRequest.wasmPath,
-              workerRequest.zkeyPath,
-            );
-            return result as unknown as ProofWorkerResult;
-          }),
-          terminate: async () => undefined,
-        }),
+        // Use the production process boundary: snarkjs cannot prove inside
+        // Vitest's worker_threads runtime.
+        proverPath: pathToFileURL(join(workerDirectory, 'proof-child.js')),
       });
       const preparePayment = createBasePaymentFactory({
         credential,
@@ -342,6 +347,7 @@ describe('Base zk-prepaid gateway', () => {
       expect(provider.calls).toBe(1);
       expect((await claimStore.get(nullifier, clockValue))?.state).toBe('committed');
     } finally {
+      await rm(workerDirectory, { recursive: true, force: true });
       if (previousVerifierPath === undefined) delete process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
       else process.env.ZK_PREPAID_VERIFYING_KEY_PATH = previousVerifierPath;
     }

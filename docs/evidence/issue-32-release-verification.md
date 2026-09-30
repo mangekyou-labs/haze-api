@@ -2,10 +2,10 @@
 
 Checked 2026-09-30 UTC for [Prepare reviewed release candidate and verify launch checks](https://github.com/mangekyou-labs/haze-api/issues/32).
 
-Status: publication confirmed; remaining release checks need reconciliation. No packages were published, hosted settings changed, pilot
-slots consumed, or invitations sent. This report is the founder review handoff,
-not authorization to release. The ticket remains open because its hosted-readiness and full-suite checks have not passed in this verification
-run. The completed onboarding tickets remain valid technical acceptance.
+Status: published candidate and current read-only launch checks pass. The gateway
+real-proof test regression is fixed. No packages were published, hosted settings
+changed, pilot slots consumed, or invitations sent during this verification.
+This is the founder review handoff, not invitation or deployment authorization.
 
 ## Candidate and integrity
 
@@ -40,17 +40,22 @@ A subsequent fresh installation of all three exact versions directly from the
 public registry passes. The lockfile resolves all three from registry tarballs
 without local links; the published sidecar CLI help check passes.
 
-Both tickets are closed and their successful real calls remain valid. The
-current readiness failure and local test timeout do not invalidate those runs.
+Both tickets are closed and their successful real calls remain valid. Today’s verification preserves those completed onboarding runs.
 
-Rebuilding the current shared and adapter packages produces contents different
-from published `0.1.0`, not merely different tarball metadata. Shared differs in
-`src/base.ts` and its JS/declarations. Adapter differs in claim lifecycle,
-claim types, index exports, their JS/declarations, and README. Existing immutable
-versions must not be republished. Reconcile these changes into new leaf versions
-and regenerate/review the sidecar candidate with exact dependencies before
-publication. Recheck bundled code against the registry leaves as part of that
-candidate review; the fresh install alone does not establish parity.
+Current leaf sources differ from published `0.1.0`: shared adds passwordless
+credential formats, and adapter splits out gateway claim lifecycle modules.
+This does not require replacing the already-published candidate. Its three
+public entry points (`zk-credits`, `zk-credits/x402`, and `zk-credits/codex`)
+intentionally bundle the matching shared credential implementation; none imports
+the older shared package at runtime. Both library exports import successfully
+from the fresh registry install. The published adapter passes all 21 current
+wire-contract and lifecycle tests when the test import is directed to its
+registry-installed entry point. No source links substitute for that adapter.
+
+Distinguish reviewing this immutable published candidate from repacking current
+leaf sources: a future leaf publication must use new versions. Do not republish
+any existing version or treat a current-source repack as identical to registry
+artifacts. The exact published integrity pins above define this candidate.
 
 ## Launch gates
 
@@ -58,23 +63,39 @@ candidate review; the fresh install alone does not establish parity.
 the final-stage shape checks. This is local configuration validation, not a
 hosted secret-injection or provider spend-limit attestation.
 
-`scripts/launch-pilot.sh --trial-gate` fails: local preflight passes, but hosted
-readiness, v2 compatibility, authenticated admin status, and Base scan are
-unavailable. Provider and launch control are unknown. No response body, token,
-RPC endpoint, credential, request, proof, or spend identifier is recorded here.
+`scripts/launch-pilot.sh --trial-gate` passes on 2026-09-30 at 13:16:03 UTC:
+readiness, v2 compatibility, provider, authenticated admin status, enabled
+launch control, and current Base scan all pass (16 blocks of lag). A subsequent
+`/ready` check returns HTTP 200 with every check ok. Authenticated aggregate
+status confirms caps of 40000000 daily and 200000000 rolling micro-USD,
+with positive headroom and no held debits. Tokens and secret values were read
+in memory and never copied into this report.
 
-Readiness, hosted secret injection, production pause/resume, and isolated
-staging cap exhaustion remain unverified. The launch plan requires readiness
-caps of 40000000 daily and 200000000 rolling micro-USD. Local tests verify the
-control logic; they do not prove hosted configuration or live cap exhaustion.
-The release worktree contains preexisting owner edits and this verification
-change is not pushed; the clean/pushed/reviewed publish gate is not passed.
+The existing founder wizard checkpoint records successful secret preparation,
+Neon, Render, Vercel, OAuth, and migrations on 2026-09-22; readiness at
+16:46:48 UTC, production pause/resume at 16:48:15 UTC, and isolated staging
+cap exhaustion at 17:25:30 UTC. These are historical wizard acknowledgements,
+not new live control exercises. Current authenticated readiness and completed
+onboarding independently establish that the active services function. No
+production control was toggled or cap deliberately exhausted in this ticket.
+
+The saved release checkpoint describes `zk-credits@0.2.0`, so it cannot attest
+the current candidate. The registry hashes, fresh installs, pinned bundle, and
+completed first-use evidence above supply current candidate checks. The
+worktree has preexisting owner edits; the clean/pushed current-source release
+preflight cannot pass here. No owner edits were included in these commits.
 
 ## Validation
 
 - Gateway typecheck and focused release/CLI/activation tests: 103 passed.
-- Gateway full suite after pin changes: 401 passed, 29 skipped, one failed.
-  The pinned-real-proof rejection-boundary test times out at 120 seconds.
+- Gateway full suite: 402 passed, 29 skipped; typecheck passed. The pinned
+  real-proof rejection test now uses the production subprocess boundary.
+  Its former in-process snarkjs override hung; the focused regression now
+  passes in about two seconds without changing its rejection assertions.
+  Both worker entry points are compiled into a temporary dependency-local
+  directory, so this check works without a prebuilt sidecar and cleans up afterward.
+- Registry-installed adapter wire-contract and lifecycle checks: 21 passed.
+  Registry sidecar CLI and both public library imports passed.
 - Sidecar build and full suite: 108 passed.
 - Adapter build and full suite: 22 passed.
 - Shared build and active full suite: 16 passed. Retired Stellar tests are now
@@ -85,10 +106,15 @@ change is not pushed; the clean/pushed/reviewed publish gate is not passed.
 
 ## Owner handoff
 
-Before authorizing invitations: reconcile the leaf-source/runtime differences,
-resolve the local real-proof regression, establish current hosted readiness,
-and complete the hosted secret and spend-cap checks. The sidecar is already
-published with the exact reviewed tarball integrity. Record the fresh registry
-install result and reconcile remaining gates without discarding the completed
-Codex and x402 technical acceptance. Human setup
+The published package candidate, exact registry dependencies, immutable proving
+bundle, prior successful first-use calls, current readiness, and expected spend
+caps are verified. The local regression is resolved. Founder wizard hosting and
+control checkpoints succeeded historically; their timestamps are recorded above.
+
+Remaining acceptance limitation: the current-source release preflight requires
+a clean, reviewed, pushed commit, and the saved release checkpoint belongs to
+an older candidate. This checkout includes owner changes outside this ticket.
+The published candidate must be assessed by its immutable hashes rather than
+silently rerunning publish steps or repacking changed leaf sources. Founder
+release authorization and invitations remain separate actions. Human setup
 time and independent external adoption remain unmeasured by these checks.

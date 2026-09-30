@@ -3,12 +3,12 @@
 Published on 2026-09-30 at 12:56:55 UTC. The public registry integrity exactly
 matches the prepared tarball below.
 
-**Invitation checks remain unresolved:** the current leaf-package source differs from published
-`0.1.0` contents, hosted readiness is unavailable, and the gateway real-proof
-regression times out. Do not invite participants until
-the [release verification report](../evidence/issue-32-release-verification.md)
-is reconciled. The publish command below is historical handoff context; this immutable version
-has already been published and must not be republished.
+The [release verification report](../evidence/issue-32-release-verification.md)
+confirms clean registry installation, pinned artifact hashes, published library
+imports, current hosted readiness, and expected spend caps. The gateway proof
+test regression is resolved. Historical founder control checkpoints and the
+remaining current-source release preflight limitation are recorded there.
+This immutable version has already been published and must not be republished.
 
 This revision replaces the public RPC default with BASE_RPC_URL read from repository
 .env.launch.local at build time. Only that value is baked into the runtime module
