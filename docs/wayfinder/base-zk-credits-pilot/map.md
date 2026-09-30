@@ -181,3 +181,5 @@ separately measured x402 run after A qualifies; it is not the grant demo.
 ## Decisions so far
 
 - [x402 operator first use: own agent and request-aware adapter](https://github.com/mangekyou-labs/haze-api/issues/30): passwordless OS-store launch, fresh package install, real Base Sepolia exchange, authenticated aggregate metrics, and generic-client rejection validated. See [technical evidence](../../evidence/issue-30-x402-passwordless-validation.md).
+
+- [Founder x402 demo kit and safe recording wizard](https://github.com/mangekyou-labs/haze-api/issues/33): reviewed-candidate walkthrough and bounded internal records keep the demo separate from fresh post-A slot B; official investment-route check is linked in the ticket resolution.

@@ -183,7 +183,7 @@ finish() {
 # STAGES: author this section. One stage() per step the human takes.
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
-TOTAL_STAGES=4
+TOTAL_STAGES=5
 
 banner "Base ZK Credits: founder's internal x402 demo"
 
@@ -198,18 +198,20 @@ if ! confirm "Are you the founder, using your own credential and approving one i
   exit 1
 fi
 
-stage "Build the pinned candidate and confirm local setup"
-say "Use Node 20 or newer. From packages/zk-credits-sidecar, run:"
-step "npm ci"
-step "npm run build"
-step "npm test -- --run"
-say "Then ensure local setup has installed zk-credits 0.2.7, verified the"
-say "private immutable proving bundle and every digest, synchronized the public"
-say "Base witness, and passed the gateway known-root check."
-say "The internal command checks gateway readiness, founder admin access, root"
-say "agreement, a fresh local sidecar state, and local credit capacity."
-if ! confirm "Are those package and setup checks complete?"; then
-  warn "finish the package and local setup checks before this demo"
+stage "Install the reviewed candidate and import locally"
+say "Follow docs/onboarding/base-zk-credits-founder-demo.md from the repo root."
+say "Verify the reviewed 0.2.9 tarball with its SHA256SUMS, then install it in"
+say "a private directory outside the checkout. Do not substitute registry 0.2.8."
+say "The candidate packages its pinned proving bundle; private repository access"
+say "and a credential password are not required for new version-3 imports."
+say "Obtain your founder-funded activated credential through website onboarding."
+say "Keep the bearer file private; import it with the candidate's setup x402."
+say "Use the same ZK_CREDITS_HOME for setup and the demo; OS storage may prompt."
+say "Public Base Sepolia RPC is the default; config rpc sets a private override."
+say "Stop if setup cannot confirm the gateway root. The release handover records"
+say "an unresolved hosted root gate; a failed setup is not successful readiness."
+if ! confirm "Has candidate setup verified artifacts, OS credential access, witness, and gateway-known root?"; then
+  warn "finish setup or record a blocked run without sending a task"
   exit 1
 fi
 
@@ -217,10 +219,24 @@ stage "Run one custom task through the founder x402 agent"
 say "The command asks for the task in this terminal and then requires an"
 say "explicit confirmation. It displays the model response locally and prints"
 say "only exchange phases and aggregate counter deltas in its status summary."
-step "From the repository root run: node packages/zk-credits-sidecar/dist/zk-credits.js founder-demo-agent"
+step "In the fresh candidate installation run: ./node_modules/.bin/zk-credits founder-demo-agent"
+say "Stop any running sidecar first. Keep the gateway quiet so aggregate deltas"
+say "can be checked. The command prompts for the admin token with hidden input."
 step "Enter your task in the local prompt. Do not put secrets or participant data in it."
 step "At the explicit confirmation, approve one internal exchange only."
 pause "Press Enter after the command has completed or stopped with a status."
+
+stage "Redact before retaining or sharing"
+warn "Do not record the task terminal: it displays your task and model response."
+say "Do not tee, redirect, or save the full terminal transcript or take a screenshot."
+say "If a recording already exists, redact request/response content, bearer files,"
+say "tokens, proofs, nullifiers, request signals, identities, and endpoint keys"
+say "locally before retaining or sharing it. Review every frame and audio track."
+say "Prefer the fixed-shape record below; do not append arbitrary log excerpts."
+if ! confirm "Have you reviewed the material and excluded all private content before retention or sharing?"; then
+  warn "stop; review and redact locally before creating the record"
+  exit 1
+fi
 
 stage "Write a safe local record and check the official funding route"
 say "Open Base's official current Ecosystem Fund and Batches pages. Verify"
@@ -239,12 +255,17 @@ while true; do
   case "$DEMO_EXCHANGE_CHECK" in yes|no) break ;; *) warn "answer yes or no" ;; esac
 done
 while true; do
-  ask DEMO_GRANT_ROUTE "Official route status (eligible-route-verified, no-builder-grant-route, or needs-review):"
-  case "$DEMO_GRANT_ROUTE" in eligible-route-verified|no-builder-grant-route|needs-review) break ;; *) warn "choose one listed status" ;; esac
+  ask DEMO_GRANT_ROUTE "Official investment route status (potential-fit, not-a-fit, or needs-review):"
+  case "$DEMO_GRANT_ROUTE" in potential-fit|not-a-fit|needs-review) break ;; *) warn "choose one listed status" ;; esac
 done
 note "Base's live Ecosystem Fund route is an investment application, not a Builder"
 note "Grant. Base Batches 004 closed 2026-09-10. Recheck official criteria and"
 note "eligibility before any application; do not claim an application was filed."
+if [[ "$DEMO_OUTCOME" == succeeded && "$DEMO_EXCHANGE_CHECK" != yes ]]; then
+  warn "a successful demo requires every exchange check; recording this as blocked"
+  DEMO_OUTCOME=blocked
+fi
+umask 077
 DEMO_RECORD_DIR="${ZK_CREDITS_DEMO_RECORD_DIR:-$HOME/.zk-credits/demo-records}"
 mkdir -p "$DEMO_RECORD_DIR"
 chmod 700 "$DEMO_RECORD_DIR"
@@ -253,12 +274,20 @@ cat > "$DEMO_RECORD" <<EOF
 # Founder Base Sepolia x402 demo
 
 - Date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)
-- Package candidate: zk-credits 0.2.7; adapter 0.1.0; shared 0.1.0
+- Package candidate: zk-credits 0.2.9; adapter 0.1.0; shared 0.1.0
 - Network: Base Sepolia (eip155:84532)
+- Internal demo: yes
+- Counted as slot B: no
 - Counted as an external activation: no
+- Starts the 14-day window: no
+- Funding application submitted by this wizard: no
 - Demo outcome: $DEMO_OUTCOME
 - Required exchange checks reported: $DEMO_EXCHANGE_CHECK
-- Official funding route status: $DEMO_GRANT_ROUTE
+- Official investment route fit: $DEMO_GRANT_ROUTE
+- Ecosystem Fund: https://docs.base.org/get-started/base-ecosystem-fund
+- Live application: https://www.base.org/ecosystem-fund/apply
+- Batches status: https://www.base.org/batches
+- Route check baseline: 2026-09-30; investment, not a Builder Grant; Batches 004 closed 2026-09-10
 
 No participant was involved. This file excludes the task, model response,
 credential, passwords, admin token, proofs, nullifiers, request signals,
@@ -266,7 +295,9 @@ identities, and spend-plane joins.
 EOF
 chmod 600 "$DEMO_RECORD"
 printf '  %s✓%s wrote redacted local record %s\n' "$GREEN" "$RESET" "$DEMO_RECORD"
-say "Keep the task, response, and credentials out of the record. Prepare grant"
+say "Keep this record separate from activation evidence. After A qualifies,"
+say "slot B requires a fresh measured run; this demo never substitutes for it."
+say "Keep the task, response, and credentials out of the record. Prepare funding"
 say "materials privately and state only what the demo verified and what Base's"
 say "official route actually accepts."
 

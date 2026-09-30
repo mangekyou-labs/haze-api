@@ -102,7 +102,9 @@ refuses operator variables in the launch env and deployer, sponsor, database,
 admin-token, and provider variables in the operator env, and refuses to write
 into a tracked, unignored, or world-readable file. `bash scripts/guardrails.test.sh`
 exercises those boundaries. The founder demo wizard runs before external
-launch and records the demo as internal and uncounted.
+launch and records the demo as internal and uncounted. Follow the
+[founder demo walkthrough](docs/onboarding/base-zk-credits-founder-demo.md)
+for the reviewed candidate, exchange checks, and safe recording.
 
 The launch env is the only place infrastructure secrets live. The refund and
 treasury vault is configured **by address**; its private key is never supplied
