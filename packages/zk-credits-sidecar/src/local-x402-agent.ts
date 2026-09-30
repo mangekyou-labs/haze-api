@@ -30,7 +30,6 @@ import { createPinnedBaseProofGenerator } from './proof-coordinator.js';
 import { createBaseProofMetrics } from './proof-metrics.js';
 import { BaseSlotLedger } from './slot-ledger.js';
 import { readSetupConfig, applySetupConfig, type SetupWitnessSource } from './setup-config.js';
-import { applyRpcConfig } from './rpc-config.js';
 import { loadCircuitManifest } from './artifact-bundle.js';
 import { createSidecarServer, type RunningSidecar, type SidecarMetricsSnapshot } from './sidecar.js';
 import { createLoopbackToken, sidecarStatePaths } from './sidecar-config.js';
@@ -81,7 +80,6 @@ export async function createLocalX402Agent(options: LocalX402AgentOptions = {}):
   const homeDirectory = options.homeDirectory ?? homedir();
   const stateDirectory = options.stateDirectory ?? environment.ZK_CREDITS_HOME ?? join(homeDirectory, '.zk-credits');
 
-  await applyRpcConfig(environment, stateDirectory);
   await applyRpcConfig(environment, stateDirectory);
   const savedConfig = await readSetupConfig(join(stateDirectory, 'config.json'));
   if (savedConfig) applySetupConfig(environment, savedConfig);
