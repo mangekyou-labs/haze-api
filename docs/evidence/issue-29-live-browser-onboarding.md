@@ -78,3 +78,19 @@ Participant consent, self-chosen participant task and active-human-time evidence
 remain outstanding. Keep issue 29 open. The subsequent release bakes the launch
 RPC; this live acceptance used a saved alternate endpoint and does not validate
 the baked endpoint’s availability.
+
+## Launch RPC release acceptance
+
+A fresh install of prepared 0.2.10 completed passwordless Codex setup using the
+baked launch RPC, with no BASE_RPC_URL or saved RPC override. Witness and pinned
+bundle validation and gateway root confirmation passed. A real clamp task
+completed in 16.437 seconds and passed the same functional checks.
+
+This reused an already-spent credential in a new isolated state directory. The
+client recovered from four payment rejections; gateway deltas classified them
+as four claim conflicts, with five valid proofs total. One new claim committed,
+one dispatch succeeded, and one settlement was confirmed. There were no invalid
+proofs or dispatch errors. This was successful recovery with retries, not a
+zero-friction first-use measurement. Metrics remained authenticated (401/200).
+Package publication is still handed to the owner; no publication was performed
+by this agent. Registry 0.2.9 already existed, so this RPC revision is 0.2.10.
