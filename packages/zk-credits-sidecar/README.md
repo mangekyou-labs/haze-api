@@ -1,8 +1,5 @@
-> The updated pilot PRD requires passwordless first use. The source x402
-> runtime now uses OS credential storage; see
-> [the x402 guide](../../docs/onboarding/base-zk-credits-x402-agent.md).
-> The setup instructions below describe the legacy encrypted/private-bundle
-> path. Published 0.2.7 does not implement the new onboarding requirements.
+> Release candidate `0.2.9` is prepared for owner publication. Registry commands
+> below apply after publication; the existing `0.2.8` lacks this flow.
 
 # zk-credits
 
@@ -15,7 +12,7 @@ receive $25 for a 30-minute session regardless of setup success. That payment
 is not product revenue or willingness-to-pay evidence.
 
 ```bash
-npm install --global zk-credits@0.2.7
+npm install --global zk-credits@0.2.9
 ```
 
 ## Pinned pilot versions
@@ -25,17 +22,15 @@ not mix versions between the sidecar, the adapter package, and the gateway:
 
 | Package | Version |
 | --- | --- |
-| `zk-credits` (this sidecar) | `0.2.7` |
+| `zk-credits` (this sidecar) | `0.2.9` |
 | `@zk-credits/x402-zk-prepaid` (adapter) | `0.1.0` |
 | `@zk-credits/shared` | `0.1.0` |
 
-The pinned Base Sepolia trial version is `0.2.7`. It uses the non-streaming
-`POST /v1/chat/completions` path below, includes the narrow loopback Responses
-bridge for supported Codex text and function-tool requests, and acquires the
-pinned private proving bundle through the local GitHub CLI session. It also
-synchronizes V2 Base events and checks the gateway known root before local
-setup completes. The proving artifacts are available only from the private
-immutable release pinned by `circuits/manifest.json`.
+The pinned Base Sepolia trial version is `0.2.9`. It includes passwordless
+OS credential storage, the hash-pinned proving archive, public Base Sepolia RPC
+by default, a narrow Codex Responses bridge, and the request-aware x402 adapter.
+Setup validates the public chain witness and gateway-known root. No private
+GitHub repository access or recovery password is required for the new flow.
 
 Verify the shipped artifacts before your first prove. The package's
 `circuits/manifest.json` fixes the SHA-256 of the frozen
@@ -65,64 +60,38 @@ still receives the class. A rejected request consumes no credit.
 
 ## First run
 
-1. Redeem the founder-prepared invite and download the encrypted V2 credential
-   export. The founder grants access to the private bundle repository
-   `mangekyou-labs/zk-credits-base-sepolia-v2-bundle` before the session.
-2. Give Codex the single setup instruction in the
-   [first-use guide](../../docs/onboarding/base-zk-credits-codex-first-use.md).
-   Codex checks local GitHub CLI authentication and repository access, installs
-   this pinned release, downloads and verifies the bundle, and runs setup.
-   The human signs in if needed, enters the recovery password at the hidden
-   prompt, gives consent, and chooses their own task. No product payment is
-   involved. The sidecar uses the local GitHub CLI session and never receives
-   or stores the GitHub token.
-3. The setup command sets the credential, gateway, and Base Sepolia RPC
-   endpoint:
+1. Sign in at https://hazecredits.vercel.app and redeem your invite. Save and
+   reimport the passwordless recovery capsule, fund your pilot credential, then
+   download the activated credential. Anyone possessing these files can spend
+   their credits; keep them private.
+2. Import the activated file and validate setup:
 
    ```bash
    export ZK_CREDITS_CREDENTIAL_PATH="$HOME/Downloads/zk-credits-credential.json"
-   export ZK_CREDITS_GATEWAY_URL="https://zk-credits-gateway.onrender.com"
-   export BASE_RPC_URL="https://sepolia.base.org"
-   ```
-
-   `zk-credits setup codex` searches the standard local folders first. If it
-   finds no valid bundle, it downloads the pinned release, verifies the
-   release id, tag, immutability, archive digest, and all three file digests,
-   then atomically installs the bundle under `~/.zk-credits/artifacts` with
-   owner-only permissions. Missing GitHub access or any mismatch stops setup.
-   It syncs public Base events from the pinned V2 bond and deployment block,
-   validates that the resulting witness resolves the activated credential,
-   and asks the gateway's public `POST /v1/root-known` endpoint whether the
-   resulting root is known. This check sends no admin token and returns only
-   `{ "known": boolean }`; the protected admin endpoints remain unavailable
-   to setup. The witness and event cache remain local. The package does not
-   accept a supplied witness file for this V2 deployment.
-
-   The package ships `circuits/manifest.json`, which fixes the immutable
-   release identity, the SHA-256 of the archive and each proving artifact, and
-   the V2 Base deployment pins. `BASE_PRIVATE_CREDIT_BOND_ADDRESS` and
-   `BASE_DEPLOYMENT_BLOCK` are optional checks; if set, they must match the
-   manifest. V2 setup rejects `ZK_CREDITS_WITNESS_PATH` because it builds the
-   witness from the pinned public Base events. The local setup config is
-   owner-readable only and never stores the credential password. If the RPC
-   URL contains a provider key, it remains in that local config file.
-
-   A missing, relocated, symlinked-out, or altered artifact fails closed
-   before the first prove. A hash mismatch is a proof failure: no payment
-   leaves, and the local slot stays reusable. The gateway never serves a path
-   for a named leaf or commitment.
-
-4. Start setup. It verifies the credential, pinned artifact hashes, and
-   witness locally, then prompts for the backup password without echo:
-
-   ```bash
    zk-credits setup codex
    ```
 
-   No gateway admin token is required. Then run `zk-credits codex` to open
-   Codex with the local sidecar. A/C first-use measurement targets five
-   minutes of active human work; unattended download, proving, and provider
-   waits are measured separately. More than five minutes is a friction finding.
+   For your own x402 agent, use `zk-credits setup x402` instead. Setup installs
+   and verifies the packaged archive and artifact hashes, synchronizes public
+   Base events from the manifest-pinned bond and deployment block, and checks
+   the gateway-known root. Credentials enter OS secure storage: macOS Keychain,
+   Windows Credential Manager, or persistent Linux Secret Service. Storage
+   access approval may be needed; unavailable or denied storage fails closed.
+3. Review consent, choose your task, and run `zk-credits codex` or
+   `zk-credits x402-agent`. Subsequent launches use OS storage without a password
+   or import file. The activated download remains a private recovery backup.
+
+The RPC defaults to https://sepolia.base.org. If the public endpoint is limited,
+run `zk-credits config rpc` and enter your own Base Sepolia endpoint in the hidden
+local prompt. Saved settings stay owner-only; `BASE_RPC_URL` takes precedence.
+Provider keys must not appear in chat or evidence. No gateway admin token is
+needed for operator setup.
+
+Existing encrypted exports require `zk-credits setup codex --legacy` (or
+`setup x402 --legacy`) and their original password in a hidden local prompt.
+A missing or altered proving artifact fails closed before payment creation.
+Setup and proving stay local; no supplied witness file is accepted for the
+manifest-pinned V2 deployment.
 
 The sidecar binds `127.0.0.1:3210` only. It does not modify `~/.cline` or
 `~/.codex`.
@@ -210,7 +179,9 @@ any identifying label are never recorded or exposed.
 
 ```
 zk-credits cline [cline arguments...]
-zk-credits setup codex [--model <model>]
+zk-credits setup codex [--model <model>] [--legacy]
+zk-credits setup x402 [--legacy]
+zk-credits config rpc
 zk-credits codex [codex arguments...]
 zk-credits status
 zk-credits serve [--port <port>] [--internal-trial-one-proof]
@@ -255,7 +226,7 @@ for integration and measured-call steps. The included `zk-credits x402-agent`
 command is a small task-running starter for the founder demo and local
 rehearsal; external slot C uses their own agent.
 
-The credential secret is decrypted only in local memory. The sidecar cache
+The credential secret is loaded from OS secure storage only into local memory. The sidecar cache
 contains public Base event leaves and never stores the secret, prompt, response,
 proof, account, or wallet.
 

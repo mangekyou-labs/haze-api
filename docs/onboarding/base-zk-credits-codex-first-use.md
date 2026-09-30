@@ -1,18 +1,17 @@
 # Base ZK Credits: Codex first use
 
 For invited operators on Base Sepolia. The target is five minutes of active
-human setup, including obtaining an RPC endpoint and OS access approvals.
+human setup, including any needed RPC configuration and OS access approvals.
 Record unattended downloads, installation, proof, and provider waits separately.
 External research participants receive a fixed $25 research honorarium for a
 30-minute session even if setup fails. This is separate from product payment.
 
 ## Before setup
 
-Obtain **your own Base Sepolia RPC endpoint (chain ID 84532)** from a
+The package uses the public Base Sepolia RPC automatically. If it is limited,
+run `zk-credits config rpc` and enter your own endpoint (chain ID 84532) from a
 [Base node provider](https://docs.base.org/base-chain/node-operators/node-providers).
-Choose Base Sepolia in the provider dashboard and copy its HTTP endpoint into
-the local hidden prompt described below. Keep API keys out of chat and evidence.
-Public Base endpoints are rate-limited; setup does not silently select one.
+Keep API keys out of chat and evidence.
 
 Sign in with GitHub on the website and redeem your invite. Download the
 passwordless recovery file and re-import it locally before funding. Anyone
@@ -24,7 +23,7 @@ created or entered. Files and secrets are never uploaded to the service.
 
 The current published `zk-credits@0.2.8` does **not** implement this passwordless
 journey. Use the reviewed local package for development acceptance until the
-owner publishes and pins the implementation release here. Publication is an
+owner publishes the prepared `zk-credits@0.2.9` release. Publication is an
 owner action. Do not install an unpinned latest package to claim acceptance.
 The new package includes its pinned proving archive; private GitHub repository
 access and GitHub CLI authentication are not setup prerequisites.
@@ -35,9 +34,9 @@ Give only the activated credential's local path and the reviewed package path.
 
 ```text
 Set up my invited Base Sepolia zk-credits pilot with the reviewed local package.
-Before setup, guide me to obtain my own Base Sepolia RPC endpoint (chain ID
-84532), then run `zk-credits config rpc` and let me paste it into the hidden
-local prompt. Do not print its URL or API key. Set ZK_CREDITS_CREDENTIAL_PATH
+Use the built-in public Base Sepolia RPC first. If it is limited, run
+`zk-credits config rpc` and let me enter my own endpoint in the hidden prompt;
+do not print its URL or API key. Set ZK_CREDITS_CREDENTIAL_PATH
 to my downloaded activated credential's path and ZK_CREDITS_GATEWAY_URL to
 https://zk-credits-gateway.onrender.com. Run `zk-credits setup codex`.
 Confirm setup verified the packaged archive and artifact hashes, synchronized the public Base witness, and checked its known root with the gateway. Import

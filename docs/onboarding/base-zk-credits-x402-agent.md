@@ -14,10 +14,10 @@ payment step.
 
 The parent PRD now requires passwordless recovery, OS credential storage,
 packaged proving artifacts, and configurable Base Sepolia RPC access. The next
-package uses https://sepolia.base.org automatically when no endpoint is configured.
+package candidate (`0.2.9`) uses https://sepolia.base.org automatically when no endpoint is configured.
 An explicit environment endpoint or saved configuration takes precedence. Website onboarding, `zk-credits config rpc`, and packaged artifact
 delivery are tracked in **Codex developer first use: invite to first call**.
-They are not implemented by the published `zk-credits@0.2.7` package. Do not
+They are not implemented by the published `zk-credits@0.2.8` package. Do not
 use that release as a fresh passwordless setup acceptance run. Publication of
 the implementation release remains an owner action.
 

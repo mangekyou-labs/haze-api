@@ -1,8 +1,8 @@
 {
   "name": "zk-credits",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "description": "Loopback x402 zk-prepaid transport for private Base API credits.",
-  "homepage": "https://feature-zk-api-credits-gadillacers-projects.vercel.app",
+  "homepage": "https://hazecredits.vercel.app",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mangekyou-labs/haze-api.git",
