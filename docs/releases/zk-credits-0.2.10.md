@@ -7,7 +7,7 @@ The [release verification report](../evidence/issue-32-release-verification.md)
 confirms clean registry installation, pinned artifact hashes, published library
 imports, current hosted readiness, and expected spend caps. The gateway proof
 test regression is resolved. Historical founder control checkpoints and the
-remaining current-source release preflight limitation are recorded there.
+clean, reviewed, pushed release preflight are recorded there.
 This immutable version has already been published and must not be republished.
 
 This revision replaces the public RPC default with BASE_RPC_URL read from repository

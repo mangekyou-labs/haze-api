@@ -79,11 +79,15 @@ not new live control exercises. Current authenticated readiness and completed
 onboarding independently establish that the active services function. No
 production control was toggled or cap deliberately exhausted in this ticket.
 
-The saved release checkpoint describes `zk-credits@0.2.0`, so it cannot attest
-the current candidate. The registry hashes, fresh installs, pinned bundle, and
-completed first-use evidence above supply current candidate checks. The
-worktree has preexisting owner edits; the clean/pushed current-source release
-preflight cannot pass here. No owner edits were included in these commits.
+The saved release checkpoint describes `zk-credits@0.2.0`, so it was not reused
+as approval for this candidate. After the two-axis review, ticket changes were
+committed and pushed to `fix/issue-32-release-verification`. In a separate clean
+checkout, the existing founder wizard’s actual `release:preflight` step passes
+with reviewed status and the branch’s configured canonical upstream. Initial
+verified commit: `20b313d46c60c377049634adf38f67e97f3feaf2`. Owner changes in
+the original checkout were preserved. The registry hashes, fresh installs,
+pinned bundle, and completed first-use evidence provide the corresponding
+immutable candidate checks. Publish steps were not rerun for consumed versions.
 
 ## Validation
 
@@ -111,10 +115,7 @@ bundle, prior successful first-use calls, current readiness, and expected spend
 caps are verified. The local regression is resolved. Founder wizard hosting and
 control checkpoints succeeded historically; their timestamps are recorded above.
 
-Remaining acceptance limitation: the current-source release preflight requires
-a clean, reviewed, pushed commit, and the saved release checkpoint belongs to
-an older candidate. This checkout includes owner changes outside this ticket.
-The published candidate must be assessed by its immutable hashes rather than
-silently rerunning publish steps or repacking changed leaf sources. Founder
-release authorization and invitations remain separate actions. Human setup
-time and independent external adoption remain unmeasured by these checks.
+The clean, reviewed, pushed release preflight now passes in the isolated review
+checkout. The owner may use this report for the separate release and invitation
+authorization ticket. Human setup time and independent external adoption remain
+unmeasured by these technical checks.

@@ -199,3 +199,5 @@ fresh-state credential reuse required four claim-conflict recoveries. See
 [technical evidence](../../evidence/issue-29-live-browser-onboarding.md) and
 [owner publication handoff](../../releases/zk-credits-0.2.10.md). Publication is
 separate from implementation completion and remains with the owner.
+
+Release and launch preparation: [reviewed published candidate verification](../../evidence/issue-32-release-verification.md) records immutable 0.2.10/0.1.0 pins, fresh registry checks, current hosted readiness and caps, the resolved proof-test regression, and the isolated clean/pushed review preflight. Founder authorization remains in the separate authorization ticket.
