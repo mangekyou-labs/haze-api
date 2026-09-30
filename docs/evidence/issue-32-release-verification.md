@@ -2,10 +2,10 @@
 
 Checked 2026-09-30 UTC for [Prepare reviewed release candidate and verify launch checks](https://github.com/mangekyou-labs/haze-api/issues/32).
 
-Status: blocked. No packages were published, hosted settings changed, pilot
+Status: publication confirmed; remaining release checks need reconciliation. No packages were published, hosted settings changed, pilot
 slots consumed, or invitations sent. This report is the founder review handoff,
-not authorization to release. The ticket remains open because its registry,
-hosted-readiness, and full-suite acceptance gates have not passed.
+not authorization to release. The ticket remains open because its hosted-readiness and full-suite checks have not passed in this verification
+run. The completed onboarding tickets remain valid technical acceptance.
 
 ## Candidate and integrity
 
@@ -28,11 +28,20 @@ The installed proving archive matches the manifest SHA-256
 All three extracted proving files match their individual manifest hashes. The
 bundle pins Base Sepolia chain 84532 and the development v2 deployment.
 
-Registry lookup for `zk-credits@0.2.10` returns E404. A candidate tarball install
-is not a clean registry install of the sidecar. Full first-use validation from
-this prepared tarball is recorded in [Codex technical acceptance](issue-29-live-browser-onboarding.md);
+The initial registry lookup returned E404, but that result was stale or
+transient: an explicit public-registry recheck confirms `zk-credits@0.2.10`,
+published at 2026-09-30T12:56:55.202Z, before the initial lookup. Its integrity
+exactly matches the prepared tarball:
+`sha512-NawqvZHncroGKPIU9i9/P5g+gWn9xBxjldvYM+Q+aIbteViegwzi/+X5P9+zvMF7Pg+Of2V0SEcsIZHnhO1Xdw==`.
+Publication is not a blocker. Full first-use validation from
+this same prepared tarball is recorded in [Codex technical acceptance](issue-29-live-browser-onboarding.md);
 the previous x402 rehearsal is in [x402 technical acceptance](issue-30-x402-passwordless-validation.md).
-Neither substitutes for post-publication checks of the final release set.
+A subsequent fresh installation of all three exact versions directly from the
+public registry passes. The lockfile resolves all three from registry tarballs
+without local links; the published sidecar CLI help check passes.
+
+Both tickets are closed and their successful real calls remain valid. The
+current readiness failure and local test timeout do not invalidate those runs.
 
 Rebuilding the current shared and adapter packages produces contents different
 from published `0.1.0`, not merely different tarball metadata. Shared differs in
@@ -76,10 +85,10 @@ change is not pushed; the clean/pushed/reviewed publish gate is not passed.
 
 ## Owner handoff
 
-Before authorizing invitations: reconcile leaf contents with fresh immutable
-versions, build and review the exact final sidecar candidate, resolve the
-real-proof regression, restore hosted readiness, and complete the hosted secret
-and spend-cap checks. Publication remains the founder action. Then install all
-three exact versions from the registry in fresh state, repeat Codex and x402
-first-use checks, record redacted results, and resolve this ticket. Human setup
+Before authorizing invitations: reconcile the leaf-source/runtime differences,
+resolve the local real-proof regression, establish current hosted readiness,
+and complete the hosted secret and spend-cap checks. The sidecar is already
+published with the exact reviewed tarball integrity. Record the fresh registry
+install result and reconcile remaining gates without discarding the completed
+Codex and x402 technical acceptance. Human setup
 time and independent external adoption remain unmeasured by these checks.

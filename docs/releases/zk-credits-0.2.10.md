@@ -1,12 +1,14 @@
 # zk-credits 0.2.10 publication handover
 
-Prepared, not published. Registry latest is 0.2.9.
+Published on 2026-09-30 at 12:56:55 UTC. The public registry integrity exactly
+matches the prepared tarball below.
 
-**Release blocked:** the current leaf-package source differs from published
+**Invitation checks remain unresolved:** the current leaf-package source differs from published
 `0.1.0` contents, hosted readiness is unavailable, and the gateway real-proof
-regression times out. Do not publish this tarball or invite participants until
+regression times out. Do not invite participants until
 the [release verification report](../evidence/issue-32-release-verification.md)
-is reconciled. The command below is an owner handoff, not authorization.
+is reconciled. The publish command below is historical handoff context; this immutable version
+has already been published and must not be republished.
 
 This revision replaces the public RPC default with BASE_RPC_URL read from repository
 .env.launch.local at build time. Only that value is baked into the runtime module
@@ -25,7 +27,7 @@ completed two settlements using a saved alternate RPC. Publish dry-run passed. S
 Artifact SHA-256: `4ffb8a0e49d48656d56015b02c98039d3adb8e3d7b54175fc37825e28f173e85`.
 Registry integrity: `sha512-NawqvZHncroGKPIU9i9/P5g+gWn9xBxjldvYM+Q+aIbteViegwzi/+X5P9+zvMF7Pg+Of2V0SEcsIZHnhO1Xdw==`.
 
-Publish this prepared tarball:
+Historical publication handoff:
 
 ```sh
 cd /Users/kyler/repos/feature-zk-api-credits/output/releases/zk-credits-0.2.10
