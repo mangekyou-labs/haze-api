@@ -109,8 +109,8 @@ describe('pilot copy contract', () => {
     const dashboard = read('web/src/app/dashboard/page.tsx');
     const guide = read('docs/onboarding/base-zk-credits-codex-first-use.md');
     expect(onboarding).toContain('one-instruction Codex guide');
-    expect(guide).toContain('zk-credits@0.2.8');
-    expect(guide).toContain('does **not** implement');
+    expect(guide).toContain('zk-credits@0.2.10');
+    expect(guide).toContain('owner action');
     expect(guide).toContain('zk-credits config rpc');
     expect(guide).toContain('zk-credits setup codex');
     expect(guide).toContain('30-minute session');
@@ -119,7 +119,8 @@ describe('pilot copy contract', () => {
     expect(guide).not.toContain('ZK_CREDITS_WITNESS_PATH');
     expect(guide).toContain('no credential password is needed');
     expect(onboarding).not.toContain('type="password"');
-    expect(guide).toContain('your own Base Sepolia RPC endpoint');
+    expect(guide).toContain('BASE_RPC_URL');
+    expect(guide).toContain('stop that process');
     expect(guide).not.toContain('ZK_CREDITS_CREDENTIAL_PASSWORD');
     expect(dashboard).not.toContain('your-gateway.example');
   });

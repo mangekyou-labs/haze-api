@@ -2,6 +2,12 @@
 
 Prepared, not published. Registry latest is 0.2.9.
 
+**Release blocked:** the current leaf-package source differs from published
+`0.1.0` contents, hosted readiness is unavailable, and the gateway real-proof
+regression times out. Do not publish this tarball or invite participants until
+the [release verification report](../evidence/issue-32-release-verification.md)
+is reconciled. The command below is an owner handoff, not authorization.
+
 This revision replaces the public RPC default with BASE_RPC_URL read from repository
 .env.launch.local at build time. Only that value is baked into the runtime module
 and bundled package. Runtime environment and saved overrides retain precedence.
@@ -28,5 +34,5 @@ npm publish ./zk-credits-0.2.10.tgz --access public --tag latest --registry http
 ```
 
 After publication, verify a clean registry installation and a real gateway request
-before updating participant installation instructions. Issue 29 remains open for
-independent participant evidence.
+before updating participant installation instructions. Independent participant evidence remains in the pilot tickets; Codex technical
+acceptance is complete.
