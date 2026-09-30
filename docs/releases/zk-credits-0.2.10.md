@@ -23,7 +23,7 @@ Publish this prepared tarball:
 
 ```sh
 cd /Users/kyler/repos/feature-zk-api-credits/output/releases/zk-credits-0.2.10
-shasum -a 256 -c SHA256SUMS
+LC_ALL=C shasum -a 256 -c SHA256SUMS
 npm publish ./zk-credits-0.2.10.tgz --access public --tag latest --registry https://registry.npmjs.org
 ```
 
