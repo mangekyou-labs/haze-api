@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-export const RPC_GUIDANCE = 'Obtain your own Base Sepolia RPC endpoint (chain ID 84532) before setup: https://docs.base.org/base-chain/node-operators/node-providers . Then run zk-credits config rpc. Public endpoints are rate-limited.';
+export const DEFAULT_BASE_SEPOLIA_RPC_URL = 'https://sepolia.base.org';
+export function resolveBaseSepoliaRpc(environment: NodeJS.ProcessEnv, legacyRpc?: string): string {
+  return environment.BASE_RPC_URL?.trim() || legacyRpc?.trim() || DEFAULT_BASE_SEPOLIA_RPC_URL;
+}
+export const RPC_GUIDANCE = 'The built-in public Base Sepolia endpoint is rate-limited. To use your own endpoint (chain ID 84532), run zk-credits config rpc. Providers: https://docs.base.org/base-chain/node-operators/node-providers .';
 export function validateRpcUrl(value: string): string {
   try {
     const url = new URL(value.trim());
@@ -23,7 +27,7 @@ export async function checkBaseSepoliaRpc(value: string, request: typeof fetch =
     const body = await response.json() as { result?: unknown; error?: unknown };
     if (body.error) throw new Error();
     result = body.result;
-  } catch { throw new Error('RPC endpoint could not be reached or rejected eth_chainId. Check the provider URL and access key; the URL is redacted.'); }
+  } catch { throw new Error('RPC endpoint could not be reached or rejected eth_chainId. Check the provider URL and access key; the URL is redacted. ' + RPC_GUIDANCE); }
   if (typeof result !== 'string' || !/^0x[0-9a-f]+$/i.test(result) || BigInt(result) !== 84532n) {
     throw new Error('RPC endpoint is not Base Sepolia (chain ID 84532). ' + RPC_GUIDANCE);
   }

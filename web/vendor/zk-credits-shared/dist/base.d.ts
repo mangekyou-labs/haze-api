@@ -67,17 +67,24 @@ export interface RecoveryCapsulePayload {
     version: typeof RECOVERY_CAPSULE_VERSION;
     secret: string;
 }
-export interface RecoveryCapsule {
+export interface EncryptedRecoveryCapsule {
     version: typeof RECOVERY_CAPSULE_VERSION;
     algorithm: 'PBKDF2-AES-GCM';
     salt: string;
     iv: string;
     ciphertext: string;
 }
+/** Passwordless bearer recovery: possession permits spending. */
+export interface PasswordlessRecoveryCapsule {
+    version: 3;
+    algorithm: 'plaintext';
+    secret: string;
+}
+export type RecoveryCapsule = EncryptedRecoveryCapsule | PasswordlessRecoveryCapsule;
 /** Locally generated, downloaded, and re-imported before funding. */
 export interface RecoveryCapsuleFile {
     format: typeof CREDENTIAL_EXPORT_FORMAT;
-    version: typeof RECOVERY_CAPSULE_VERSION;
+    version: 2 | 3;
     kind: 'recovery-capsule';
     capsule: RecoveryCapsule;
 }
@@ -94,27 +101,27 @@ export interface ActivatedCredentialMetadata {
 /** The same encrypted capsule wrapped with authoritative funding metadata. */
 export interface ActivatedCredentialFile {
     format: typeof CREDENTIAL_EXPORT_FORMAT;
-    version: typeof RECOVERY_CAPSULE_VERSION;
+    version: 2 | 3;
     kind: 'activated-credential';
     capsule: RecoveryCapsule;
     activation: ActivatedCredentialMetadata;
 }
 export type CredentialExportFile = RecoveryCapsuleFile | ActivatedCredentialFile;
-export declare function createRecoveryCapsule(secret: Uint8Array, password: string): Promise<RecoveryCapsule>;
-export declare function createRecoveryCapsuleFile(secret: Uint8Array, password: string): Promise<RecoveryCapsuleFile>;
+export declare function createRecoveryCapsule(secret: Uint8Array, password?: string): Promise<RecoveryCapsule>;
+export declare function createRecoveryCapsuleFile(secret: Uint8Array, password?: string): Promise<RecoveryCapsuleFile>;
 /** Opens a capsule locally. The decrypted secret never leaves the caller. */
-export declare function openRecoveryCapsule(capsule: RecoveryCapsule, password: string): Promise<Uint8Array>;
+export declare function openRecoveryCapsule(capsule: RecoveryCapsule, password?: string): Promise<Uint8Array>;
 /** Pre-funding re-import check: the capsule decrypts and still yields the same commitment. */
-export declare function verifyRecoveryCapsule(file: RecoveryCapsuleFile, password: string): Promise<{
+export declare function verifyRecoveryCapsule(file: RecoveryCapsuleFile, password?: string): Promise<{
     secret: Uint8Array;
     commitment: string;
 }>;
 /** Wraps the untouched capsule with the gateway's authoritative funding metadata. */
 export declare function wrapActivatedCredential(capsule: RecoveryCapsule, activation: ActivatedCredentialMetadata): ActivatedCredentialFile;
 /** Verifies the activated credential locally against the secret it wraps. */
-export declare function verifyActivatedCredential(file: ActivatedCredentialFile, password: string): Promise<CreditCredential>;
+export declare function verifyActivatedCredential(file: ActivatedCredentialFile, password?: string): Promise<CreditCredential>;
 /** Accepts both the version-2 activated credential and the legacy version-1 export. */
-export declare function decryptAnyCredentialExport(file: unknown, password: string): Promise<CreditCredential>;
+export declare function decryptAnyCredentialExport(file: unknown, password?: string): Promise<CreditCredential>;
 export interface MerkleWitness {
     root: string;
     leafIndex: number;

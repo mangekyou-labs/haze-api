@@ -13,8 +13,9 @@ payment step.
 ## Local setup
 
 The parent PRD now requires passwordless recovery, OS credential storage,
-explicit operator-owned Base Sepolia RPC configuration, and packaged proving
-artifacts. Website onboarding, `zk-credits config rpc`, and packaged artifact
+packaged proving artifacts, and configurable Base Sepolia RPC access. The next
+package uses https://sepolia.base.org automatically when no endpoint is configured.
+An explicit environment endpoint or saved configuration takes precedence. Website onboarding, `zk-credits config rpc`, and packaged artifact
 delivery are tracked in **Codex developer first use: invite to first call**.
 They are not implemented by the published `zk-credits@0.2.7` package. Do not
 use that release as a fresh passwordless setup acceptance run. Publication of
@@ -52,8 +53,8 @@ environment variable, command argument, chat, log, or project file.
 Until the first-use dependency lands, existing installations still need their
 verified pinned proving artifacts and public witness configuration. Published 0.2.7’s
 `setup codex` path uses private repository access and password prompts; it is
-not the new passwordless setup path. Configure your own Base Sepolia RPC
-endpoint locally and keep embedded API keys out of evidence. A fresh run
+not the new passwordless setup path. If the public RPC is rate-limited, run `zk-credits config rpc` to configure
+your own Base Sepolia endpoint locally. Keep API keys out of evidence. A fresh run
 against the real gateway remains an acceptance requirement after those setup
 prerequisites are delivered.
 

@@ -20,6 +20,7 @@ import {
   type CreditCredential,
 } from '@zk-credits/shared/base';
 import type { BaseCreditWitness, BaseWitnessProvider } from './base-sidecar.js';
+import { RPC_GUIDANCE } from './rpc-config.js';
 
 const BUNDLE_FUNDED_ABI = parseAbi([
   'event BundleFunded(bytes32 indexed commitment, uint8 indexed tierId, uint64 expiry, uint256 leafIndex, uint256 bondAmount, bytes32 root)',
@@ -118,6 +119,11 @@ export function createBaseEventWitnessProvider(options: BaseEventWitnessProvider
   let cache: CachedLeafState | undefined;
   let leaves = new Map<number, { commitment: string; leaf: string; expiry?: number }>();
 
+  async function rpcCall<T>(operation: Promise<T>): Promise<T> {
+    try { return await operation; }
+    catch { throw new Error('Base Sepolia RPC request failed during witness synchronization; provider details are redacted. ' + RPC_GUIDANCE); }
+  }
+
   async function loadCache(): Promise<void> {
     if (cache || !options.cachePath) return;
     try {
@@ -137,12 +143,12 @@ export function createBaseEventWitnessProvider(options: BaseEventWitnessProvider
 
   async function synchronize(): Promise<void> {
     await loadCache();
-    const latest = await client.getBlockNumber();
+    const latest = await rpcCall(client.getBlockNumber());
     const target = latest > confirmations ? latest - confirmations : 0n;
     let from = options.deploymentBlock ?? 0n;
     if (cache) {
       const previousBlock = BigInt(cache.scannedTo);
-      const previous = await client.getBlock({ blockNumber: previousBlock });
+      const previous = await rpcCall(client.getBlock({ blockNumber: previousBlock }));
       if (previous.hash && previous.hash !== cache.scannedToHash) {
         cache = undefined;
         leaves = new Map();
@@ -152,7 +158,7 @@ export function createBaseEventWitnessProvider(options: BaseEventWitnessProvider
     }
     while (from <= target) {
       const to = from + maxBlockRange - 1n < target ? from + maxBlockRange - 1n : target;
-      const logs = await client.getLogs({ address: contract, event: BUNDLE_FUNDED_ABI[0], fromBlock: from, toBlock: to });
+      const logs = await rpcCall(client.getLogs({ address: contract, event: BUNDLE_FUNDED_ABI[0], fromBlock: from, toBlock: to }));
       for (const log of logs) {
         const funded = decodeFundedLog(log);
         if (!funded) continue;
@@ -160,7 +166,7 @@ export function createBaseEventWitnessProvider(options: BaseEventWitnessProvider
         const leaf = await computeCreditLeaf(funded.commitment, funded.tierId, funded.expiry);
         leaves.set(funded.leafIndex, { commitment: funded.commitment, leaf, expiry: funded.expiry });
       }
-      const block = await client.getBlock({ blockNumber: to });
+      const block = await rpcCall(client.getBlock({ blockNumber: to }));
       cache = { scannedTo: to.toString(), scannedToHash: block.hash ?? '', leaves: serializeLeaves(leaves) };
       await saveCache();
       from = to + 1n;

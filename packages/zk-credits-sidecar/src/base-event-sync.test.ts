@@ -35,3 +35,14 @@ describe('sidecar Base event witness synchronization', () => {
     expect(leaf).toMatch(/^\d+$/u);
   });
 });
+
+it('redacts provider errors and explains how to replace a rate-limited RPC', async () => {
+  const client: BaseEventWitnessClient = {
+    async getBlockNumber() { throw new Error('HTTP 429 https://provider.example/private-key'); },
+    async getBlock() { return {}; }, async getLogs() { return []; },
+  };
+  const provider = createBaseEventWitnessProvider({ rpcUrl: 'https://provider.example/private-key', contractAddress: '0x00000000000000000000000000000000000000a1', client });
+  const request = provider.witnessForCredential({ version: 1, secret: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', commitment: '123', tierId: 0, expiry: 1800000000, deploymentDomain: '84532' });
+  await expect(request).rejects.toThrow(/zk-credits config rpc/);
+  await expect(request).rejects.not.toThrow(/private-key/);
+});

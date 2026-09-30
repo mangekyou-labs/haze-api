@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readStoredCredential, nativeCredentialStore, type CredentialStore } from './credential-store.js';
-import { applyRpcConfig, RPC_GUIDANCE } from './rpc-config.js';
+import { applyRpcConfig, resolveBaseSepoliaRpc } from './rpc-config.js';
 import {
   BASE_SEPOLIA_NETWORK,
   createZkPrepaidLifecycleMetrics,
@@ -88,8 +88,7 @@ export async function createLocalX402Agent(options: LocalX402AgentOptions = {}):
   if (!artifactDirectory) throw new Error('Run `zk-credits setup codex` first to install and verify the pinned proving bundle');
 
   const witnessPath = environment.ZK_CREDITS_WITNESS_PATH;
-  const rpcUrl = environment.BASE_RPC_URL;
-  if (!rpcUrl?.trim()) throw new Error(RPC_GUIDANCE);
+  const rpcUrl = resolveBaseSepoliaRpc(environment);
   const contractAddress = environment.BASE_PRIVATE_CREDIT_BOND_ADDRESS;
   const witnessProvider = witnessPath
     ? await witnessProviderForSource({ kind: 'file', path: witnessPath }, join(stateDirectory, 'base-event-sync.json'))

@@ -20,7 +20,7 @@ import { createZkPrepaidLifecycleMetrics } from '@zk-credits/x402-zk-prepaid';
 import { BaseSlotLedger } from './slot-ledger.js';
 import { type CreditCredential } from '@zk-credits/shared/base';
 import { nativeCredentialStore, importCredentialPath, readStoredCredential } from './credential-store.js';
-import { applyRpcConfig, checkBaseSepoliaRpc, writeRpcConfig, RPC_GUIDANCE } from './rpc-config.js';
+import { applyRpcConfig, checkBaseSepoliaRpc, writeRpcConfig, RPC_GUIDANCE, resolveBaseSepoliaRpc } from './rpc-config.js';
 import { runCliCommand } from './cli-runtime.js';
 import { createNodeSidecarLifecycle } from './node-sidecar-lifecycle.js';
 import { activateSidecarServer } from './server-startup.js';
@@ -188,8 +188,8 @@ request-aware adapter and local proof engine; aggregate metrics stay on the
 loopback-only authenticated endpoint.
 "zk-credits serve --internal-trial-one-proof" limits this sidecar process to
 one authenticated, valid spend request and one local proof attempt.
-Obtain your own Base Sepolia RPC endpoint before setup, then run
-"zk-credits config rpc". Public RPC endpoints are rate-limited.
+Base Sepolia uses https://sepolia.base.org automatically. Public RPC endpoints
+are rate-limited; run "zk-credits config rpc" to use your own endpoint.
 Provider guide: https://docs.base.org/base-chain/node-operators/node-providers
 Set ZK_CREDITS_CREDENTIAL_PATH to the activated browser download for first setup.
 The passwordless credential is imported into your OS credential store. OS access
@@ -708,8 +708,7 @@ async function main(): Promise<void> {
     validateSetupPrerequisites: async () => {
       await applyRpcConfig(process.env, sidecarHome);
       const saved = await readSetupConfig(setupConfigPath(sidecarHome));
-      const rpc = process.env.BASE_RPC_URL?.trim() || (saved?.witness.kind === 'base-events' ? saved.witness.rpcUrl : undefined);
-      if (!rpc) throw new Error(RPC_GUIDANCE);
+      const rpc = resolveBaseSepoliaRpc(process.env, saved?.witness.kind === 'base-events' ? saved.witness.rpcUrl : undefined);
       await checkBaseSepoliaRpc(rpc);
       process.env.BASE_RPC_URL = rpc;
       const credentialPath = process.env.ZK_CREDITS_CREDENTIAL_PATH;

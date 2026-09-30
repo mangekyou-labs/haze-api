@@ -14,6 +14,16 @@ if (!sharedRoot) {
   throw new Error('Shared package artifact is missing from both the workspace and web/vendor');
 }
 
+// A web-only deployment cannot see the workspace package. Refresh its tracked
+// artifact whenever building from the monorepo so both builds use the same API.
+const vendorRoot = sharedCandidates[1];
+if (sharedRoot !== vendorRoot) {
+  mkdirSync(vendorRoot, { recursive: true });
+  rmSync(path.join(vendorRoot, 'dist'), { recursive: true, force: true });
+  cpSync(path.join(sharedRoot, 'dist'), path.join(vendorRoot, 'dist'), { recursive: true });
+  cpSync(path.join(sharedRoot, 'package.json'), path.join(vendorRoot, 'package.json'));
+}
+
 rmSync(target, { force: true, recursive: true });
 mkdirSync(path.dirname(target), { recursive: true });
 cpSync(sharedRoot, target, { recursive: true });

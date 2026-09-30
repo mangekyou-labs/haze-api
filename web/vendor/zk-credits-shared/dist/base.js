@@ -377,6 +377,10 @@ function validateActivationMetadata(activation) {
 }
 export async function createRecoveryCapsule(secret, password) {
     const encoded = secretToBase64Url(secretFromBase64Url(secretToBase64Url(secret)));
+    if (secretToField(secret) === '0')
+        throw new Error('Credential secret must not be zero');
+    if (password === undefined)
+        return { version: 3, algorithm: 'plaintext', secret: encoded };
     const payload = { version: RECOVERY_CAPSULE_VERSION, secret: encoded };
     const encrypted = await encryptExportPayload(payload, password, RECOVERY_CAPSULE_VERSION);
     return {
@@ -390,16 +394,22 @@ export async function createRecoveryCapsule(secret, password) {
 export async function createRecoveryCapsuleFile(secret, password) {
     return {
         format: CREDENTIAL_EXPORT_FORMAT,
-        version: RECOVERY_CAPSULE_VERSION,
+        version: password === undefined ? 3 : RECOVERY_CAPSULE_VERSION,
         kind: 'recovery-capsule',
         capsule: await createRecoveryCapsule(secret, password),
     };
 }
 /** Opens a capsule locally. The decrypted secret never leaves the caller. */
 export async function openRecoveryCapsule(capsule, password) {
+    if (capsule?.version === 3 && capsule.algorithm === 'plaintext') {
+        const secret = secretFromBase64Url(capsule.secret);
+        if (secretToField(secret) === '0')
+            throw new Error('Credential secret must not be zero');
+        return secret;
+    }
     if (!capsule || capsule.algorithm !== 'PBKDF2-AES-GCM')
         throw new Error('Unsupported credential export');
-    const payload = await decryptExportPayload(capsule, password, RECOVERY_CAPSULE_VERSION);
+    const payload = await decryptExportPayload(capsule, password ?? '', RECOVERY_CAPSULE_VERSION);
     if (!payload || payload.version !== RECOVERY_CAPSULE_VERSION || typeof payload.secret !== 'string') {
         throw new Error('Recovery capsule is malformed');
     }
@@ -412,7 +422,8 @@ export async function openRecoveryCapsule(capsule, password) {
 export async function verifyRecoveryCapsule(file, password) {
     if (!file
         || file.format !== CREDENTIAL_EXPORT_FORMAT
-        || file.version !== RECOVERY_CAPSULE_VERSION
+        || (file.version !== 2 && file.version !== 3)
+        || file.capsule?.version !== file.version
         || file.kind !== 'recovery-capsule') {
         throw new Error('Unsupported credential export');
     }
@@ -421,12 +432,12 @@ export async function verifyRecoveryCapsule(file, password) {
 }
 /** Wraps the untouched capsule with the gateway's authoritative funding metadata. */
 export function wrapActivatedCredential(capsule, activation) {
-    if (!capsule || capsule.version !== RECOVERY_CAPSULE_VERSION || capsule.algorithm !== 'PBKDF2-AES-GCM') {
+    if (!capsule || !((capsule.version === 2 && capsule.algorithm === 'PBKDF2-AES-GCM') || (capsule.version === 3 && capsule.algorithm === 'plaintext'))) {
         throw new Error('Unsupported credential export');
     }
     return {
         format: CREDENTIAL_EXPORT_FORMAT,
-        version: RECOVERY_CAPSULE_VERSION,
+        version: capsule.version,
         kind: 'activated-credential',
         capsule,
         activation: validateActivationMetadata(activation),
@@ -436,7 +447,8 @@ export function wrapActivatedCredential(capsule, activation) {
 export async function verifyActivatedCredential(file, password) {
     if (!file
         || file.format !== CREDENTIAL_EXPORT_FORMAT
-        || file.version !== RECOVERY_CAPSULE_VERSION
+        || (file.version !== 2 && file.version !== 3)
+        || file.capsule?.version !== file.version
         || file.kind !== 'activated-credential') {
         throw new Error('Unsupported credential export');
     }
@@ -459,11 +471,11 @@ export async function decryptAnyCredentialExport(file, password) {
     const candidate = (file ?? {});
     if (candidate.format !== CREDENTIAL_EXPORT_FORMAT)
         throw new Error('Unsupported credential export');
-    if (candidate.version === RECOVERY_CAPSULE_VERSION) {
+    if (candidate.version === RECOVERY_CAPSULE_VERSION || candidate.version === 3) {
         return verifyActivatedCredential(file, password);
     }
     if (candidate.version === CREDENTIAL_VERSION && candidate.encrypted && typeof candidate.encrypted === 'object') {
-        return decryptCredentialExport(candidate.encrypted, password);
+        return decryptCredentialExport(candidate.encrypted, password ?? '');
     }
     throw new Error('Unsupported credential export');
 }

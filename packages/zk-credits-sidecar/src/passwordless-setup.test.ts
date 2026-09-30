@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRecoveryCapsuleFile, generateSecret, verifyRecoveryCapsule, wrapActivatedCredential } from '@zk-credits/shared/base';
 import { importStoredCredential, readStoredCredential } from './credential-store.js';
-import { applyRpcConfig, checkBaseSepoliaRpc, readRpcConfig, writeRpcConfig } from './rpc-config.js';
+import { resolveBaseSepoliaRpc, applyRpcConfig, checkBaseSepoliaRpc, readRpcConfig, writeRpcConfig } from './rpc-config.js';
 
 it('validates the RPC without exposing provider errors or keys', async () => {
   const url = 'https://rpc.example/secret-provider-key';
@@ -41,4 +41,14 @@ describe('OS credential storage', () => {
     await expect(importStoredCredential(activated, { read: async () => undefined, write: async () => { throw new Error('locked'); } })).rejects.toThrow(/OS credential storage/);
     await expect(importStoredCredential(file, store)).rejects.toThrow(/Unsupported/);
   });
+});
+
+it('gives actionable, redacted guidance when the public RPC is rate-limited', async () => {
+  await expect(checkBaseSepoliaRpc('https://sepolia.base.org', (async () => new Response('', { status: 429 })) as typeof fetch)).rejects.toThrow(/zk-credits config rpc/);
+});
+
+it('uses the public RPC only when no configured or legacy endpoint exists', () => {
+  expect(resolveBaseSepoliaRpc({})).toBe('https://sepolia.base.org');
+  expect(resolveBaseSepoliaRpc({ BASE_RPC_URL: '  ' }, 'https://legacy.example')).toBe('https://legacy.example');
+  expect(resolveBaseSepoliaRpc({ BASE_RPC_URL: ' https://configured.example ' }, 'https://legacy.example')).toBe('https://configured.example');
 });
