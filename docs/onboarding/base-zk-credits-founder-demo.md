@@ -51,7 +51,7 @@ ledger: setup and every subsequent spend must share the same `ZK_CREDITS_HOME`.
 
 The candidate verifies packaged proving artifacts, synchronizes the public
 Base witness, and checks the gateway-known root. No private proving-repository
-access is needed. If the default public RPC is rate-limited, configure an
+access is needed. If the default launch RPC is rate-limited, configure an
 owner-only override with `./node_modules/.bin/zk-credits config rpc`; never copy
 endpoint keys into evidence. Keep any gateway override a plain HTTPS origin.
 
@@ -107,19 +107,19 @@ signals, identities, and any identity-to-spend join **locally before retaining
 or sharing**. Review every frame and audio track. Do not append transcript excerpts
 to the safe record. Record aggregate checks, never payment headers or identifiers.
 
-Official route checked **2026-09-30**:
+The funding target is a **$5,000 Base Builder Grant**. Prepare private materials
+for this program. Ecosystem Fund investment and Base Batches are outside this
+funding scope.
 
-- The [Base Ecosystem Fund](https://docs.base.org/get-started/base-ecosystem-fund)
-  backs pre-seed/seed onchain businesses on Base, including payments and AI
-  agents. Its [live application](https://www.base.org/ecosystem-fund/apply)
-  is for investment, not a Builder Grant. This project's Base prepaid bond and
-  adapter-enabled agent path plausibly fit those themes; actual stage, business
-  readiness, team information, and eligibility require founder review.
-- [Base Batches 004](https://www.base.org/batches) targets pre-product through
-  post-MVP teams without a formal Seed round and with Base as their primary
-  network. Applications closed September 10, 2026; it is not a live route today.
+Route checked **2026-09-30**: the
+[Base Builder Grant Program application](https://docs.google.com/forms/d/e/1FAIpQLSeEFi9BLm5XCm7KrFzRZC-rxcAqCNZPzWZ9He4aZkxsKuRXjw/viewform)
+identifies Coinbase as its creator and says Round 1 is closed; it directs
+builders to watch X for Round 2. Recheck the current official round, amount,
+eligibility, and submission route before submitting. The $5,000 amount is the
+founder's target, not a verified program cap, award, or entitlement. Keep the
+prototype described as testnet-only, experimental, and unaudited; the internal
+demo establishes technical evidence only. No submission or eligibility is
+claimed.
 
-Recheck these sources before preparing funding materials. Neither thematic fit
-nor this demo guarantees eligibility or funding. No submission is claimed.
 The next human ticket is
 [Run the uncounted founder demo and prepare truthful funding materials](https://github.com/mangekyou-labs/haze-api/issues/35).

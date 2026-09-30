@@ -48,7 +48,7 @@ it('gives actionable, redacted guidance when the public RPC is rate-limited', as
 });
 
 it('uses the public RPC only when no configured or legacy endpoint exists', () => {
-  expect(resolveBaseSepoliaRpc({})).toBe('https://sepolia.base.org');
+  expect(() => resolveBaseSepoliaRpc({})).toThrow(/Release RPC has not been baked/);
   expect(resolveBaseSepoliaRpc({ BASE_RPC_URL: '  ' }, 'https://legacy.example')).toBe('https://legacy.example');
   expect(resolveBaseSepoliaRpc({ BASE_RPC_URL: ' https://configured.example ' }, 'https://legacy.example')).toBe('https://configured.example');
 });

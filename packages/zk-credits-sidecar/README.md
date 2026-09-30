@@ -81,7 +81,7 @@ still receives the class. A rejected request consumes no credit.
    `zk-credits x402-agent`. Subsequent launches use OS storage without a password
    or import file. The activated download remains a private recovery backup.
 
-The RPC defaults to https://sepolia.base.org. If the public endpoint is limited,
+The RPC defaults to the launch endpoint baked into the package. If that endpoint is limited,
 run `zk-credits config rpc` and enter your own Base Sepolia endpoint in the hidden
 local prompt. Saved settings stay owner-only; `BASE_RPC_URL` takes precedence.
 Provider keys must not appear in chat or evidence. No gateway admin token is

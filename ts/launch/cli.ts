@@ -41,11 +41,13 @@ import {
   type LaunchEnvCheck,
   type LaunchStage,
 } from './environment.js';
+import { PINNED_ACTIVATION_VERSIONS } from '../activation-evidence.js';
 import { redact } from './redact.js';
 import { LaunchStateStore, type StepDetail, type StepRecord, type StepStatus } from './state.js';
 import { collectTrialGate, loadTrialGateCompatibilityPin } from './trial-gate.js';
 import {
   RELEASE_PACKAGES,
+  SIDECAR_RELEASE_PACKAGE,
   assertReleaseReady,
   isDependencyOnlyChange,
   packContentDigest,
@@ -407,7 +409,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
         'A new package publishes directly; npm staged publishing only covers packages that already exist.',
         '  npm view @zk-credits/shared@0.1.0 dist.integrity',
         '  npm view @zk-credits/x402-zk-prepaid@0.1.0 dist.integrity',
-        '  npm view zk-credits@0.2.7 dist.integrity',
+        `  npm view zk-credits@${SIDECAR_RELEASE_PACKAGE.version} dist.integrity`,
       ],
     }),
     manualStep({
@@ -482,7 +484,7 @@ export function buildLaunchPlan(env: Record<string, string> = {}): LaunchStep[] 
       instructions: [
         'The sidecar is publishable only now that its dependencies resolve from the registry.',
         '  cd packages/zk-credits-sidecar && npm publish --access public',
-        'The pinned pilot set is then: zk-credits 0.2.7, adapter 0.1.0, shared 0.1.0.',
+        `The pinned pilot set is then: zk-credits ${SIDECAR_RELEASE_PACKAGE.version}, adapter ${PINNED_ACTIVATION_VERSIONS.adapter}, shared ${PINNED_ACTIVATION_VERSIONS.shared}.`,
       ],
     }),
 

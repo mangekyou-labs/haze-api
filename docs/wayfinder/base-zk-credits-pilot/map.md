@@ -124,7 +124,7 @@ below.
 | 1 — [#29](https://github.com/mangekyou-labs/haze-api/issues/29) | Codex first use | — | `ready-for-agent` |
 | 2 — [#30](https://github.com/mangekyou-labs/haze-api/issues/30) | x402 agent first use | — | `ready-for-agent` |
 | 3 — [#31](https://github.com/mangekyou-labs/haze-api/issues/31) | Founder-aware evidence | — | `ready-for-agent` |
-| 4 — [#32](https://github.com/mangekyou-labs/haze-api/issues/32) | Release and launch preparation | #29, #30, #31 | `ready-for-agent` |
+| 4 — [#32](https://github.com/mangekyou-labs/haze-api/issues/32) | Release and launch preparation | #29, #30, #31 | closed |
 | 5 — [#33](https://github.com/mangekyou-labs/haze-api/issues/33) | Founder demo kit and wizard | #30, #31 | `ready-for-agent` |
 | 6 — [#34](https://github.com/mangekyou-labs/haze-api/issues/34) | Recruit A and C | — | `ready-for-human` |
 | 7 — [#35](https://github.com/mangekyou-labs/haze-api/issues/35) | Prepare founder grant demo | #33 | `ready-for-human` |
@@ -133,17 +133,16 @@ below.
 | 10 — [#37](https://github.com/mangekyou-labs/haze-api/issues/37) | External follow-up | A checkpoint in #27 | `ready-for-human` |
 | 11 — [#16](https://github.com/mangekyou-labs/haze-api/issues/16) | B13 readout | #27, #37, completed 14-day window | `ready-for-human` |
 
-## Grant route check (2026-09-29)
+## Grant target correction (2026-09-30)
 
-Base's official [Ecosystem Fund documentation](https://docs.base.org/get-started/base-ecosystem-fund)
-links to a live [application form](https://www.base.org/ecosystem-fund/apply)
-for pre-seed or seed investment, and identifies payments and AI agents among
-its areas. This is an investment application, not a Builder Grant. The separate
-[Base Batches 004](https://www.base.org/batches) route accepts pre-product to
-post-MVP teams focused on Base, but its 2026-09-10 deadline has passed. The
-founder demo ticket must check eligibility against the live Ecosystem Fund
-criteria before any submission. Do not claim a grant application or funding
-request was filed unless it was actually submitted.
+The founder's funding target is a **$5,000 Base Builder Grant**. Prepare
+materials through
+[Run the uncounted founder demo and prepare truthful funding materials](https://github.com/mangekyou-labs/haze-api/issues/35).
+The [founder demo guide](../../onboarding/base-zk-credits-founder-demo.md#safe-recording-and-funding-fit)
+holds the application link and dated round-status check. Confirm the current
+Builder Grant round and prototype eligibility before submission; the target
+amount is not a verified award. Ecosystem Fund investment and Base Batches
+are outside this effort's funding scope.
 
 The demo runs before external launch and is **uncounted**. Slot B is a fresh,
 separately measured x402 run after A qualifies; it is not the grant demo.
@@ -157,8 +156,8 @@ separately measured x402 run after A qualifies; it is not the grant demo.
 - Install the pinned release with its packaged proving bundle. The human signs
   in, saves and reimports the passwordless recovery capsule, gives consent, and
   chooses the task. Activated credentials enter OS secure storage. Base Sepolia
-  uses the public RPC by default; a private local override is optional until
-  provider limits require it.
+  uses the launch RPC baked into the reviewed package by default; local overrides
+  remain available when needed.
 - Prepare and review a version-matched package candidate, then verify clean
   registry installs before invitations. Publishing and hosted launch remain
   behind the founder authorization ticket.
@@ -183,3 +182,22 @@ separately measured x402 run after A qualifies; it is not the grant demo.
 - [x402 operator first use: own agent and request-aware adapter](https://github.com/mangekyou-labs/haze-api/issues/30): passwordless OS-store launch, fresh package install, real Base Sepolia exchange, authenticated aggregate metrics, and generic-client rejection validated. See [technical evidence](../../evidence/issue-30-x402-passwordless-validation.md).
 
 - [Founder x402 demo kit and safe recording wizard](https://github.com/mangekyou-labs/haze-api/issues/33): reviewed-candidate walkthrough and bounded internal records keep the demo separate from fresh post-A slot B; official investment-route check is linked in the ticket resolution.
+
+## Delegated Codex acceptance (2026-09-30)
+
+The owner authorized a delegated agent operator to complete issue 29 technical
+acceptance while the participant is unavailable. Human consent interviews,
+self-chosen human tasks and active-human setup timing are not gates for that
+implementation ticket. Record these as unmeasured, not successful. Independent
+A/C adoption, payment intent and the 14-day cohort remain in their pilot tickets;
+this delegated run does not start that window.
+
+Issue 29's website-to-Codex technical journey is validated. Passwordless recovery,
+OS-store restart, packaged proving artifacts, witness/root checks and committed
+Codex requests passed. Prepared 0.2.10 also passed using the baked launch RPC;
+fresh-state credential reuse required four claim-conflict recoveries. See
+[technical evidence](../../evidence/issue-29-live-browser-onboarding.md) and
+[owner publication handoff](../../releases/zk-credits-0.2.10.md). Publication is
+separate from implementation completion and remains with the owner.
+
+Release and launch preparation: [reviewed published candidate verification](../../evidence/issue-32-release-verification.md) records immutable 0.2.10/0.1.0 pins, fresh registry checks, current hosted readiness and caps, the resolved proof-test regression, and the isolated clean/pushed review preflight. Founder authorization remains in the separate authorization ticket.

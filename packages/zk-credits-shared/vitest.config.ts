@@ -5,6 +5,7 @@ const circuitsDir = resolve(import.meta.dirname, '..', '..', 'circuits');
 
 export default defineConfig({
   test: {
+    exclude: ['**/node_modules/**', '**/archive/**', '**/dist/**'],
     env: {
       CIRCUITS_DIR: circuitsDir,
     },

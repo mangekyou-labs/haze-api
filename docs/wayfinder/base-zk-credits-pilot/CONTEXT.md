@@ -329,3 +329,10 @@ The detached side of onboarding: funding capabilities and the Base Sepolia
 funding transaction. It never stores a GitHub account id, an invite id, or any
 other identifier that could join a commitment back to a person. The two planes
 are separate database schemas with no foreign key and no durable join.
+
+## Delegated operator
+
+An agent authorized by a principal to perform the local onboarding and task
+journey on the principal’s behalf. Delegation permits technical acceptance;
+it does not make the agent an independent human participant or establish
+human usability, external adoption, or payment intent.

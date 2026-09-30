@@ -65,9 +65,9 @@ export const SLOT_ASSIGNMENT: Record<OperatorSlot, { participantType: Participan
   C: { participantType: 'x402_native_agent', integrationMode: 'x402_zk_prepaid_adapter' },
 };
 
-/** Exact published versions. An activation pinned to anything else is rejected. */
+/** Exact pilot release pins. Publication and clean-install verification gate invitations. */
 export const PINNED_ACTIVATION_VERSIONS = {
-  sidecar: '0.2.7',
+  sidecar: '0.2.10',
   adapter: '0.1.0',
   shared: '0.1.0',
 } as const;

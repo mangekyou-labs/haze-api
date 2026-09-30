@@ -239,12 +239,10 @@ if ! confirm "Have you reviewed the material and excluded all private content be
 fi
 
 stage "Write a safe local record and check the official funding route"
-say "Open Base's official current Ecosystem Fund and Batches pages. Verify"
-say "whether a current route is a Builder Grant, its live status, and the"
-say "prototype's eligibility before preparing or submitting any materials."
-open_url "https://docs.base.org/get-started/base-ecosystem-fund"
-open_url "https://www.base.org/ecosystem-fund/apply"
-open_url "https://www.base.org/batches"
+say 'The funding target is a $5,000 Base Builder Grant. Open the Builder Grant'
+say "application and verify the current round, amount, submission route, and"
+say "testnet prototype eligibility before preparing or submitting materials."
+open_url "https://docs.google.com/forms/d/e/1FAIpQLSeEFi9BLm5XCm7KrFzRZC-rxcAqCNZPzWZ9He4aZkxsKuRXjw/viewform"
 pause "Press Enter after checking the official route and eligibility."
 while true; do
   ask DEMO_OUTCOME "Demo outcome (succeeded, blocked, or failed):"
@@ -255,12 +253,12 @@ while true; do
   case "$DEMO_EXCHANGE_CHECK" in yes|no) break ;; *) warn "answer yes or no" ;; esac
 done
 while true; do
-  ask DEMO_GRANT_ROUTE "Official investment route status (potential-fit, not-a-fit, or needs-review):"
+  ask DEMO_GRANT_ROUTE "Base Builder Grant fit (potential-fit, not-a-fit, or needs-review):"
   case "$DEMO_GRANT_ROUTE" in potential-fit|not-a-fit|needs-review) break ;; *) warn "choose one listed status" ;; esac
 done
-note "Base's live Ecosystem Fund route is an investment application, not a Builder"
-note "Grant. Base Batches 004 closed 2026-09-10. Recheck official criteria and"
-note "eligibility before any application; do not claim an application was filed."
+note "On 2026-09-30, the Coinbase-created Builder Grant application says Round 1"
+note "is closed; watch X for Round 2. Recheck status and eligibility before"
+note "submission. The target amount is not a verified award or entitlement."
 if [[ "$DEMO_OUTCOME" == succeeded && "$DEMO_EXCHANGE_CHECK" != yes ]]; then
   warn "a successful demo requires every exchange check; recording this as blocked"
   DEMO_OUTCOME=blocked
@@ -283,11 +281,11 @@ cat > "$DEMO_RECORD" <<EOF
 - Funding application submitted by this wizard: no
 - Demo outcome: $DEMO_OUTCOME
 - Required exchange checks reported: $DEMO_EXCHANGE_CHECK
-- Official investment route fit: $DEMO_GRANT_ROUTE
-- Ecosystem Fund: https://docs.base.org/get-started/base-ecosystem-fund
-- Live application: https://www.base.org/ecosystem-fund/apply
-- Batches status: https://www.base.org/batches
-- Route check baseline: 2026-09-30; investment, not a Builder Grant; Batches 004 closed 2026-09-10
+- Funding target: \$5,000 Base Builder Grant
+- Base Builder Grant fit: $DEMO_GRANT_ROUTE
+- Builder Grant application: https://docs.google.com/forms/d/e/1FAIpQLSeEFi9BLm5XCm7KrFzRZC-rxcAqCNZPzWZ9He4aZkxsKuRXjw/viewform
+- Route check baseline: 2026-09-30; Round 1 closed; watch X for Round 2
+- Target amount is not a verified award or entitlement
 
 No participant was involved. This file excludes the task, model response,
 credential, passwords, admin token, proofs, nullifiers, request signals,

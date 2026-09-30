@@ -13,11 +13,11 @@ wizard template that guides the internal run and safe recording.
 The demo is internal, redacted, and uncounted. Keep its evidence separate from
 the later, fresh slot B activation, which occurs after A qualifies.
 
-Check the official Base funding route and eligibility. As of 2026-09-29, Base
-documents a live Ecosystem Fund application for pre-seed/seed investment in
-onchain businesses, including payments and AI agents; that is investment, not
-a Builder Grant. Base Batches 004 applications closed on 2026-09-10. Record
-fit and the live route without claiming a submission.
+Check the Base Builder Grant route for the founder's $5,000 funding target.
+Use the [founder demo guide](../../../onboarding/base-zk-credits-founder-demo.md#safe-recording-and-funding-fit)
+for the application link and dated status. Record the current round and
+prototype eligibility without claiming a submission. Ecosystem Fund investment
+and Base Batches are outside this effort's funding scope.
 
 ## Acceptance
 
