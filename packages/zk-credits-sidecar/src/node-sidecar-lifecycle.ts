@@ -18,7 +18,6 @@ export interface NodeSidecarLifecycleOptions {
   tokenPath: string;
   logPath: string;
   cliEntryPath: string;
-  readCredentialPassword?: () => Promise<string>;
 }
 
 export interface NodeSidecarLifecycleRuntime {
@@ -99,14 +98,11 @@ export function createNodeSidecarLifecycle(
       }
     },
     async startDetached(): Promise<void> {
-      if (!options.readCredentialPassword) throw new Error('Credential password prompt is unavailable');
-      const password = await options.readCredentialPassword();
       await runtime.startDetachedProcess({
         executable: process.execPath,
-        args: [options.cliEntryPath, 'serve', '--port', url.port, '--credential-password-stdin'],
+        args: [options.cliEntryPath, 'serve', '--port', url.port],
         env: sidecarEnvironment(options.stateDirectory, url.port),
         logPath: options.logPath,
-        stdin: password,
       });
     },
     readToken: () => readLoopbackToken(options.tokenPath),

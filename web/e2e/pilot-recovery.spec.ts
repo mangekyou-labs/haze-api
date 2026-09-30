@@ -42,6 +42,7 @@ test('restores a version-2 activated credential without showing the commitment',
   const { path, commitment } = await activatedFixture();
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(path);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
 
@@ -49,6 +50,24 @@ test('restores a version-2 activated credential without showing the commitment',
   await expect(page.getByText(/Activated credential · tier 0/u)).toBeVisible();
   const html = await page.content();
   expect(html).not.toContain(commitment);
+});
+
+test('restores a passwordless activated credential without retaining its secret in browser storage', async ({ page }) => {
+  const secret = generateSecret();
+  const credential = await createCredential(secret, FUNDED_TIER_ID, EXPIRY, DOMAIN);
+  const capsule = await createRecoveryCapsule(secret);
+  const path = writeFixture('passwordless.json', wrapActivatedCredential(capsule, {
+    ...credential, network: 'eip155:84532',
+    contractAddress: '0x0000000000000000000000000000000000000001', transactionHash: '0xfunded',
+  }));
+  await page.goto('/recover');
+  await expect(page.locator('input[type=password]')).toHaveCount(0);
+  await page.locator('#credential-file').setInputFiles(path);
+  await page.getByRole('button', { name: 'Restore credential' }).click();
+  await expect(page.getByText('Credential restored locally.')).toBeVisible();
+  const browserStorage = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
+  expect(browserStorage).not.toContain(credential.secret);
+  expect(await page.content()).not.toContain(credential.secret);
 });
 
 test('still restores a legacy version-1 export', async ({ page }) => {
@@ -62,6 +81,7 @@ test('still restores a legacy version-1 export', async ({ page }) => {
 
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(path);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
   await expect(page.getByText(/Legacy version-1 export · tier 0/u)).toBeVisible();
@@ -71,11 +91,13 @@ test('rejects a wrong password and a tampered capsule', async ({ page }) => {
   const { path: goodPath } = await activatedFixture();
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(goodPath);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', 'wrong password value');
   await page.getByRole('button', { name: 'Restore credential' }).click();
   await expect(page.locator('p[role="alert"]')).toContainText(/password or ciphertext is invalid/u);
 
   const capsule = await createRecoveryCapsule(generateSecret(), PASSWORD);
+  if (capsule.algorithm !== 'PBKDF2-AES-GCM') throw new Error('Expected legacy fixture');
   const tampered = {
     format: 'zk-credits-credential',
     version: 2,
@@ -93,6 +115,7 @@ test('rejects a wrong password and a tampered capsule', async ({ page }) => {
   };
   const tamperedPath = writeFixture('tampered.json', tampered);
   await page.locator('#credential-file').setInputFiles(tamperedPath);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
   await expect(page.locator('p[role="alert"]')).toContainText(/invalid|malformed/iu);
@@ -129,6 +152,7 @@ test('activates a recovered capsule from its existing funding bundle', async ({ 
 
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(path);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Restore credential' }).click();
@@ -169,6 +193,7 @@ test('does not save or download a recovered credential with expired activation m
   page.on('download', () => { downloads += 1; });
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(path);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
 
@@ -200,12 +225,14 @@ test('rejects a wrong capsule password and malformed capsule before lookup', asy
 
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(wrongPasswordPath);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', 'wrong password value');
   await page.getByRole('button', { name: 'Restore credential' }).click();
   await expect(page.locator('p[role="alert"]')).toContainText(/password or ciphertext is invalid/u);
   expect(lookupRequests).toBe(0);
 
   await page.locator('#credential-file').setInputFiles(malformedPath);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
   await expect(page.locator('p[role="alert"]')).toContainText(/invalid|malformed/iu);
@@ -232,6 +259,7 @@ test('does not fund a capsule with no existing bundle and rejects mismatched loo
 
   await page.goto('/recover');
   await page.locator('#credential-file').setInputFiles(path);
+  await page.getByLabel('Import a legacy encrypted export').check();
   await page.fill('#recovery-password', PASSWORD);
   await page.getByRole('button', { name: 'Restore credential' }).click();
   await expect(page.locator('p[role="alert"]')).toContainText(/no funded credential bundle was found/iu);

@@ -58,8 +58,8 @@ test('completes invite, capsule backup, detached funding, and local verification
   await page.getByRole('button', { name: 'Redeem invite' }).click();
   await expect(page.getByText(/Invite redeemed/u)).toBeVisible();
 
-  await page.fill('#capsule-password', PASSWORD);
-  await page.fill('#capsule-password-confirmation', PASSWORD);
+  await expect(page.locator('input[type=password]')).toHaveCount(0);
+  await expect(page.getByText(/Anyone possessing this recovery file/)).toBeVisible();
   const capsuleDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: /Generate and download recovery capsule/u }).click();
   const capsuleFile = await capsuleDownload;
@@ -67,7 +67,7 @@ test('completes invite, capsule backup, detached funding, and local verification
 
   const capsulePath = (await capsuleFile.path())!;
   const capsule = JSON.parse(readFileSync(capsulePath, 'utf8')) as RecoveryCapsuleFile;
-  const { commitment } = await verifyRecoveryCapsule(capsule, PASSWORD);
+  const { commitment } = await verifyRecoveryCapsule(capsule);
 
   // Backup gating: funding stays locked until the capsule is re-imported.
   await expect(page.getByText('Locked', { exact: true }).last()).toBeVisible();
@@ -93,7 +93,7 @@ test('completes invite, capsule backup, detached funding, and local verification
     contractAddress: FUNDING_RESPONSE.contractAddress,
     transactionHash: FUNDING_RESPONSE.transactionHash,
   });
-  const verified = await verifyActivatedCredential(activated, PASSWORD);
+  const verified = await verifyActivatedCredential(activated);
   expect(verified.commitment).toBe(commitment);
 
   // The funding capability is erased once funding succeeds.
@@ -125,8 +125,8 @@ test('survives funding rejection and retries the same detached capability', asyn
 
   await page.fill('#invite-code', 'pilot-invite-code-0123456789');
   await page.getByRole('button', { name: 'Redeem invite' }).click();
-  await page.fill('#capsule-password', PASSWORD);
-  await page.fill('#capsule-password-confirmation', PASSWORD);
+  await expect(page.locator('input[type=password]')).toHaveCount(0);
+  await expect(page.getByText(/Anyone possessing this recovery file/)).toBeVisible();
   const capsuleDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: /Generate and download recovery capsule/u }).click();
   const capsulePath = (await (await capsuleDownload).path())!;

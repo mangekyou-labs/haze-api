@@ -1,72 +1,77 @@
 # Base ZK Credits: Codex first use
 
-This guide is for invited external Codex developers in slot A. The founder
-prepares the invite, provisions the Base Sepolia test credential, and grants
-read access to `mangekyou-labs/zk-credits-base-sepolia-v2-bundle` before the
-session. The target is five minutes of active human setup. Bundle downloads,
-installation, proof generation, and model response time are recorded
-separately from human action time.
+For invited operators on Base Sepolia. The target is five minutes of active
+human setup, including obtaining an RPC endpoint and OS access approvals.
+Record unattended downloads, installation, proof, and provider waits separately.
+External research participants receive a fixed $25 research honorarium for a
+30-minute session even if setup fails. This is separate from product payment.
 
-External participants receive a fixed **$25 research honorarium for a
-30-minute session**, even if setup or the call fails. It is not product revenue
-or evidence of willingness to pay. The product call uses founder-provisioned
-Base Sepolia test credits and has no product payment step.
+## Before setup
+
+Obtain **your own Base Sepolia RPC endpoint (chain ID 84532)** from a
+[Base node provider](https://docs.base.org/base-chain/node-operators/node-providers).
+Choose Base Sepolia in the provider dashboard and copy its HTTP endpoint into
+the local hidden prompt described below. Keep API keys out of chat and evidence.
+Public Base endpoints are rate-limited; setup does not silently select one.
+
+Sign in with GitHub on the website and redeem your invite. Download the
+passwordless recovery file and re-import it locally before funding. Anyone
+possessing the file can spend its credits. Keep it private. Fund your pilot
+credential, then download the activated credential. No credential password is
+created or entered. Files and secrets are never uploaded to the service.
+
+## Release availability
+
+The current published `zk-credits@0.2.8` does **not** implement this passwordless
+journey. Use the reviewed local package for development acceptance until the
+owner publishes and pins the implementation release here. Publication is an
+owner action. Do not install an unpinned latest package to claim acceptance.
+The new package includes its pinned proving archive; private GitHub repository
+access and GitHub CLI authentication are not setup prerequisites.
 
 ## Give Codex this one instruction
 
-Save the encrypted credential export from the invite flow as
-`~/Downloads/zk-credits-credential.json`, then paste this instruction into
-Codex in the Haze API repository:
+Give only the activated credential's local path and the reviewed package path.
 
 ```text
-Set up my invited Base Sepolia zk-credits pilot on this machine. First check
-`gh auth status` and confirm I can read
-`mangekyou-labs/zk-credits-base-sepolia-v2-bundle`. If GitHub CLI sign-in or
-repository access is missing, stop and ask me to complete it locally; do not
-copy, print, or store a GitHub token. Install exactly `zk-credits@0.2.7` from
-npm, then set `ZK_CREDITS_CREDENTIAL_PATH` to
-`~/Downloads/zk-credits-credential.json`, set `ZK_CREDITS_GATEWAY_URL` to
-`https://zk-credits-gateway.onrender.com`, and set `BASE_RPC_URL` to
-`https://sepolia.base.org`. Run `zk-credits setup codex` and wait for me to
-enter my recovery password in its hidden local prompt. Confirm that setup
-downloaded the immutable bundle pinned in
-`packages/zk-credits-sidecar/circuits/manifest.json`, checked every artifact
-hash, synchronized the public Base witness, and completed the gateway
-known-root check. Do not read or echo my credential export, put my recovery
-password in chat, a command argument, an environment variable, or a file, or
-make an API request during setup. Stop after reporting local setup checks as
-pass or fail; I will review consent and choose my own task before any call.
+Set up my invited Base Sepolia zk-credits pilot with the reviewed local package.
+Before setup, guide me to obtain my own Base Sepolia RPC endpoint (chain ID
+84532), then run `zk-credits config rpc` and let me paste it into the hidden
+local prompt. Do not print its URL or API key. Set ZK_CREDITS_CREDENTIAL_PATH
+to my downloaded activated credential's path and ZK_CREDITS_GATEWAY_URL to
+https://zk-credits-gateway.onrender.com. Run `zk-credits setup codex`.
+Confirm setup verified the packaged archive and artifact hashes, synchronized the public Base witness, and checked its known root with the gateway. Import
+my credential into OS secure storage; fail clearly if storage is unavailable.
+Do not show my credential or secret in chat/logs or make a model request during
+setup. Stop after reporting setup checks so I can review consent and choose
+my own task. OS storage approval may be needed; no credential password is needed.
 ```
 
-If the invite flow saved the export under a different name, give Codex only
-the local file path. Enter the recovery password directly into the hidden
-terminal prompt. Never paste the password into Codex or a shell command.
+After successful import, the downloaded file is a recovery backup. Runtime reads
+OS storage; subsequent launches and restarts need no credential password.
+Legacy encrypted exports require the explicit `--legacy` setup option and their
+original password in the local hidden prompt.
 
-## After setup
+## Change the RPC later
 
-1. Read the consent text and confirm that you want to take part.
-2. Start the operator wizard with slot `A`:
+Run `zk-credits config rpc` anytime, including before setup. It validates
+connectivity and chain ID and stores the endpoint with owner-only access.
+`BASE_RPC_URL` overrides saved settings. A running sidecar keeps its current
+endpoint: stop that process, then run `zk-credits serve` or `zk-credits codex`
+to use the updated setting. Configuration does not unlock a credential.
 
-   ```sh
-   scripts/operator-wizard.sh
-   ```
+## First call
 
-3. Follow the wizard's authenticated local counter snapshots. It asks for one
-   discarded warm-up call, then one counted call using a task you choose.
-   Don't make other calls between snapshots.
-4. Record active human action time only. Pause the timer during unattended
-   downloads, proof generation, and provider response waits. Time above five
-   minutes is a friction finding, not grounds to reject an otherwise valid
-   protocol exchange.
-5. Send the founder only the generated redacted activation bundle. It contains
-   aggregate exchange/proving counters and bounded setup measurements, never
-   task text or output.
+Review consent and choose your own coding task. Run `zk-credits codex`.
+A counted activation requires a committed call from your agent loop; warm-ups,
+retries and smoke calls do not count. Record failed checkpoints, assistance,
+active human seconds and unattended waits. Automation is technical evidence,
+not independent external market validation. Share only redacted aggregate
+measurements: exclude RPC keys, files, secrets, request text, proofs, nullifiers,
+request signals and identity-to-spend joins.
 
 For valid spends, the proof is designed for payer and credential unlinkability.
-The model provider still receives the request, and the gateway and provider
-can observe request content and traffic metadata. The circuit is experimental
-and not independently audited. Codex's existing `/v1/responses` bridge is
-limited to supported text and function-tool requests translated into the
-fixed non-streaming `/v1/chat/completions` service class; it is not a general
-Responses gateway.
-
+The model provider receives requests; the gateway and provider can observe
+content and traffic metadata. The circuit is experimental and not independently
+audited. Generic unmodified x402 clients are unsupported. Codex's local Responses
+bridge supports only the bounded text/function-tool service class.

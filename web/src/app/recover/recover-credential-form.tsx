@@ -7,6 +7,7 @@ import { formatDate, importCredentialFile, PILOT_TIER_ALLOWANCE, restoreCapsuleF
 export function RecoverCredentialForm() {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
+  const [legacy, setLegacy] = useState(false);
   const [restored, setRestored] = useState<{ version: number; tierId: number; expiry: number; deploymentDomain: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -14,8 +15,8 @@ export function RecoverCredentialForm() {
   async function recover(): Promise<void> {
     setError(null);
     setRestored(null);
-    if (!file || !password) {
-      setError('Choose the encrypted credential export and enter its password.');
+    if (!file || (legacy && !password)) {
+      setError('Choose your recovery file. Legacy encrypted exports also require their original password.');
       return;
     }
     setBusy(true);
@@ -26,10 +27,10 @@ export function RecoverCredentialForm() {
         && 'kind' in parsed
         && parsed.kind === 'recovery-capsule';
       const { credential, activated } = isRecoveryCapsule
-        ? await restoreCapsuleFromFunding(parsed, password)
-        : await importCredentialFile(parsed, password);
+        ? await restoreCapsuleFromFunding(parsed, legacy ? password : undefined)
+        : await importCredentialFile(parsed, legacy ? password : undefined);
       setRestored({
-        version: activated ? 2 : 1,
+        version: activated ? activated.version : 1,
         tierId: credential.tierId,
         expiry: credential.expiry,
         deploymentDomain: credential.deploymentDomain,
@@ -44,29 +45,31 @@ export function RecoverCredentialForm() {
   return (
     <section className="mx-auto w-full max-w-xl rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 shadow-2xl shadow-black/20">
       <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Local recovery</p>
-      <h1 className="mt-3 text-3xl font-bold tracking-tight text-white">Restore an encrypted credential</h1>
+      <h1 className="mt-3 text-3xl font-bold tracking-tight text-white">Restore your credential</h1>
       <p className="mt-3 text-sm leading-6 text-zinc-400">
-        Version-2 recovery capsules, activated credentials, and legacy
-        version-1 exports are accepted. Capsules are decrypted here, then
-        their derived commitment is used only to look up an existing funded
-        bundle. The capsule and password are never uploaded, and recovery never
-        starts funding.
+        Passwordless recovery files and activated credentials are verified locally.
+        Anyone possessing these files can spend their credits. Legacy encrypted
+        exports are supported through the legacy import option below. The file
+        and secret are never uploaded; recovery never starts funding.
       </p>
       <p className="mt-3 text-xs leading-5 text-zinc-500">
         Invite-only, experimental Base Sepolia pilot. The circuit is
         not independently audited, there is no payment step, and recovery
         never uploads your export, password, or credential.
       </p>
-      <label htmlFor="credential-file" className="mt-8 block text-sm font-medium text-zinc-200">Encrypted export</label>
+      <label htmlFor="credential-file" className="mt-8 block text-sm font-medium text-zinc-200">Recovery or activated credential file</label>
       <input id="credential-file" type="file" accept="application/json,.json" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="mt-2 block min-h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" />
+      <label className="mt-5 flex min-h-11 items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={legacy} onChange={(event) => setLegacy(event.target.checked)} className="focus-visible:ring-2 focus-visible:ring-cyan-300" />Import a legacy encrypted export</label>
+      {legacy && <>
       <label htmlFor="recovery-password" className="mt-5 block text-sm font-medium text-zinc-200">Backup password</label>
       <input id="recovery-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" />
+      </>}
       {error && <p role="alert" className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200">{error}</p>}
       {restored && (
         <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/5 p-3 text-sm text-emerald-100">
           <p>Credential restored locally.</p>
           <p className="mt-1 text-emerald-200/80">
-            {restored.version === 2 ? 'Activated credential' : 'Legacy version-1 export'} · tier {restored.tierId}
+            {restored.version >= 2 ? 'Activated credential' : 'Legacy version-1 export'} · tier {restored.tierId}
             {restored.tierId === 0 ? ` (${PILOT_TIER_ALLOWANCE} private calls)` : ''} · expires {formatDate(restored.expiry)} · domain {restored.deploymentDomain}
           </p>
           <Link href="/dashboard" className="mt-3 inline-flex text-sm underline underline-offset-4">Return to dashboard</Link>

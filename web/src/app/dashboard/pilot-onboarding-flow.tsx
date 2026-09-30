@@ -52,8 +52,6 @@ function errorMessage(cause: unknown, fallback: string): string {
 export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: NetworkStatus | null; gatewayBaseUrl: string }) {
   const [step, setStep] = useState<Step>(() => 'invite');
   const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmation, setConfirmation] = useState('');
   const [capsule, setCapsule] = useState<RecoveryCapsuleFile | null>(null);
   const [commitment, setCommitment] = useState<string | null>(null);
   const [activation, setActivation] = useState<Activation | null>(null);
@@ -86,17 +84,9 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
 
   const generateCapsule = useCallback(async () => {
     setError(null);
-    if (password.length < 12) {
-      setError('Choose a backup password of at least 12 characters.');
-      return;
-    }
-    if (password !== confirmation) {
-      setError('The backup password and confirmation do not match.');
-      return;
-    }
     setBusy(true);
     try {
-      const generated = await createRecoveryCapsule(password);
+      const generated = await createRecoveryCapsule();
       downloadRecoveryCapsule(generated.file, generated.commitment);
       savePendingCapsule(generated.file);
       setCapsule(generated.file);
@@ -107,7 +97,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
     } finally {
       setBusy(false);
     }
-  }, [password, confirmation]);
+  }, []);
 
   const reimportCapsule = useCallback(async (file: File | null) => {
     setError(null);
@@ -119,15 +109,15 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
     setBusy(true);
     try {
       const parsed = JSON.parse(await file.text()) as RecoveryCapsuleFile;
-      await confirmRecoveryCapsule(parsed, password, commitment);
-      setNotice('Backup verified locally. The capsule decrypts to the same credential.');
+      await confirmRecoveryCapsule(parsed, undefined, commitment);
+      setNotice('Backup verified locally. The file contains the same credential.');
       setStep('fund');
     } catch (cause) {
       setError(errorMessage(cause, 'That capsule could not be verified.'));
     } finally {
       setBusy(false);
     }
-  }, [capsule, commitment, password]);
+  }, [capsule, commitment]);
 
   const fund = useCallback(async () => {
     setError(null);
@@ -165,10 +155,10 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
       if (!capsuleFile) throw new Error('The local recovery capsule is missing; restore it before funding.');
       const activated = wrapWithActivation(capsuleFile, { ...metadata, commitment });
       // Local verification: the wrapped metadata must match the secret in the capsule.
-      const verified = await verifyActivatedCredential(activated, password);
+      const verified = await verifyActivatedCredential(activated);
       downloadActivatedCredential(activated);
       setCredential({
-        version: 2,
+        version: activated.version,
         tierId: verified.tierId,
         expiry: verified.expiry,
         deploymentDomain: verified.deploymentDomain,
@@ -182,7 +172,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
     } finally {
       setBusy(false);
     }
-  }, [capsule, commitment, password]);
+  }, [capsule, commitment]);
 
   const stored = useMemo(() => (typeof window === 'undefined' ? null : readLocalCredential()), []);
 
@@ -228,36 +218,12 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
           index="02"
           title="Create your local credential"
           state={step === 'invite' ? 'upcoming' : step === 'capsule' ? 'current' : 'done'}
-          description="Your browser generates the secret and encrypts only that secret into a recovery capsule. The service never receives it."
+          description="Your browser generates a passwordless recovery file locally. The service never receives its secret."
         />
         {step === 'capsule' && (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100/80">
-              Choose a backup password you will keep. Without it the capsule cannot be opened, and nobody can reset it for you.
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="capsule-password" className="block text-sm font-medium text-zinc-200">Backup password</label>
-                <input
-                  id="capsule-password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="mt-2 h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
-                />
-              </div>
-              <div>
-                <label htmlFor="capsule-password-confirmation" className="block text-sm font-medium text-zinc-200">Confirm password</label>
-                <input
-                  id="capsule-password-confirmation"
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                  className="mt-2 h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
-                />
-              </div>
+              Anyone possessing this recovery file can spend its credits. Keep it private and store a backup securely. There is no password or password reset.
             </div>
             <button
               type="button"
@@ -270,7 +236,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
           </div>
         )}
         {step !== 'capsule' && step !== 'invite' && (
-          <p className="mt-3 text-sm text-zinc-400">Recovery capsule generated and downloaded. Keep it with the password.</p>
+          <p className="mt-3 text-sm text-zinc-400">Recovery capsule generated and downloaded. Keep it private.</p>
         )}
       </section>
 
@@ -279,7 +245,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
           index="03"
           title="Re-import the capsule"
           state={step === 'backup' ? 'current' : step === 'invite' || step === 'capsule' ? 'upcoming' : 'done'}
-          description="Funding stays locked until the downloaded capsule decrypts back to the same credential in this browser."
+          description="Funding stays locked until the downloaded file contains the same credential in this browser."
         />
         {step === 'backup' && (
           <div className="mt-4 space-y-3">
@@ -291,7 +257,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
               onChange={(event) => void reimportCapsule(event.target.files?.[0] ?? null)}
               className="block min-h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
             />
-            <p className="text-xs text-zinc-500">Enter the same backup password above before choosing the file.</p>
+            <p className="text-xs text-zinc-500">Choose the file you just downloaded; verification stays in this browser.</p>
           </div>
         )}
       </section>
@@ -350,7 +316,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
             )}
           </dl>
           <p className="mt-4 text-sm text-emerald-100/70">
-            The activated credential was downloaded and verified against the secret in your capsule. Store it with the recovery capsule and password.
+            The activated credential was downloaded and verified against the secret in your capsule. Keep both files private; anyone possessing either can spend its credits.
           </p>
         </section>
       )}
@@ -359,10 +325,13 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Local setup</p>
         <h2 className="mt-2 text-lg font-semibold text-zinc-100">Let Codex prepare local setup</h2>
         <p className="mt-2 text-sm text-zinc-400">
-          The founder has granted access to the private proving-bundle repository. Give Codex the single instruction in the first-use guide:
-          it checks GitHub CLI sign-in and access, installs the pinned release, downloads and verifies the bundle, and runs setup.
-          You sign in if needed, enter your recovery password at the hidden local prompt, give consent, and choose your task.
+          Before zk-credits setup, obtain your own Base Sepolia RPC endpoint (chain ID 84532).
+          Run zk-credits config rpc to save it locally or change it later without unlocking a credential.
+          Public RPC endpoints are rate-limited. The package verifies its included proving bundle locally.
+          Setup imports your activated credential into OS secure storage; no credential password is needed.
+          Your OS may request storage access approval. Then give consent and choose your task.
         </p>
+        <a href="https://docs.base.org/base-chain/node-operators/node-providers" target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-10 items-center text-cyan-200 underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-cyan-300">Get your own Base Sepolia RPC endpoint</a>
         <a
           href={CODEX_FIRST_USE_GUIDE}
           target="_blank"

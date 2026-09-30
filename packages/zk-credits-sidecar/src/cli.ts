@@ -18,7 +18,9 @@ import { createPinnedBaseProofGenerator } from './proof-coordinator.js';
 import { createBaseProofMetrics } from './proof-metrics.js';
 import { createZkPrepaidLifecycleMetrics } from '@zk-credits/x402-zk-prepaid';
 import { BaseSlotLedger } from './slot-ledger.js';
-import { decryptAnyCredentialExport, type CreditCredential } from '@zk-credits/shared/base';
+import { type CreditCredential } from '@zk-credits/shared/base';
+import { nativeCredentialStore, importCredentialPath, readStoredCredential } from './credential-store.js';
+import { applyRpcConfig, checkBaseSepoliaRpc, writeRpcConfig, RPC_GUIDANCE } from './rpc-config.js';
 import { runCliCommand } from './cli-runtime.js';
 import { createNodeSidecarLifecycle } from './node-sidecar-lifecycle.js';
 import { activateSidecarServer } from './server-startup.js';
@@ -51,6 +53,7 @@ function setupConfigPath(directory = stateDirectory()): string {
 }
 
 async function applySavedSetupConfig(environment: NodeJS.ProcessEnv, directory = stateDirectory()): Promise<void> {
+  await applyRpcConfig(environment, directory);
   const config = await readSetupConfig(setupConfigPath(directory));
   if (config) applySetupConfig(environment, config);
 }
@@ -120,23 +123,10 @@ async function witnessProviderForSource(
   });
 }
 
-/** Reads a password written to the private stdin pipe by the foreground CLI. */
-async function readCredentialPasswordFromStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  let byteLength = 0;
-  for await (const chunk of process.stdin) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    byteLength += bytes.length;
-    if (byteLength > 4096) throw new Error('Credential password input is too long');
-    chunks.push(bytes);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-/** Reads a credential backup password from a TTY without terminal echo or shell history. */
+/** Reads a local secret value without terminal echo or shell history. */
 async function readHiddenValue(prompt: string): Promise<string> {
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
-    throw new Error('credential backup requires an interactive terminal');
+    throw new Error('Hidden input requires an interactive local terminal.');
   }
   process.stdout.write(prompt);
   process.stdin.setRawMode(true);
@@ -172,22 +162,11 @@ async function readHiddenValue(prompt: string): Promise<string> {
   });
 }
 
-/**
- * Reads a local credential export. Version-2 activated credentials and legacy
- * version-1 exports are both accepted; decryption stays in local memory.
- */
-async function readEncryptedCredential(path: string, password: string): Promise<CreditCredential> {
-  const parsed = JSON.parse(await readFile(path, 'utf8')) as { format?: unknown; version?: unknown };
-  if (parsed.format !== 'zk-credits-credential' || (parsed.version !== 1 && parsed.version !== 2)) {
-    throw new Error('Credential file is not a supported zk-credits export');
-  }
-  return decryptAnyCredentialExport(parsed, password);
-}
-
 function printHelp(): void {
   console.log(`Usage:
   zk-credits cline [cline arguments...]
-  zk-credits setup codex [--model <model>]
+  zk-credits config rpc
+  zk-credits setup [codex|x402] [--legacy] [--model <model>]
   zk-credits codex [codex arguments...]
   zk-credits status
   zk-credits serve [--port <port>] [--internal-trial-one-proof]
@@ -209,12 +188,17 @@ request-aware adapter and local proof engine; aggregate metrics stay on the
 loopback-only authenticated endpoint.
 "zk-credits serve --internal-trial-one-proof" limits this sidecar process to
 one authenticated, valid spend request and one local proof attempt.
-Set ZK_CREDITS_CREDENTIAL_PATH and BASE_RPC_URL before setup. For Base Sepolia
-V2, setup can download the immutable bundle pinned by the package manifest by
-using this machine's authenticated GitHub CLI session, then synchronizes the
-witness from the pinned public Base events and checks the resulting root with
-the gateway. It saves local paths and prompts for the credential password
-without echo; the encrypted export is decrypted only in local memory.`);
+Obtain your own Base Sepolia RPC endpoint before setup, then run
+"zk-credits config rpc". Public RPC endpoints are rate-limited.
+Provider guide: https://docs.base.org/base-chain/node-operators/node-providers
+Set ZK_CREDITS_CREDENTIAL_PATH to the activated browser download for first setup.
+The passwordless credential is imported into your OS credential store. OS access
+approval may be needed. Later restarts do not need the export or a password.
+Use --legacy only for old encrypted exports with their original password.
+The pinned proving archive is packaged, checked locally and installed without
+GitHub sign-in. Setup synchronizes the public Base witness and checks its root.
+No version of the published 0.2.8 package implements this new passwordless flow.
+`);
 }
 
 interface BaseClientRuntime {
@@ -227,11 +211,8 @@ interface BaseClientRuntime {
 }
 
 /** Loads the same credential, witness, proof, and durable ledger used by serve. */
-async function loadBaseClientRuntime(passwordInput?: string): Promise<BaseClientRuntime> {
-  const credentialPath = process.env.ZK_CREDITS_CREDENTIAL_PATH;
-  if (!credentialPath) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH to the encrypted browser export');
-  const password = passwordInput ?? await readHiddenValue('Credential backup password: ');
-  const credential = await readEncryptedCredential(credentialPath, password);
+async function loadBaseClientRuntime(): Promise<BaseClientRuntime> {
+  const credential = await readStoredCredential(nativeCredentialStore(stateDirectory()));
   const witnessPath = process.env.ZK_CREDITS_WITNESS_PATH;
   const artifactDirectory = process.env.ZK_CREDITS_ARTIFACT_DIR;
   if (!artifactDirectory) {
@@ -629,12 +610,12 @@ async function trialRegisteredAdapter(task: string): Promise<void> {
   }
 }
 
-async function serve(args: readonly string[], passwordInput?: string): Promise<void> {
+async function serve(args: readonly string[]): Promise<void> {
   const port = readPort(args);
   const internalTrialOneProof = args.includes('--internal-trial-one-proof');
   const statePaths = sidecarStatePaths(stateDirectory());
   const localToken = createLoopbackToken();
-  const { credential, witnessProvider, proofMetrics, exchangeMetrics, slotLedger, prove } = await loadBaseClientRuntime(passwordInput);
+  const { credential, witnessProvider, proofMetrics, exchangeMetrics, slotLedger, prove } = await loadBaseClientRuntime();
   const prepaid = createBasePrepaidClient({
     credential,
     witnessProvider,
@@ -679,14 +660,20 @@ async function main(): Promise<void> {
     return;
   }
   const sidecarHome = stateDirectory();
+  if (args[0] === 'config' && args[1] === 'rpc' && args.length === 2) {
+    console.log(RPC_GUIDANCE);
+    const rpc = await checkBaseSepoliaRpc(await readHiddenValue('Base Sepolia RPC URL (hidden): '));
+    await writeRpcConfig(sidecarHome, rpc);
+    console.log('Base Sepolia RPC saved with owner-only access. BASE_RPC_URL overrides this setting.');
+    console.log('A running sidecar keeps its current RPC. Stop and restart it to apply this change.');
+    return;
+  }
+
   if (args[0] !== 'setup' && args[0] !== 'status' && args[0] !== 'env') {
     await applySavedSetupConfig(process.env, sidecarHome);
   }
   if (args[0] === 'serve') {
-    const passwordFromStdin = args.includes('--credential-password-stdin')
-      ? await readCredentialPasswordFromStdin()
-      : undefined;
-    await serve(args.slice(1).filter((argument) => argument !== '--credential-password-stdin'), passwordFromStdin);
+    await serve(args.slice(1));
     return;
   }
   if (args[0] === 'founder-demo-agent') {
@@ -705,41 +692,31 @@ async function main(): Promise<void> {
   const codexHome = resolveCodexHome(process.env, homedir());
   const cliEntryPath = process.argv[1];
   if (!cliEntryPath) throw new Error('Unable to resolve the zk-credits executable path');
-  let setupCredentialPassword: string | undefined;
+  const credentialStore = nativeCredentialStore(sidecarHome);
   const lifecycle = createNodeSidecarLifecycle({
-    loopbackBaseUrl: loopbackBaseUrl(),
-    stateDirectory: sidecarHome,
-    tokenPath: statePaths.tokenPath,
-    logPath: statePaths.logPath,
-    cliEntryPath,
-    readCredentialPassword: async () => {
-      if (setupCredentialPassword !== undefined) {
-        const password = setupCredentialPassword;
-        setupCredentialPassword = undefined;
-        return password;
-      }
-      return readHiddenValue('Credential backup password: ');
-    },
+    loopbackBaseUrl: loopbackBaseUrl(), stateDirectory: sidecarHome,
+    tokenPath: statePaths.tokenPath, logPath: statePaths.logPath, cliEntryPath,
   });
   const exitCode = await runCliCommand(args, {
     loopbackBaseUrl: loopbackBaseUrl(),
     readToken: () => readLoopbackToken(statePaths.tokenPath),
     write: (line) => console.log(line),
     isCredentialConfigured: async () => {
-      const path = process.env.ZK_CREDITS_CREDENTIAL_PATH;
-      if (!path) return false;
-      try {
-        await readFile(path);
-        return true;
-      } catch {
-        return false;
-      }
+      if (process.env.ZK_CREDITS_CREDENTIAL_PATH) return true;
+      return Boolean(await credentialStore.read());
     },
     validateSetupPrerequisites: async () => {
+      await applyRpcConfig(process.env, sidecarHome);
+      const saved = await readSetupConfig(setupConfigPath(sidecarHome));
+      const rpc = process.env.BASE_RPC_URL?.trim() || (saved?.witness.kind === 'base-events' ? saved.witness.rpcUrl : undefined);
+      if (!rpc) throw new Error(RPC_GUIDANCE);
+      await checkBaseSepoliaRpc(rpc);
+      process.env.BASE_RPC_URL = rpc;
       const credentialPath = process.env.ZK_CREDITS_CREDENTIAL_PATH;
-      if (!credentialPath?.trim()) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH to the encrypted browser export');
-      const password = await readHiddenValue('Credential backup password: ');
-      const credential = await readEncryptedCredential(credentialPath, password);
+      const legacyPassword = args.includes('--legacy') ? await readHiddenValue('Legacy export password: ') : undefined;
+      const credential = credentialPath
+        ? await importCredentialPath(credentialPath, credentialStore, legacyPassword)
+        : await readStoredCredential(credentialStore);
       const manifest = await loadCircuitManifest();
       const config = await resolveSetupInputs({
         environment: process.env,
@@ -769,7 +746,7 @@ async function main(): Promise<void> {
       }
       await writeSetupConfig(setupConfigPath(sidecarHome), config);
       applySetupConfig(process.env, config);
-      setupCredentialPassword = password;
+
       console.log('Pinned proving bundle and witness validated for this activated credential.');
       console.log('Local setup paths saved to ' + setupConfigPath(sidecarHome));
     },

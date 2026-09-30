@@ -457,7 +457,7 @@ export interface RecoveryCapsulePayload {
   secret: string;
 }
 
-export interface RecoveryCapsule {
+export interface EncryptedRecoveryCapsule {
   version: typeof RECOVERY_CAPSULE_VERSION;
   algorithm: 'PBKDF2-AES-GCM';
   salt: string;
@@ -465,10 +465,19 @@ export interface RecoveryCapsule {
   ciphertext: string;
 }
 
+/** Passwordless bearer recovery: possession permits spending. */
+export interface PasswordlessRecoveryCapsule {
+  version: 3;
+  algorithm: 'plaintext';
+  secret: string;
+}
+
+export type RecoveryCapsule = EncryptedRecoveryCapsule | PasswordlessRecoveryCapsule;
+
 /** Locally generated, downloaded, and re-imported before funding. */
 export interface RecoveryCapsuleFile {
   format: typeof CREDENTIAL_EXPORT_FORMAT;
-  version: typeof RECOVERY_CAPSULE_VERSION;
+  version: 2 | 3;
   kind: 'recovery-capsule';
   capsule: RecoveryCapsule;
 }
@@ -487,7 +496,7 @@ export interface ActivatedCredentialMetadata {
 /** The same encrypted capsule wrapped with authoritative funding metadata. */
 export interface ActivatedCredentialFile {
   format: typeof CREDENTIAL_EXPORT_FORMAT;
-  version: typeof RECOVERY_CAPSULE_VERSION;
+  version: 2 | 3;
   kind: 'activated-credential';
   capsule: RecoveryCapsule;
   activation: ActivatedCredentialMetadata;
@@ -523,8 +532,10 @@ function validateActivationMetadata(activation: Partial<ActivatedCredentialMetad
   };
 }
 
-export async function createRecoveryCapsule(secret: Uint8Array, password: string): Promise<RecoveryCapsule> {
+export async function createRecoveryCapsule(secret: Uint8Array, password?: string): Promise<RecoveryCapsule> {
   const encoded = secretToBase64Url(secretFromBase64Url(secretToBase64Url(secret)));
+  if (secretToField(secret) === '0') throw new Error('Credential secret must not be zero');
+  if (password === undefined) return { version: 3, algorithm: 'plaintext', secret: encoded };
   const payload: RecoveryCapsulePayload = { version: RECOVERY_CAPSULE_VERSION, secret: encoded };
   const encrypted = await encryptExportPayload(payload, password, RECOVERY_CAPSULE_VERSION);
   return {
@@ -536,19 +547,24 @@ export async function createRecoveryCapsule(secret: Uint8Array, password: string
   };
 }
 
-export async function createRecoveryCapsuleFile(secret: Uint8Array, password: string): Promise<RecoveryCapsuleFile> {
+export async function createRecoveryCapsuleFile(secret: Uint8Array, password?: string): Promise<RecoveryCapsuleFile> {
   return {
     format: CREDENTIAL_EXPORT_FORMAT,
-    version: RECOVERY_CAPSULE_VERSION,
+    version: password === undefined ? 3 : RECOVERY_CAPSULE_VERSION,
     kind: 'recovery-capsule',
     capsule: await createRecoveryCapsule(secret, password),
   };
 }
 
 /** Opens a capsule locally. The decrypted secret never leaves the caller. */
-export async function openRecoveryCapsule(capsule: RecoveryCapsule, password: string): Promise<Uint8Array> {
+export async function openRecoveryCapsule(capsule: RecoveryCapsule, password?: string): Promise<Uint8Array> {
+  if (capsule?.version === 3 && capsule.algorithm === 'plaintext') {
+    const secret = secretFromBase64Url(capsule.secret);
+    if (secretToField(secret) === '0') throw new Error('Credential secret must not be zero');
+    return secret;
+  }
   if (!capsule || capsule.algorithm !== 'PBKDF2-AES-GCM') throw new Error('Unsupported credential export');
-  const payload = await decryptExportPayload(capsule, password, RECOVERY_CAPSULE_VERSION) as Partial<RecoveryCapsulePayload>;
+  const payload = await decryptExportPayload(capsule, password ?? '', RECOVERY_CAPSULE_VERSION) as Partial<RecoveryCapsulePayload>;
   if (!payload || payload.version !== RECOVERY_CAPSULE_VERSION || typeof payload.secret !== 'string') {
     throw new Error('Recovery capsule is malformed');
   }
@@ -560,12 +576,13 @@ export async function openRecoveryCapsule(capsule: RecoveryCapsule, password: st
 /** Pre-funding re-import check: the capsule decrypts and still yields the same commitment. */
 export async function verifyRecoveryCapsule(
   file: RecoveryCapsuleFile,
-  password: string,
+  password?: string,
 ): Promise<{ secret: Uint8Array; commitment: string }> {
   if (
     !file
     || file.format !== CREDENTIAL_EXPORT_FORMAT
-    || file.version !== RECOVERY_CAPSULE_VERSION
+    || (file.version !== 2 && file.version !== 3)
+    || file.capsule?.version !== file.version
     || file.kind !== 'recovery-capsule'
   ) {
     throw new Error('Unsupported credential export');
@@ -579,12 +596,12 @@ export function wrapActivatedCredential(
   capsule: RecoveryCapsule,
   activation: ActivatedCredentialMetadata,
 ): ActivatedCredentialFile {
-  if (!capsule || capsule.version !== RECOVERY_CAPSULE_VERSION || capsule.algorithm !== 'PBKDF2-AES-GCM') {
+  if (!capsule || !((capsule.version === 2 && capsule.algorithm === 'PBKDF2-AES-GCM') || (capsule.version === 3 && capsule.algorithm === 'plaintext'))) {
     throw new Error('Unsupported credential export');
   }
   return {
     format: CREDENTIAL_EXPORT_FORMAT,
-    version: RECOVERY_CAPSULE_VERSION,
+    version: capsule.version,
     kind: 'activated-credential',
     capsule,
     activation: validateActivationMetadata(activation),
@@ -594,12 +611,13 @@ export function wrapActivatedCredential(
 /** Verifies the activated credential locally against the secret it wraps. */
 export async function verifyActivatedCredential(
   file: ActivatedCredentialFile,
-  password: string,
+  password?: string,
 ): Promise<CreditCredential> {
   if (
     !file
     || file.format !== CREDENTIAL_EXPORT_FORMAT
-    || file.version !== RECOVERY_CAPSULE_VERSION
+    || (file.version !== 2 && file.version !== 3)
+    || file.capsule?.version !== file.version
     || file.kind !== 'activated-credential'
   ) {
     throw new Error('Unsupported credential export');
@@ -619,14 +637,14 @@ export async function verifyActivatedCredential(
 }
 
 /** Accepts both the version-2 activated credential and the legacy version-1 export. */
-export async function decryptAnyCredentialExport(file: unknown, password: string): Promise<CreditCredential> {
+export async function decryptAnyCredentialExport(file: unknown, password?: string): Promise<CreditCredential> {
   const candidate = (file ?? {}) as { format?: unknown; version?: unknown; encrypted?: unknown };
   if (candidate.format !== CREDENTIAL_EXPORT_FORMAT) throw new Error('Unsupported credential export');
-  if (candidate.version === RECOVERY_CAPSULE_VERSION) {
+  if (candidate.version === RECOVERY_CAPSULE_VERSION || candidate.version === 3) {
     return verifyActivatedCredential(file as ActivatedCredentialFile, password);
   }
   if (candidate.version === CREDENTIAL_VERSION && candidate.encrypted && typeof candidate.encrypted === 'object') {
-    return decryptCredentialExport(candidate.encrypted as EncryptedCredentialExport, password);
+    return decryptCredentialExport(candidate.encrypted as EncryptedCredentialExport, password ?? '');
   }
   throw new Error('Unsupported credential export');
 }

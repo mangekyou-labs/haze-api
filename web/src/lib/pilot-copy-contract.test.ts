@@ -104,19 +104,22 @@ describe('pilot copy contract', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('gives new users the single Codex setup guide, local requirements, gateway, and password prompt', () => {
+  it('gives new users the single Codex setup guide, local requirements, gateway, and passwordless storage', () => {
     const onboarding = read('web/src/app/dashboard/pilot-onboarding-flow.tsx');
     const dashboard = read('web/src/app/dashboard/page.tsx');
     const guide = read('docs/onboarding/base-zk-credits-codex-first-use.md');
     expect(onboarding).toContain('one-instruction Codex guide');
-    expect(guide).toContain('zk-credits@0.2.7');
-    expect(guide).toContain('gh auth status');
+    expect(guide).toContain('zk-credits@0.2.8');
+    expect(guide).toContain('does **not** implement');
+    expect(guide).toContain('zk-credits config rpc');
     expect(guide).toContain('zk-credits setup codex');
     expect(guide).toContain('30-minute session');
     expect(dashboard).toContain('https://zk-credits-gateway.onrender.com');
     expect(guide).toContain('synchronized the public Base witness');
     expect(guide).not.toContain('ZK_CREDITS_WITNESS_PATH');
-    expect(guide).toMatch(/password.{0,90}hidden local prompt/iu);
+    expect(guide).toContain('no credential password is needed');
+    expect(onboarding).not.toContain('type="password"');
+    expect(guide).toContain('your own Base Sepolia RPC endpoint');
     expect(guide).not.toContain('ZK_CREDITS_CREDENTIAL_PASSWORD');
     expect(dashboard).not.toContain('your-gateway.example');
   });

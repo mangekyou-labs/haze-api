@@ -301,18 +301,20 @@ capability expires.
 
 ## Recovery capsule
 
-The version-2 local export produced before funding. It encrypts only the
-locally generated secret with a password (PBKDF2-AES-GCM) and is downloaded
-and re-imported by the participant before any funding is attempted. The
-service never receives the capsule, its password, or its plaintext.
-_Avoid_: backup file, mnemonic, seed phrase
+The local export produced before funding. New onboarding uses a version-3
+passwordless bearer file: anyone possessing it can spend the credits. The
+participant downloads and re-imports it before funding. It stays local and is
+not persisted in browser storage. Version-2 password-encrypted capsules remain
+readable through explicit legacy import.
+_Avoid_: mnemonic, seed phrase
 
 ## Activated credential
 
-The same encrypted recovery capsule wrapped with the gateway's authoritative
-tier, expiry, deployment domain, and contract metadata after funding. The
-participant downloads it and verifies it locally against the secret in the
-capsule. Version-1 exports remain readable as legacy activated credentials.
+The same recovery capsule wrapped with authoritative funding metadata after
+funding. Its commitment is recomputed locally. Version-3 files are imported
+into native OS credential storage for runtime use without a password. The OS
+may request access approval. Unavailable storage fails without a plaintext
+runtime fallback. Version-1 and version-2 encrypted exports remain legacy paths.
 _Avoid_: funded key, issued key, receipt
 
 ## Control plane

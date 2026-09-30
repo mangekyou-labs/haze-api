@@ -38,6 +38,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
+    "@napi-rs/keyring": "2.1.0",
     "@x402/core": "^2.26.0",
     "@zk-credits/shared": "0.1.0",
     "@zk-credits/x402-zk-prepaid": "0.1.0",

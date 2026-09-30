@@ -8,7 +8,9 @@ const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputPath = resolve(packageDirectory, 'dist/zk-credits.js');
 const entryPoint = resolve(packageDirectory, 'dist/cli.js');
 const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
-const runtimeExternalPackages = ['@napi-rs/keyring', '@x402/core', '@zk-credits/shared', '@zk-credits/x402-zk-prepaid', 'snarkjs'];
+// Ship the matching credential format implementation rather than resolving an
+// older published shared package at runtime.
+const runtimeExternalPackages = ['@napi-rs/keyring', '@x402/core', '@zk-credits/x402-zk-prepaid', 'snarkjs'];
 
 function isRuntimeExternal(path) {
   return runtimeExternalPackages.some((packageName) => (
@@ -58,3 +60,22 @@ await build({
 });
 
 await chmod(outputPath, 0o755);
+
+// Library consumers need the same passwordless runtime as the CLI.
+for (const name of ['local-x402-agent', 'codex-sdk-options']) {
+  await build({
+    absWorkingDir: packageDirectory,
+    entryPoints: [resolve(packageDirectory, `dist/${name}.js`)],
+    outfile: resolve(packageDirectory, `dist/${name}.js`),
+    allowOverwrite: true,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    banner: { js: "import { createRequire as __createNodeRequire } from 'node:module'; const require = __createNodeRequire(import.meta.url);" },
+    external: runtimeExternalPackages.flatMap((packageName) => [packageName, `${packageName}/*`]),
+    plugins: [resolveBareImportsWithoutPnp],
+    legalComments: 'external',
+    logLevel: 'warning',
+  });
+}

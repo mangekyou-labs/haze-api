@@ -14,10 +14,11 @@ export interface CliCommandDependencies {
   launchCline(args: readonly string[], localToken: string): Promise<number>;
 }
 function setupModel(args: readonly string[]): string | undefined {
-  if (args[1] !== 'codex') throw new Error('Usage: zk-credits setup codex [--model <model>]');
-  if (args.length === 2) return undefined;
-  if (args.length === 4 && args[2] === '--model' && args[3]?.trim()) return args[3];
-  throw new Error('Usage: zk-credits setup codex [--model <model>]');
+  const options = args.slice(1).filter((arg) => arg !== '--legacy');
+  if (options[0] === 'codex' || options[0] === 'x402') options.shift();
+  if (options.length === 0) return undefined;
+  if (options.length === 2 && options[0] === '--model' && options[1]?.trim()) return options[1];
+  throw new Error('Usage: zk-credits setup [codex|x402] [--legacy] [--model <model>]');
 }
 
 /** Handles the non-server CLI commands independently from terminal I/O. */
@@ -37,6 +38,10 @@ export async function runCliCommand(
       const model = setupModel(args);
       if (!await dependencies.isCredentialConfigured()) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH before running zk-credits setup');
       await dependencies.validateSetupPrerequisites();
+      if (args[1] === 'x402') {
+        dependencies.write('ZK Credits is ready. Run: zk-credits x402-agent');
+        return 0;
+      }
       await dependencies.ensureSidecar();
       await dependencies.configureCodex(model);
       dependencies.write('ZK Credits is ready for Codex.');

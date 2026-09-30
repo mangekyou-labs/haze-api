@@ -50,7 +50,7 @@ export function downloadActivatedCredential(file: ActivatedCredentialFile): void
 }
 
 /** Generates the secret locally and encrypts only that secret in the capsule. */
-export async function createRecoveryCapsule(password: string): Promise<{ file: RecoveryCapsuleFile; commitment: string }> {
+export async function createRecoveryCapsule(password?: string): Promise<{ file: RecoveryCapsuleFile; commitment: string }> {
   const secret = generateSecret();
   const commitment = await computeCommitment(secret);
   return { file: await createRecoveryCapsuleFile(secret, password), commitment };
@@ -59,7 +59,7 @@ export async function createRecoveryCapsule(password: string): Promise<{ file: R
 /** Pre-funding re-import: the downloaded capsule must decrypt to the same commitment. */
 export async function confirmRecoveryCapsule(
   file: RecoveryCapsuleFile,
-  password: string,
+  password: string | undefined,
   expectedCommitment: string,
 ): Promise<string> {
   const reopened = await verifyRecoveryCapsule(file, password);
@@ -85,6 +85,7 @@ export function wrapWithActivation(
 }
 
 export function savePendingCapsule(file: RecoveryCapsuleFile): void {
+  if (file.version === 3) return; // Never persist bearer secrets in browser storage.
   localStorage.setItem(PENDING_CAPSULE_KEY, JSON.stringify(file));
 }
 
@@ -120,7 +121,7 @@ export function clearFundingToken(): void {
 }
 
 export interface LocalCredentialMetadata {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   tierId: number;
   expiry: number;
   deploymentDomain: string;
@@ -130,6 +131,7 @@ export interface LocalCredentialMetadata {
 }
 
 export function saveLocalCredential(metadata: LocalCredentialMetadata): void {
+  if (metadata.version === 3) return;
   localStorage.setItem(LOCAL_CREDENTIAL_KEY, JSON.stringify(metadata));
 }
 
@@ -160,14 +162,14 @@ export function readLocalCredential(): LocalCredentialMetadata | null {
  */
 export async function importCredentialFile(
   parsed: unknown,
-  password: string,
+  password: string | undefined,
 ): Promise<{ credential: CreditCredential; activated: ActivatedCredentialFile | null }> {
   const credential = await decryptAnyCredentialExport(parsed, password);
   const activated = (parsed as ActivatedCredentialFile)?.kind === 'activated-credential'
     ? parsed as ActivatedCredentialFile
     : null;
   saveLocalCredential({
-    version: activated ? 2 : 1,
+    version: activated ? activated.version : 1,
     tierId: credential.tierId,
     expiry: credential.expiry,
     deploymentDomain: credential.deploymentDomain,
@@ -184,7 +186,7 @@ export async function importCredentialFile(
  */
 export async function restoreCapsuleFromFunding(
   parsed: unknown,
-  password: string,
+  password: string | undefined,
 ): Promise<{ credential: CreditCredential; activated: ActivatedCredentialFile }> {
   const capsuleFile = parsed as RecoveryCapsuleFile;
   const recovered = await verifyRecoveryCapsule(capsuleFile, password);
@@ -217,7 +219,7 @@ export async function restoreCapsuleFromFunding(
   const activated = wrapActivatedCredential(capsuleFile.capsule, activation);
   const credential = await verifyActivatedCredential(activated, password);
   saveLocalCredential({
-    version: 2,
+    version: activated.version,
     tierId: credential.tierId,
     expiry: credential.expiry,
     deploymentDomain: credential.deploymentDomain,

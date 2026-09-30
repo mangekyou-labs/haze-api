@@ -19,6 +19,15 @@ function dependencies(overrides: Partial<CliCommandDependencies> = {}): CliComma
 }
 
 describe('CLI commands', () => {
+  it('prepares x402 without occupying the agent port with the Codex sidecar', async () => {
+    const ensureSidecar = vi.fn();
+    const configureCodex = vi.fn();
+    const validateSetupPrerequisites = vi.fn(async () => undefined);
+    await runCliCommand(['setup', 'x402'], dependencies({ ensureSidecar, configureCodex, validateSetupPrerequisites }));
+    expect(validateSetupPrerequisites).toHaveBeenCalledOnce();
+    expect(ensureSidecar).not.toHaveBeenCalled();
+    expect(configureCodex).not.toHaveBeenCalled();
+  });
   it('emits local OpenAI environment variables without exposing credential material', async () => {
     const write = vi.fn();
     await runCliCommand(['env'], dependencies({ write }));

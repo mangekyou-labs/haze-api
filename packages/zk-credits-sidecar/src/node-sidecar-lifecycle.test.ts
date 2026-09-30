@@ -54,7 +54,6 @@ describe('Node sidecar lifecycle adapter', () => {
       tokenPath: '/private/zk-state/loopback-token',
       logPath: '/private/zk-state/sidecar.log',
       cliEntryPath: '/opt/zk-credits/dist/cli.js',
-      readCredentialPassword: async () => password,
     }, {
       fetchHealth: async () => new Response(null, { status: 503 }),
       startDetachedProcess,
@@ -66,18 +65,18 @@ describe('Node sidecar lifecycle adapter', () => {
     const specification = startDetachedProcess.mock.calls[0]?.[0];
     expect(specification?.executable).toBe(process.execPath);
     expect(specification?.args).toEqual([
-      '/opt/zk-credits/dist/cli.js', 'serve', '--port', '4567', '--credential-password-stdin',
+      '/opt/zk-credits/dist/cli.js', 'serve', '--port', '4567',
     ]);
     expect(specification?.env).toMatchObject({
       ZK_CREDITS_HOME: '/private/zk-state',
       ZK_CREDITS_SIDECAR_PORT: '4567',
     });
-    expect(specification?.stdin).toBe(password);
+    expect(specification?.stdin).toBeUndefined();
     expect(specification?.logPath).toBe('/private/zk-state/sidecar.log');
     const childEnvironment = specification?.env;
     expect(childEnvironment).not.toHaveProperty('ZK_CREDITS_CREDENTIAL_PASSWORD');
     expect(childEnvironment).not.toHaveProperty('ORACLE_WALLET');
-    expect(specification?.stdin).toBe(password);
+    expect(specification?.stdin).toBeUndefined();
   });
 
   it('rejects a different process that happens to return HTTP 200', async () => {

@@ -1,4 +1,4 @@
-/** Authenticated, immutable-release acquisition for local proving material. */
+/** Verified packaged acquisition for local proving material. */
 
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile as nodeExecFile } from 'node:child_process';
@@ -13,6 +13,7 @@ import {
   rename,
   rm,
 } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import type { CircuitManifest, PinnedArtifactRelease } from './artifact-bundle.js';
 import { resolvePinnedArtifactBundle } from './artifact-bundle.js';
@@ -29,6 +30,7 @@ export interface AcquirePinnedBundleOptions {
   manifest: CircuitManifest;
   targetDirectory: string;
   runGithubCommand?: GithubCommand;
+  archivePath?: string;
 }
 
 function digest(bytes: Uint8Array): string {
@@ -193,7 +195,7 @@ async function replaceDirectoryAtomically(stage: string, target: string): Promis
   }
 }
 
-/** Fetches a pinned private GitHub release and atomically installs its safe USTAR bundle. */
+/** Installs the packaged pinned archive; explicit legacy callers may acquire it via GitHub. */
 export async function acquirePinnedArtifactBundle(options: AcquirePinnedBundleOptions): Promise<string> {
   const release = options.manifest.release;
   if (!release) throw new Error('This sidecar manifest has no pinned artifact release');
@@ -206,15 +208,15 @@ export async function acquirePinnedArtifactBundle(options: AcquirePinnedBundleOp
     await mkdir(parent, { recursive: true, mode: 0o700 });
     await mkdir(tempDirectory, { recursive: false, mode: 0o700 });
     await mkdir(stage, { recursive: false, mode: 0o700 });
-    const releaseJson = await command(['api', `repos/${release.repository}/releases/${release.releaseId}`]);
-    pinnedAsset(release, releaseJson);
-    await command([
-      'release', 'download', release.tag,
-      '--repo', release.repository,
-      '--dir', tempDirectory,
-      '--pattern', release.assetName,
-    ]);
-    const archivePath = join(tempDirectory, release.assetName);
+    let archivePath = options.archivePath ?? fileURLToPath(new URL('../circuits/' + release.assetName, import.meta.url));
+    if (options.runGithubCommand) {
+      // Explicit legacy/test acquisition. Normal operator setup is packaged.
+      const releaseJson = await command(['api', `repos/${release.repository}/releases/${release.releaseId}`]);
+      pinnedAsset(release, releaseJson);
+      await command(['release', 'download', release.tag, '--repo', release.repository,
+        '--dir', tempDirectory, '--pattern', release.assetName]);
+      archivePath = join(tempDirectory, release.assetName);
+    }
     const archiveInfo = await lstat(archivePath);
     if (archiveInfo.isSymbolicLink() || !archiveInfo.isFile() || archiveInfo.size > MAX_COMPRESSED_BYTES) {
       throw new Error('Pinned proving bundle archive is missing or too large');
@@ -234,7 +236,7 @@ export async function acquirePinnedArtifactBundle(options: AcquirePinnedBundleOp
     return resolve(options.targetDirectory);
   } catch (error) {
     if (error instanceof Error && /^(Pinned proving|This sidecar manifest|Local proving bundle)/u.test(error.message)) throw error;
-    throw new Error('Pinned proving bundle acquisition failed; verify gh access and the published release pin.');
+    throw new Error('Pinned proving bundle acquisition failed; reinstall the package containing its pinned archive.');
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
     await rm(stage, { recursive: true, force: true });
