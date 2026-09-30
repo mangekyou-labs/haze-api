@@ -94,3 +94,15 @@ proofs or dispatch errors. This was successful recovery with retries, not a
 zero-friction first-use measurement. Metrics remained authenticated (401/200).
 Package publication is still handed to the owner; no publication was performed
 by this agent. Registry 0.2.9 already existed, so this RPC revision is 0.2.10.
+
+## Owner-approved acceptance amendment (2026-09-30)
+
+The owner subsequently authorized this agent as the delegated operator and
+approved changing acceptance criteria. The completed run satisfies delegated
+technical acceptance for issue 29. Historical descriptions above reflect the
+criteria at the time of each run. Independent human participation, human consent
+interview, self-chosen human task and active-human setup time were not observed
+and are no longer closure gates for the implementation ticket. External pilot
+activation and market evidence remain outstanding in their dedicated tickets.
+No historical run is relabeled independent external adoption. Publication
+remains the separate owner handoff for 0.2.10.

@@ -156,8 +156,8 @@ separately measured x402 run after A qualifies; it is not the grant demo.
 - Install the pinned release with its packaged proving bundle. The human signs
   in, saves and reimports the passwordless recovery capsule, gives consent, and
   chooses the task. Activated credentials enter OS secure storage. Base Sepolia
-  uses the public RPC by default; a private local override is optional until
-  provider limits require it.
+  uses the launch RPC baked into the reviewed package by default; local overrides
+  remain available when needed.
 - Prepare and review a version-matched package candidate, then verify clean
   registry installs before invitations. Publishing and hosted launch remain
   behind the founder authorization ticket.
@@ -182,3 +182,20 @@ separately measured x402 run after A qualifies; it is not the grant demo.
 - [x402 operator first use: own agent and request-aware adapter](https://github.com/mangekyou-labs/haze-api/issues/30): passwordless OS-store launch, fresh package install, real Base Sepolia exchange, authenticated aggregate metrics, and generic-client rejection validated. See [technical evidence](../../evidence/issue-30-x402-passwordless-validation.md).
 
 - [Founder x402 demo kit and safe recording wizard](https://github.com/mangekyou-labs/haze-api/issues/33): reviewed-candidate walkthrough and bounded internal records keep the demo separate from fresh post-A slot B; official investment-route check is linked in the ticket resolution.
+
+## Delegated Codex acceptance (2026-09-30)
+
+The owner authorized a delegated agent operator to complete issue 29 technical
+acceptance while the participant is unavailable. Human consent interviews,
+self-chosen human tasks and active-human setup timing are not gates for that
+implementation ticket. Record these as unmeasured, not successful. Independent
+A/C adoption, payment intent and the 14-day cohort remain in their pilot tickets;
+this delegated run does not start that window.
+
+Issue 29's website-to-Codex technical journey is validated. Passwordless recovery,
+OS-store restart, packaged proving artifacts, witness/root checks and committed
+Codex requests passed. Prepared 0.2.10 also passed using the baked launch RPC;
+fresh-state credential reuse required four claim-conflict recoveries. See
+[technical evidence](../../evidence/issue-29-live-browser-onboarding.md) and
+[owner publication handoff](../../releases/zk-credits-0.2.10.md). Publication is
+separate from implementation completion and remains with the owner.
