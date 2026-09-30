@@ -51,7 +51,7 @@ ledger: setup and every subsequent spend must share the same `ZK_CREDITS_HOME`.
 
 The candidate verifies packaged proving artifacts, synchronizes the public
 Base witness, and checks the gateway-known root. No private proving-repository
-access is needed. If the default public RPC is rate-limited, configure an
+access is needed. If the default launch RPC is rate-limited, configure an
 owner-only override with `./node_modules/.bin/zk-credits config rpc`; never copy
 endpoint keys into evidence. Keep any gateway override a plain HTTPS origin.
 

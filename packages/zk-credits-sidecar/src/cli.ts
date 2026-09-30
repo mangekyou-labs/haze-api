@@ -188,7 +188,7 @@ request-aware adapter and local proof engine; aggregate metrics stay on the
 loopback-only authenticated endpoint.
 "zk-credits serve --internal-trial-one-proof" limits this sidecar process to
 one authenticated, valid spend request and one local proof attempt.
-Base Sepolia uses https://sepolia.base.org automatically. Public RPC endpoints
+Base Sepolia uses the launch endpoint baked into the package automatically. RPC endpoints
 are rate-limited; run "zk-credits config rpc" to use your own endpoint.
 Provider guide: https://docs.base.org/base-chain/node-operators/node-providers
 Set ZK_CREDITS_CREDENTIAL_PATH to the activated browser download for first setup.

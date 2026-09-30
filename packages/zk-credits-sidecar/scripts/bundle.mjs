@@ -1,10 +1,24 @@
-import { chmod } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { builtinModules, createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { parseEnv } from 'node:util';
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
+// Read only the launch RPC; never copy the remaining launch environment.
+const launchEnvironment = parseEnv(await readFile(resolve(packageDirectory, '../../.env.launch.local'), 'utf8'));
+const releaseRpc = launchEnvironment.BASE_RPC_URL?.trim();
+if (!releaseRpc) throw new Error('BASE_RPC_URL is required in .env.launch.local to build zk-credits.');
+let parsedRpc;
+try { parsedRpc = new URL(releaseRpc); } catch { throw new Error('Release RPC must be an HTTP(S) URL.'); }
+if (!['https:', 'http:'].includes(parsedRpc.protocol) || parsedRpc.hash) throw new Error('Release RPC must be an HTTP(S) URL without a fragment.');
+const rpcModulePath = resolve(packageDirectory, 'dist/rpc-config.js');
+const rpcModule = await readFile(rpcModulePath, 'utf8');
+const defaultDeclaration = "export const DEFAULT_BASE_SEPOLIA_RPC_URL = '__ZK_CREDITS_RELEASE_RPC_URL__';";
+if (!rpcModule.includes(defaultDeclaration)) throw new Error('Release RPC placeholder is missing.');
+await writeFile(rpcModulePath, rpcModule.replace(defaultDeclaration, `export const DEFAULT_BASE_SEPOLIA_RPC_URL = ${JSON.stringify(releaseRpc)};`));
+
 const outputPath = resolve(packageDirectory, 'dist/zk-credits.js');
 const entryPoint = resolve(packageDirectory, 'dist/cli.js');
 const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));

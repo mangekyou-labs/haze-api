@@ -1,0 +1,30 @@
+# zk-credits 0.2.10 publication handover
+
+Prepared, not published. Registry latest is 0.2.9.
+
+This revision replaces the public RPC default with BASE_RPC_URL read from repository
+.env.launch.local at build time. Only that value is baked into the runtime module
+and bundled package. Runtime environment and saved overrides retain precedence.
+Any provider key in the endpoint is readable by package installers. The endpoint
+is intentionally included as requested; it is omitted from source control and
+this handoff. Builds require the launch file; CI supplies a synthetic endpoint.
+
+Build/typecheck and 108 sidecar tests passed. Baked runtime and CLI values match
+the launch setting. The prior live Codex run completed two settled requests with
+zero failures, using a saved alternate RPC. The baked endpoint’s live readiness
+has not been established. See [acceptance evidence](../evidence/issue-29-live-browser-onboarding.md).
+
+Artifact SHA-256: `4ffb8a0e49d48656d56015b02c98039d3adb8e3d7b54175fc37825e28f173e85`.
+Registry integrity: `sha512-NawqvZHncroGKPIU9i9/P5g+gWn9xBxjldvYM+Q+aIbteViegwzi/+X5P9+zvMF7Pg+Of2V0SEcsIZHnhO1Xdw==`.
+
+Publish this prepared tarball:
+
+```sh
+cd /Users/kyler/repos/feature-zk-api-credits/output/releases/zk-credits-0.2.10
+shasum -a 256 -c SHA256SUMS
+npm publish ./zk-credits-0.2.10.tgz --access public --tag latest --registry https://registry.npmjs.org
+```
+
+After publication, verify a clean registry installation and a real gateway request
+before updating participant installation instructions. Issue 29 remains open for
+independent participant evidence.

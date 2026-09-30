@@ -14,12 +14,11 @@ payment step.
 
 The parent PRD now requires passwordless recovery, OS credential storage,
 packaged proving artifacts, and configurable Base Sepolia RPC access. The next
-package candidate (`0.2.9`) uses https://sepolia.base.org automatically when no endpoint is configured.
+package candidate (`0.2.10`) uses the launch endpoint baked from `.env.launch.local` automatically when no endpoint is configured.
 An explicit environment endpoint or saved configuration takes precedence. Website onboarding, `zk-credits config rpc`, and packaged artifact
 delivery are tracked in **Codex developer first use: invite to first call**.
-They are not implemented by the published `zk-credits@0.2.8` package. Do not
-use that release as a fresh passwordless setup acceptance run. Publication of
-the implementation release remains an owner action.
+Published `zk-credits@0.2.9` supports passwordless setup with a public RPC default.
+The launch-baked 0.2.10 revision remains an owner publication action.
 
 In this checkout, the x402 runtime loads an activated credential from OS secure
 storage. macOS uses Keychain, Windows uses Credential Manager, and Linux requires
@@ -51,8 +50,7 @@ prompt. Later x402 launches do not ask for it. Never put the password in an
 environment variable, command argument, chat, log, or project file.
 
 The local package candidate includes the pinned proving bundle and validates
-its manifest, chain witness, and gateway root during setup. The published release
-still uses the earlier setup path. If the public RPC is rate-limited, run `zk-credits config rpc` to configure
+its manifest, chain witness, and gateway root during setup. Published 0.2.9 supports the passwordless setup path; 0.2.10 changes its RPC default. If the default RPC is rate-limited, run `zk-credits config rpc` to configure
 your own Base Sepolia endpoint locally. Keep API keys out of evidence. A fresh tarball installation passed real gateway acceptance; see
 [founder technical validation](../evidence/issue-30-x402-passwordless-validation.md).
 

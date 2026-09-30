@@ -57,3 +57,24 @@ journey issue open until its remaining acceptance requirements are satisfied.
 The older deployment status in
 [prior operator validation](../onboarding/issue-29-operator-validation.md)
 is historical; this run verified the deployed passwordless browser flow.
+
+## Local Codex acceptance continuation
+
+The user authorized the agent to continue as the operator. Fresh tarball setup
+imported the activated credential into the OS store without a password. A saved
+alternate RPC enabled witness synchronization, pinned-artifact verification, and
+gateway root confirmation. Restart and setup without the export succeeded.
+
+An isolated Codex profile completed a warm-up and a throwaway JavaScript clamp
+task through the sidecar and live gateway. The task completed in 6.225 seconds;
+its returned function passed local checks including rejecting reversed bounds.
+Aggregate deltas: two valid proofs, committed claims, successful dispatches and
+confirmed settlements; zero proof, exchange or dispatch failures. Metrics access
+returned 401 without authorization and 200 with authorization. One hot-proof
+sample measured 1.094 seconds; no latency percentile guarantee is claimed.
+
+This is agent-assisted founder acceptance, not independent participant adoption.
+Participant consent, self-chosen participant task and active-human-time evidence
+remain outstanding. Keep issue 29 open. The subsequent release bakes the launch
+RPC; this live acceptance used a saved alternate endpoint and does not validate
+the baked endpoint’s availability.

@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-export const DEFAULT_BASE_SEPOLIA_RPC_URL = 'https://sepolia.base.org';
+export const DEFAULT_BASE_SEPOLIA_RPC_URL = '__ZK_CREDITS_RELEASE_RPC_URL__';
 export function resolveBaseSepoliaRpc(environment: NodeJS.ProcessEnv, legacyRpc?: string): string {
-  return environment.BASE_RPC_URL?.trim() || legacyRpc?.trim() || DEFAULT_BASE_SEPOLIA_RPC_URL;
+  const rpc = environment.BASE_RPC_URL?.trim() || legacyRpc?.trim() || DEFAULT_BASE_SEPOLIA_RPC_URL;
+  if (rpc === '__ZK_CREDITS_RELEASE_RPC_URL__') throw new Error('Release RPC has not been baked. Set BASE_RPC_URL or build the release package.');
+  return rpc;
 }
-export const RPC_GUIDANCE = 'The built-in public Base Sepolia endpoint is rate-limited. To use your own endpoint (chain ID 84532), run zk-credits config rpc. Providers: https://docs.base.org/base-chain/node-operators/node-providers .';
+export const RPC_GUIDANCE = 'The package uses the release Base Sepolia endpoint by default. To use your own endpoint (chain ID 84532), run zk-credits config rpc. Providers: https://docs.base.org/base-chain/node-operators/node-providers .';
 export function validateRpcUrl(value: string): string {
   try {
     const url = new URL(value.trim());

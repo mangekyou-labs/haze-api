@@ -87,6 +87,9 @@ jobs:
         working-directory: packages/x402-zk-prepaid
         run: npm ci && npm run build
       - run: npm ci
+      - name: Create synthetic launch RPC for package build checks
+        run: |
+          node --input-type=module -e "import { writeFile } from 'node:fs/promises'; await writeFile('../../.env.launch.local', 'BASE_RPC_URL=https://rpc.invalid/base-sepolia\n', { mode: 0o600 });"
       - run: npm run build
       - run: npm test -- --run
       - run: npm pack --dry-run

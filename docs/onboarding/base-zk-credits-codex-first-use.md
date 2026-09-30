@@ -8,7 +8,7 @@ External research participants receive a fixed $25 research honorarium for a
 
 ## Before setup
 
-The package uses the public Base Sepolia RPC automatically. If it is limited,
+The package uses the launch Base Sepolia RPC automatically. If it is limited,
 run `zk-credits config rpc` and enter your own endpoint (chain ID 84532) from a
 [Base node provider](https://docs.base.org/base-chain/node-operators/node-providers).
 Keep API keys out of chat and evidence.
@@ -21,9 +21,9 @@ created or entered. Files and secrets are never uploaded to the service.
 
 ## Release availability
 
-The current published `zk-credits@0.2.8` does **not** implement this passwordless
-journey. Use the reviewed local package for development acceptance until the
-owner publishes the prepared `zk-credits@0.2.9` release. Publication is an
+Published `zk-credits@0.2.9` implements the passwordless journey with a public
+RPC default. The prepared `zk-credits@0.2.10` release bakes the launch RPC.
+Use the reviewed 0.2.10 tarball until the owner publishes it. Publication is an
 owner action. Do not install an unpinned latest package to claim acceptance.
 The new package includes its pinned proving archive; private GitHub repository
 access and GitHub CLI authentication are not setup prerequisites.
@@ -34,7 +34,7 @@ Give only the activated credential's local path and the reviewed package path.
 
 ```text
 Set up my invited Base Sepolia zk-credits pilot with the reviewed local package.
-Use the built-in public Base Sepolia RPC first. If it is limited, run
+Use the package’s built-in launch Base Sepolia RPC first. If it is limited, run
 `zk-credits config rpc` and let me enter my own endpoint in the hidden prompt;
 do not print its URL or API key. Set ZK_CREDITS_CREDENTIAL_PATH
 to my downloaded activated credential's path and ZK_CREDITS_GATEWAY_URL to

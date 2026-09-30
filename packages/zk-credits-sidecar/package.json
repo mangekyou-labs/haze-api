@@ -1,6 +1,6 @@
 {
   "name": "zk-credits",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Loopback x402 zk-prepaid transport for private Base API credits.",
   "homepage": "https://hazecredits.vercel.app",
   "repository": {
