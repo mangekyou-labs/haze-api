@@ -39,9 +39,9 @@ to reject a valid protocol exchange.
 
 As an external developer who has not used zk-credits, I receive repository
 access and a prepared invite, give Codex one setup instruction, complete only
-GitHub sign-in, a local recovery password, consent, and my own task, then make
+GitHub sign-in, passwordless recovery-file download and reimport, consent, and my own task, then make
 one real call. Codex checks `gh` authentication, installs the pinned release,
-downloads and verifies the private hash-pinned proving bundle, and runs local
+verifies the packaged hash-pinned proving bundle, and runs local
 setup. I can tell what the provider sees and what the project records.
 
 #### x402 operator's own agent loop
@@ -154,10 +154,11 @@ separately measured x402 run after A qualifies; it is not the grant demo.
   readiness, and release checks.
 - Operator wizard is limited to consent and local recovery, agent-led setup,
   one throwaway warm-up, one own-agent call, and redacted evidence review.
-- Pregrant access to the private bundle repository. Codex checks local GitHub
-  CLI authentication, installs the pinned release, downloads and verifies the
-  bundle, and runs setup. The human signs in, supplies the local recovery
-  password, gives consent, and chooses the task.
+- Install the pinned release with its packaged proving bundle. The human signs
+  in, saves and reimports the passwordless recovery capsule, gives consent, and
+  chooses the task. Activated credentials enter OS secure storage. Base Sepolia
+  uses the public RPC by default; a private local override is optional until
+  provider limits require it.
 - Prepare and review a version-matched package candidate, then verify clean
   registry installs before invitations. Publishing and hosted launch remain
   behind the founder authorization ticket.
@@ -176,3 +177,7 @@ separately measured x402 run after A qualifies; it is not the grant demo.
 - Provider blindness or request confidentiality. The model provider receives
   the request as part of inference.
 - Treating the $25 research honorarium as revenue or willingness to pay.
+
+## Decisions so far
+
+- [x402 operator first use: own agent and request-aware adapter](https://github.com/mangekyou-labs/haze-api/issues/30): passwordless OS-store launch, fresh package install, real Base Sepolia exchange, authenticated aggregate metrics, and generic-client rejection validated. See [technical evidence](../../evidence/issue-30-x402-passwordless-validation.md).

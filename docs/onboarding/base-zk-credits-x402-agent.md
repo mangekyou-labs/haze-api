@@ -32,7 +32,7 @@ The shared onboarding command imports the version-3 passwordless activated
 credential downloaded after funding into OS storage:
 
 ```sh
-zk-credits setup codex
+zk-credits setup x402
 ```
 
 Anyone possessing the downloaded file can spend its credits. Keep it private
@@ -43,20 +43,18 @@ to `ZK_CREDITS_HOME` (default `~/.zk-credits`).
 Existing encrypted exports use the explicit legacy path:
 
 ```sh
-zk-credits setup codex --legacy
+zk-credits setup x402 --legacy
 ```
 
 Only this legacy import asks for the original password, using a hidden local
 prompt. Later x402 launches do not ask for it. Never put the password in an
 environment variable, command argument, chat, log, or project file.
 
-Until the first-use dependency lands, existing installations still need their
-verified pinned proving artifacts and public witness configuration. Published 0.2.7’s
-`setup codex` path uses private repository access and password prompts; it is
-not the new passwordless setup path. If the public RPC is rate-limited, run `zk-credits config rpc` to configure
-your own Base Sepolia endpoint locally. Keep API keys out of evidence. A fresh run
-against the real gateway remains an acceptance requirement after those setup
-prerequisites are delivered.
+The local package candidate includes the pinned proving bundle and validates
+its manifest, chain witness, and gateway root during setup. The published release
+still uses the earlier setup path. If the public RPC is rate-limited, run `zk-credits config rpc` to configure
+your own Base Sepolia endpoint locally. Keep API keys out of evidence. A fresh tarball installation passed real gateway acceptance; see
+[founder technical validation](../evidence/issue-30-x402-passwordless-validation.md).
 
 The package's `zk-credits/x402` entry exposes the existing local proof engine
 and request-aware `zk-prepaid` client for an x402-native agent.

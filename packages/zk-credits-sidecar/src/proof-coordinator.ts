@@ -113,14 +113,31 @@ async function defaultVerifyProof(
   verificationKey: unknown,
   publicSignals: string[],
   proof: Record<string, unknown>,
+  verifierPath: URL,
 ): Promise<boolean> {
-  const module = await import('snarkjs') as unknown as {
-    groth16?: {
-      verify(verificationKey: unknown, publicSignals: string[], proof: Record<string, unknown>): Promise<boolean>;
-    };
-  };
-  if (!module.groth16?.verify) throw new ProofCoordinatorError('prover_unavailable', 'snarkjs Groth16 verifier is unavailable');
-  return module.groth16.verify(verificationKey, publicSignals, proof);
+  // snarkjs keeps its curve worker pool alive in the calling process. Isolate
+  // self-verification, like proving, so library users can close their runtime.
+  const child = fork(verifierPath, [], {
+    execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Local proof self-check timed out')), DEFAULT_PROVE_TIMEOUT_MS);
+      const finish = (error?: Error, valid?: boolean) => {
+        clearTimeout(timer);
+        if (error) reject(error); else resolve(valid === true);
+      };
+      child.once('message', (message: unknown) => finish(undefined, message === true));
+      child.once('error', () => finish(new Error('Local proof self-check worker failed')));
+      child.once('exit', () => finish(new Error('Local proof self-check worker exited')));
+      child.send({ verificationKey, publicSignals, proof });
+    });
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    }
+  }
 }
 
 class ProofTimeoutError extends Error {
@@ -190,7 +207,8 @@ export async function createPinnedBaseProofGenerator(
   const metrics = options.metrics ?? NO_METRICS;
   const workerFactory = options.workerFactory
     ?? proverProcessFactory(options.proverPath ?? new URL('./proof-child.js', import.meta.url));
-  const verifyProof = options.verifyProof ?? defaultVerifyProof;
+  const verifierPath = new URL('./proof-verification-child.js', options.proverPath ?? new URL('./proof-child.js', import.meta.url));
+  const verifyProof = options.verifyProof ?? ((key, signals, proof) => defaultVerifyProof(key, signals, proof, verifierPath));
 
   let bundle: PinnedArtifactBundle;
   try {
