@@ -1,7 +1,7 @@
 /**
  * Local runtime for an operator's own x402 agent.
  *
- * This loads the same encrypted credential, pinned proving artifacts, public
+ * This loads the same OS-stored credential, pinned proving artifacts, public
  * Base witness source, proof coordinator, and local slot ledger used by the
  * loopback sidecar. The returned client binds each actual HTTP method, URL,
  * and body into its proof. A loopback-only authenticated metrics endpoint
@@ -13,7 +13,8 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { decryptAnyCredentialExport, type CreditCredential } from '@zk-credits/shared/base';
+import { readStoredCredential, nativeCredentialStore, type CredentialStore } from './credential-store.js';
+import { applyRpcConfig, RPC_GUIDANCE } from './rpc-config.js';
 import {
   BASE_SEPOLIA_NETWORK,
   createZkPrepaidLifecycleMetrics,
@@ -29,6 +30,7 @@ import { createPinnedBaseProofGenerator } from './proof-coordinator.js';
 import { createBaseProofMetrics } from './proof-metrics.js';
 import { BaseSlotLedger } from './slot-ledger.js';
 import { readSetupConfig, applySetupConfig, type SetupWitnessSource } from './setup-config.js';
+import { applyRpcConfig } from './rpc-config.js';
 import { loadCircuitManifest } from './artifact-bundle.js';
 import { createSidecarServer, type RunningSidecar, type SidecarMetricsSnapshot } from './sidecar.js';
 import { createLoopbackToken, sidecarStatePaths } from './sidecar-config.js';
@@ -38,8 +40,8 @@ const DEFAULT_GATEWAY_URL = 'https://zk-credits-gateway.onrender.com';
 const DEFAULT_PORT = 3210;
 
 export interface LocalX402AgentOptions {
-  /** Decrypts the browser export in local memory. Never pass this through an environment variable. */
-  credentialPassword: string;
+  /** OS storage boundary; defaults to the platform credential store. */
+  credentialStore?: CredentialStore;
   environment?: NodeJS.ProcessEnv;
   homeDirectory?: string;
   stateDirectory?: string;
@@ -68,35 +70,28 @@ async function witnessProviderForSource(source: SetupWitnessSource, cachePath: s
   });
 }
 
-async function readCredential(path: string, password: string): Promise<CreditCredential> {
-  const parsed = JSON.parse(await readFile(path, 'utf8')) as { format?: unknown; version?: unknown };
-  if (parsed.format !== 'zk-credits-credential' || (parsed.version !== 1 && parsed.version !== 2)) {
-    throw new Error('Credential file is not a supported zk-credits export');
-  }
-  return decryptAnyCredentialExport(parsed, password);
-}
-
 /**
  * Starts the local proof engine for a participant's own agent integration.
  * Call `client.fetch(url, init)` for each real request, then close the runtime
  * when the agent exits. The local server serves only loopback and requires its
  * owner-only token for the aggregate `/metrics` response.
  */
-export async function createLocalX402Agent(options: LocalX402AgentOptions): Promise<LocalX402Agent> {
+export async function createLocalX402Agent(options: LocalX402AgentOptions = {}): Promise<LocalX402Agent> {
   const environment = options.environment ?? process.env;
   const homeDirectory = options.homeDirectory ?? homedir();
   const stateDirectory = options.stateDirectory ?? environment.ZK_CREDITS_HOME ?? join(homeDirectory, '.zk-credits');
-  const credentialPath = environment.ZK_CREDITS_CREDENTIAL_PATH;
-  if (!credentialPath) throw new Error('Set ZK_CREDITS_CREDENTIAL_PATH to the encrypted browser export');
 
+  await applyRpcConfig(environment, stateDirectory);
+  await applyRpcConfig(environment, stateDirectory);
   const savedConfig = await readSetupConfig(join(stateDirectory, 'config.json'));
   if (savedConfig) applySetupConfig(environment, savedConfig);
-  const credential = await readCredential(credentialPath, options.credentialPassword);
+  const credential = await readStoredCredential(options.credentialStore ?? nativeCredentialStore(stateDirectory));
   const artifactDirectory = environment.ZK_CREDITS_ARTIFACT_DIR;
   if (!artifactDirectory) throw new Error('Run `zk-credits setup codex` first to install and verify the pinned proving bundle');
 
   const witnessPath = environment.ZK_CREDITS_WITNESS_PATH;
   const rpcUrl = environment.BASE_RPC_URL;
+  if (!rpcUrl?.trim()) throw new Error(RPC_GUIDANCE);
   const contractAddress = environment.BASE_PRIVATE_CREDIT_BOND_ADDRESS;
   const witnessProvider = witnessPath
     ? await witnessProviderForSource({ kind: 'file', path: witnessPath }, join(stateDirectory, 'base-event-sync.json'))

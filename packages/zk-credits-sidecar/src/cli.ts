@@ -430,9 +430,7 @@ async function readX402AgentTask(): Promise<string | null> {
 
 async function runX402Agent(): Promise<void> {
   const gateway = gatewayOrigin();
-  const runtime = await createLocalX402Agent({
-    credentialPassword: await readHiddenValue('Credential backup password: '),
-  });
+  const runtime = await createLocalX402Agent();
   const url = new URL('/v1/chat/completions', gateway).toString();
   console.log(`Local aggregate metrics: ${runtime.metricsUrl}`);
   console.log('Enter one task at a time. Each task can spend one founder-provisioned test credit.');

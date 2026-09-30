@@ -1,3 +1,9 @@
+> The updated pilot PRD requires passwordless first use. The source x402
+> runtime now uses OS credential storage; see
+> [the x402 guide](../../docs/onboarding/base-zk-credits-x402-agent.md).
+> The setup instructions below describe the legacy encrypted/private-bundle
+> path. Published 0.2.7 does not implement the new onboarding requirements.
+
 # zk-credits
 
 Loopback sidecar that attaches a hash-pinned BN254 Groth16 proof to each

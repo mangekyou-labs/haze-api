@@ -119,9 +119,7 @@ can use the sidecar package's `zk-credits/x402` entry point:
 ```ts
 import { createLocalX402Agent } from 'zk-credits/x402';
 
-const runtime = await createLocalX402Agent({
-  credentialPassword: await readPasswordFromHiddenLocalPrompt(),
-});
+const runtime = await createLocalX402Agent();
 try {
   const response = await runtime.client.fetch(
     'https://zk-credits-gateway.onrender.com/v1/chat/completions',
