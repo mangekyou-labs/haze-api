@@ -133,17 +133,16 @@ below.
 | 10 — [#37](https://github.com/mangekyou-labs/haze-api/issues/37) | External follow-up | A checkpoint in #27 | `ready-for-human` |
 | 11 — [#16](https://github.com/mangekyou-labs/haze-api/issues/16) | B13 readout | #27, #37, completed 14-day window | `ready-for-human` |
 
-## Grant route check (2026-09-29)
+## Grant target correction (2026-09-30)
 
-Base's official [Ecosystem Fund documentation](https://docs.base.org/get-started/base-ecosystem-fund)
-links to a live [application form](https://www.base.org/ecosystem-fund/apply)
-for pre-seed or seed investment, and identifies payments and AI agents among
-its areas. This is an investment application, not a Builder Grant. The separate
-[Base Batches 004](https://www.base.org/batches) route accepts pre-product to
-post-MVP teams focused on Base, but its 2026-09-10 deadline has passed. The
-founder demo ticket must check eligibility against the live Ecosystem Fund
-criteria before any submission. Do not claim a grant application or funding
-request was filed unless it was actually submitted.
+The founder's funding target is a **$5,000 Base Builder Grant**. Prepare
+materials through
+[Run the uncounted founder demo and prepare truthful funding materials](https://github.com/mangekyou-labs/haze-api/issues/35).
+The [founder demo guide](../../onboarding/base-zk-credits-founder-demo.md#safe-recording-and-funding-fit)
+holds the application link and dated round-status check. Confirm the current
+Builder Grant round and prototype eligibility before submission; the target
+amount is not a verified award. Ecosystem Fund investment and Base Batches
+are outside this effort's funding scope.
 
 The demo runs before external launch and is **uncounted**. Slot B is a fresh,
 separately measured x402 run after A qualifies; it is not the grant demo.
