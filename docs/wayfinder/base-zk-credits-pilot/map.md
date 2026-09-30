@@ -124,7 +124,7 @@ below.
 | 1 — [#29](https://github.com/mangekyou-labs/haze-api/issues/29) | Codex first use | — | `ready-for-agent` |
 | 2 — [#30](https://github.com/mangekyou-labs/haze-api/issues/30) | x402 agent first use | — | `ready-for-agent` |
 | 3 — [#31](https://github.com/mangekyou-labs/haze-api/issues/31) | Founder-aware evidence | — | `ready-for-agent` |
-| 4 — [#32](https://github.com/mangekyou-labs/haze-api/issues/32) | Release and launch preparation | #29, #30, #31 | `ready-for-agent` |
+| 4 — [#32](https://github.com/mangekyou-labs/haze-api/issues/32) | Release and launch preparation | #29, #30, #31 | closed |
 | 5 — [#33](https://github.com/mangekyou-labs/haze-api/issues/33) | Founder demo kit and wizard | #30, #31 | `ready-for-agent` |
 | 6 — [#34](https://github.com/mangekyou-labs/haze-api/issues/34) | Recruit A and C | — | `ready-for-human` |
 | 7 — [#35](https://github.com/mangekyou-labs/haze-api/issues/35) | Prepare founder grant demo | #33 | `ready-for-human` |
