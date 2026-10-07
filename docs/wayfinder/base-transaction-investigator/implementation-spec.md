@@ -1,7 +1,7 @@
 # Base transaction investigator: implementation handoff
 
-Status: draft for owner review. The owner accepted the boundary recommendations
-on 2026-10-07; this consolidated handoff still requires review. No investigator,
+Status: accepted by the owner on 2026-10-07 after review of the complete handoff.
+The boundary recommendations and consolidated specification are resolved. No investigator,
 live purchase, deployed endpoint, or runnable investigator command exists as a
 result of this specification.
 
