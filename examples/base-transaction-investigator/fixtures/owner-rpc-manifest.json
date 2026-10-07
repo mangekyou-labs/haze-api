@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "artifact": "sepolia-authentic-0.json",
+      "sha256": "7dc46ec7dc1dd4f784839f3d9a9f0de02f96995d1d2f711cf6083f9ce498fa1e",
+      "chainId": 84532,
+      "transactionHash": "0x1de9bc19687f0be7cb8f664ce273eb3baf212ab82bf90aa096391c9d6966b3a6",
+      "blockNumber": "0x1c1bfbc",
+      "blockHash": "0x488b732eed7120e9322a8ea9441ac0bcd27e85c7ccb548a4e6727899d3d4f22b",
+      "source": "owner-configured BASE_RPC_URL",
+      "provenance": "recorded_authentic",
+      "expectedFacts": [
+        "Receipt status 0x0",
+        "Transaction, receipt and block hash agree",
+        "Configured debug trace unavailable (-32601)"
+      ],
+      "limitations": [
+        "No original trace; no nested causal diagnosis",
+        "Historical replay when present is end-of-block simulation, not original execution"
+      ]
+    },
+    {
+      "artifact": "sepolia-authentic-1.json",
+      "sha256": "ea82229089e9733b422d158780d23e46af554ac7ca4cff3bfa2eebba13a24d84",
+      "chainId": 84532,
+      "transactionHash": "0xb7b56c560bfb64940e1c7e79226e6b7858e06c794adab62da655a17139d96129",
+      "blockNumber": "0x1888eb5",
+      "blockHash": "0x20296871e054e10659a2f4f6bf187e124d7fdfa171e9ff4baeb7a98f37992e24",
+      "source": "owner-configured BASE_RPC_URL",
+      "provenance": "recorded_authentic",
+      "expectedFacts": [
+        "Receipt status 0x0",
+        "Transaction, receipt and block hash agree",
+        "Configured debug trace unavailable (-32601)"
+      ],
+      "limitations": [
+        "No original trace; no nested causal diagnosis",
+        "Historical replay when present is end-of-block simulation, not original execution"
+      ]
+    },
+    {
+      "artifact": "sepolia-authentic-2.json",
+      "sha256": "99945f25de3f8de3647264acb669014fe54d16aa84ac04ebc01ca99ec200a066",
+      "chainId": 84532,
+      "transactionHash": "0xf8a1dcd663e70c365e9a782dc697e4aeca3a0a61a14a29d062dcd481f3215c29",
+      "blockNumber": "0x9673d2",
+      "blockHash": "0xf8e76475d67606da3818f7487e40f6e4fd0d8b5c88226ca383a1e810d163afed",
+      "source": "owner-configured BASE_RPC_URL",
+      "provenance": "recorded_authentic",
+      "expectedFacts": [
+        "Receipt status 0x0",
+        "Transaction, receipt and block hash agree",
+        "Configured debug trace unavailable (-32601)"
+      ],
+      "limitations": [
+        "No original trace; no nested causal diagnosis",
+        "Historical replay when present is end-of-block simulation, not original execution"
+      ]
+    },
+    {
+      "artifact": "sepolia-execution-error.json",
+      "sha256": "a8285d15ea75b5c19eee4d6d12b6d0020950966929baa29eff047ff86be04389",
+      "chainId": 84532,
+      "transactionHash": "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+      "blockNumber": "0x1b5684c",
+      "blockHash": "0x9a806b2a39a91e02a11c43b8f809cad2771721a3b46e9ffd669bbb530666d425",
+      "source": "owner-configured BASE_RPC_URL",
+      "provenance": "recorded_authentic",
+      "expectedFacts": [
+        "Receipt status 0x0",
+        "Transaction, receipt and block hash agree",
+        "Configured debug trace unavailable (-32601)"
+      ],
+      "limitations": [
+        "No original trace; no nested causal diagnosis",
+        "Historical replay when present is end-of-block simulation, not original execution"
+      ]
+    }
+  ],
+  "unrecorded": [
+    "Authentic nested failed call trace",
+    "Primary contract verification status"
+  ],
+  "secretHandling": "Endpoint URL and credentials excluded."
+}

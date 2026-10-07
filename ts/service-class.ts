@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { CODING_DEEPSEEK_V4_FLASH_V1 } from '@zk-credits/x402-zk-prepaid';
+import { CODING_DEEPSEEK_V4_FLASH_V1 } from '../packages/x402-zk-prepaid/src/service-class-id.js';
 
 /** Versioned class identifier carried by the challenge `asset` field. */
 export const SERVICE_CLASS_ID = CODING_DEEPSEEK_V4_FLASH_V1;

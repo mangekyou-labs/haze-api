@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "paymentMode": "simulated",
+  "cases": [
+    {
+      "name": "Public evidence suffices",
+      "file": "inference.test.mjs",
+      "testName": "public evidence supports a cited model finding"
+    },
+    {
+      "name": "Necessary additional evidence",
+      "file": "purchase.test.mjs",
+      "testName": "one bounded simulated trace"
+    },
+    {
+      "name": "Rejected quote",
+      "file": "purchase.test.mjs",
+      "testName": "refused"
+    },
+    {
+      "name": "Malformed or inconsistent evidence",
+      "file": "purchase.test.mjs",
+      "testName": "cannot support a diagnosis"
+    },
+    {
+      "name": "Reorganization",
+      "file": "investigator.test.mjs",
+      "testName": "reorganization invalidates"
+    },
+    {
+      "name": "Bounded model/tool loop",
+      "file": "inference.test.mjs",
+      "testName": "multiple unknown model tools"
+    },
+    {
+      "name": "Evidence size reduction",
+      "file": "inference.test.mjs",
+      "testName": "evidence reduction records omitted"
+    },
+    {
+      "name": "Interrupted exact settlement",
+      "file": "purchase.test.mjs",
+      "testName": "ambiguous purchase remains held"
+    },
+    {
+      "name": "Inference interruption",
+      "file": "inference.test.mjs",
+      "testName": "exact-request replay observations"
+    },
+    {
+      "name": "Restart",
+      "file": "recovery.test.mjs",
+      "testName": "cross-process"
+    },
+    {
+      "name": "Runtime exclusion",
+      "file": "recovery.test.mjs",
+      "testName": "live owner cannot be displaced"
+    },
+    {
+      "name": "Unsupported and unavailable input",
+      "file": "investigator.test.mjs",
+      "testName": "never accesses RPC or authorization"
+    },
+    {
+      "name": "Report integrity/privacy",
+      "file": "inference.test.mjs",
+      "testName": "hallucinated cause and invented evidence"
+    }
+  ],
+  "authenticFixtures": [
+    "fixtures/manifest.json",
+    "fixtures/owner-rpc-manifest.json",
+    "fixtures/execution-manifest.json"
+  ],
+  "authenticAcceptanceGaps": [],
+  "additionalSuites": [
+    "packages/zk-credits-sidecar/src/base-sidecar.test.ts",
+    "packages/zk-credits-sidecar/src/investigator-transport.test.ts",
+    "packages/zk-credits-sidecar/src/runtime-owner.test.ts",
+    "ts/service-class.test.ts"
+  ],
+  "authenticCases": [
+    {
+      "name": "Original nested failure",
+      "file": "authentic-fixtures.test.mjs",
+      "testName": "authentic nested failure produces a cited diagnosis"
+    },
+    {
+      "name": "Original execution error",
+      "file": "authentic-fixtures.test.mjs",
+      "testName": "authentic execution error supports out-of-gas"
+    },
+    {
+      "name": "Unverified contract",
+      "file": "authentic-fixtures.test.mjs",
+      "testName": "authentic unverified contract still yields standard revert bytes"
+    },
+    {
+      "name": "Missing trace",
+      "file": "authentic-fixtures.test.mjs",
+      "testName": "authentic failed receipt with unavailable original trace stays partial"
+    }
+  ]
+}

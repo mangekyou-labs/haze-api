@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createRecoveryCapsule, generateSecret, computeCommitment, wrapActivatedCredential } from '@zk-credits/shared/base';
 import { importStoredCredential, type CredentialStore } from './credential-store.js';
@@ -22,8 +25,11 @@ describe('passwordless own-agent launch', () => {
     const store = memoryStore();
     await importStoredCredential(await activatedFile(), store);
     // The artifact gate is reached after resolving the imported credential.
-    await expect(createLocalX402Agent({ stateDirectory: '/operator/a', environment: {}, credentialStore: store }))
-      .rejects.toThrow('pinned proving bundle');
+    const directory = await mkdtemp(join(tmpdir(), 'native-launch-'));
+    try {
+      await expect(createLocalX402Agent({ stateDirectory: directory, homeDirectory: directory, environment: {}, credentialStore: store }))
+        .rejects.toThrow('pinned proving bundle');
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
   it('does not fall back to a browser export when no credential is stored', async () => {

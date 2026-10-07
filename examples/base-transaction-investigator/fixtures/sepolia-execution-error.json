@@ -1,0 +1,246 @@
+{
+  "chainId": 84532,
+  "transaction": {
+    "source": "owner-configured BASE_RPC_URL",
+    "recordedAt": "2026-10-07T08:22:03.860047+00:00",
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "eth_getTransactionByHash",
+      "params": [
+        "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5"
+      ]
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "type": "0x2",
+        "chainId": "0x14a34",
+        "nonce": "0x1871",
+        "gas": "0x7a120",
+        "maxFeePerGas": "0xf42e0",
+        "maxPriorityFeePerGas": "0xf4240",
+        "to": "0xd179d41ce9f41ae3b26849d019167edf58b4dce9",
+        "value": "0x0",
+        "accessList": [],
+        "input": "0xd362ae49",
+        "r": "0x508c40c9d77dcb1078dc794f53c096049c0266631f87864f2f268e41c89d018a",
+        "s": "0xaf363cd7f0d2360ab8725c70fcc0e80df7fd3bf226d12a5ec78ae8253316a0c",
+        "yParity": "0x0",
+        "v": "0x0",
+        "hash": "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+        "blockHash": "0x9a806b2a39a91e02a11c43b8f809cad2771721a3b46e9ffd669bbb530666d425",
+        "blockNumber": "0x1b5684c",
+        "transactionIndex": "0x23",
+        "blockTimestamp": "0x687e2f78",
+        "from": "0x97ec89056293d8e3e3119865725616769e27236b",
+        "gasPrice": "0xf4290"
+      }
+    }
+  },
+  "receipt": {
+    "source": "owner-configured BASE_RPC_URL",
+    "recordedAt": "2026-10-07T08:22:04.637741+00:00",
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "eth_getTransactionReceipt",
+      "params": [
+        "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5"
+      ]
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "type": "0x2",
+        "status": "0x0",
+        "cumulativeGasUsed": "0xb131a2",
+        "logs": [],
+        "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "transactionHash": "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+        "transactionIndex": "0x23",
+        "blockHash": "0x9a806b2a39a91e02a11c43b8f809cad2771721a3b46e9ffd669bbb530666d425",
+        "blockNumber": "0x1b5684c",
+        "gasUsed": "0x7a120",
+        "effectiveGasPrice": "0xf4290",
+        "from": "0x97ec89056293d8e3e3119865725616769e27236b",
+        "to": "0xd179d41ce9f41ae3b26849d019167edf58b4dce9",
+        "contractAddress": null,
+        "l1GasPrice": "0x2c5736",
+        "l1GasUsed": "0x640",
+        "l1Fee": "0x4e1c8d",
+        "l1BaseFeeScalar": "0x44d",
+        "l1BlobBaseFee": "0x1",
+        "l1BlobBaseFeeScalar": "0xa118b"
+      }
+    }
+  },
+  "block": {
+    "source": "owner-configured BASE_RPC_URL",
+    "recordedAt": "2026-10-07T08:22:05.379720+00:00",
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "eth_getBlockByNumber",
+      "params": [
+        "0x1b5684c",
+        false
+      ]
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "hash": "0x9a806b2a39a91e02a11c43b8f809cad2771721a3b46e9ffd669bbb530666d425",
+        "parentHash": "0x4679b3bf47d5747f2bb706c5d8ed36fc7d528a13f283f80c3da4afe52ea32a61",
+        "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "miner": "0x4200000000000000000000000000000000000011",
+        "stateRoot": "0x4508ba2433e65489b329e8396bf07bd0acf39591ece161c0262fa1f3d9f2428a",
+        "transactionsRoot": "0x12a171b81b75e6d9af8428233abe8928c8170b393513b8e1800252fa8c4e8448",
+        "receiptsRoot": "0x2d646b9e0f95bbce04dc17ce1aab86d951402401d7a496dbc3de51c06250d4b1",
+        "logsBloom": "0x57b3a47990c2b5848a94a33285009a98a6d74720607812288d9d96c0810f4ae46045e28114c5aebe5a52ac508c4c8388741fda2c2384567e103d18a08e29b5330488753e14380fb2cb04a04b204031102d61f0230c5108b38fbc0bb2209d71cdc8938684d363f0ac030216cd1c872f835980414d53496c6c0e983212aa0c74f03a053b0012e9ab3b5f31623dec226ddcd1db07f242499787f9bb022648ee24733f949975dd36caf70f034b2e960e2d7820d141b64987d4d0712241c21d8a81488267839b02ba2d1002c295001abc990724976c106678893a001b1102891d6c0c4832a43f91acf684029f3c003b051b9d16560c8b35181ef46e980846c1190439",
+        "difficulty": "0x0",
+        "number": "0x1b5684c",
+        "gasLimit": "0x3938700",
+        "gasUsed": "0xba6ace",
+        "timestamp": "0x687e2f78",
+        "extraData": "0x000000003200000004",
+        "mixHash": "0x8b6d4e516d9e70225958d17811c4b77f23fe7d37b97386d86636e4f811606b66",
+        "nonce": "0x0000000000000000",
+        "baseFeePerGas": "0x50",
+        "withdrawalsRoot": "0x46d4f8a9d90d158c84d59ff070d0b91a311767d94a5c358da30bd2cc929f3e56",
+        "blobGasUsed": "0x0",
+        "excessBlobGas": "0x0",
+        "parentBeaconBlockRoot": "0xc825e6eaa64383babbea82bd8ad7f278d8a8532bd3929346d13158f07f94e8a0",
+        "requestsHash": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": "0x39ba",
+        "uncles": [],
+        "transactions": [
+          "0x4f4aba3c5b05783ec3c60d258e9e1f1a7c8cb9de6734666ecfd5f28e0df8c9e3",
+          "0x81d4de3d0fe22e587c7f40c3ea4c7fba7a6db4384818ab9783378b7ae7a42e0e",
+          "0x3d6d01422018dcb1551d70f20b37e4145e1fc77c29dc66a2f2e2cd3bf3c2d001",
+          "0xffdca91fdf1b318405f9b2472db2d9887711d770cc7f5d852e4e85998e88efd5",
+          "0x2a4923acfbeecdd1e4acd91f8c5c5431cdb3baa47bf96cab6a9606aef91b49ae",
+          "0x982488ed7a76fb6d60d227d52a43c0954036b46e998c3ad6d6b4fc79222bdc08",
+          "0x7e93b709583bcd37bd7441c98c788ca05b9f0330b61d0f47a7b02b884f16ab5e",
+          "0x5d1d01eb8a6511d0b53be9f1928814834b95673b9b06ff2da1f942acc49bfc39",
+          "0x3677e9130c5a8c4cd3b0104f46aa03afe108b1678b4a94a7452c3da89d67bb48",
+          "0x0aa2fa8606dd5b48a24bc355f9b580068e6815b935e474d4df0bea9f36d0b40d",
+          "0xfb020c78afa17892232240cbabfa16657fb401a82c872f82ad7511607e2dd818",
+          "0x7c756768fd9d4e581631e860bce9178a960674e0f2d244bb252486f466c1b9f4",
+          "0xfaff5e7ef75935ca865b20c881b110d59b14decba9c61f3a347f9a27daf1894c",
+          "0x3c1fb86bbfa5d3798b19fccbea1edea9915cc985931b5f10600fe68a6e9e5c11",
+          "0xc4528a7760978f4606208bfeac8c5331d3599e6b537d0405c6522291284eecfe",
+          "0x57951f80baf10703b394a586c14e27adbb08862ab12fd17e4905e88ce484510f",
+          "0xd80d004d1449295a6dd9245ca212bbae8764d6dd77a5ea499216c624483ac317",
+          "0x23006fc42e2efb57a3cb001a36d2fc495426ba0d70aac4d4951485c66e9adf04",
+          "0xfe8a8d015dd1544ac455162954f793e809301be806e208d059041b378f822589",
+          "0x3259a373d8d30eee4ee6dab692f2b80677a3ec941bfb893e4e62fcd4e6b2c4c2",
+          "0x199d1134188c1470f75ed1755a932736ab51399855a12885f4e4f550e45e01f6",
+          "0x38b30f12a95c83ef09ab7537bb300c108d02912865504b25981fe4a30bc1e20d",
+          "0x8d6313c7b397871202df91879b773a7eac2f555553bb15f2f3cc11b923d90660",
+          "0xb942cda8fe5695f0deed7dc57d0ba0fd8577ff58afc4383e75631a87f8bf1032",
+          "0x79e05ae4cb42d67e501d33066743d0374c63b575e91a850fb31d48b0272fa9c4",
+          "0x70a0be0158dc290536a97b50ef454df8b38085f5a4cac7888188f77dd1ff406b",
+          "0xf9cb290493dbb1bed2df8b9689a9eb2d79389abc67c47804abc2168eeb58f7fc",
+          "0xea603a25278ca73d24f449c0725799a3a0e83c404bf8ee8521f54cc372fa77be",
+          "0x0487dbbc8f8ac3eed1df759d3aff97843bb12bcef847c339e8e942a6fa15e5bb",
+          "0x2e799579fae07e659b683af63d47a52f5b2ef8a77566bba3dba7305d129cadbc",
+          "0x0645c4a9c6e6983f05f244cc8bc22e4594d833b7027b0086bab81e606ebebd2f",
+          "0x97595dc32400708430c54113370409e137722e793e9c523cd55cdac9b177ef9d",
+          "0xab8864fe44339dea4dc236475d5446c4be01c101f3ff547197c0806cc7f18143",
+          "0x4e5727ab206de72607d3d149b9e327a13b11bb6f4cc7c4006a5bc2a88f9dd147",
+          "0xeee2cda8a9a6a58e1db1d72dcea87491003c01ee33f4cca9f63e022b07fb17ef",
+          "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+          "0x3579f5d2cd5bf7f645d488f1373cad3a129bee151348805bf7fc82c749b7b12e",
+          "0x7ed45efbfeafe62085c88ca5e557f83d9293929fcd51647ee0c4ccb821aa3300",
+          "0xe6d1aa1328ab5440c29606e39aeb828632ea12a731321ca37caecea91578c125",
+          "0x8823d6f799d12f02709bbf21877c2a7cd8ee004e324533fab4fbf47811af9a99",
+          "0x66b3caebca94fd1bc7e12a14dfdca7c0d3393d60997a73baaa1f3275349a1d41",
+          "0x5d5325517891703bf9f434bd111abc27c3c997d23036f82f7a79cbc99f0129c3",
+          "0x2f5b875e88c06b55b4e22e9f310015fb7639382ddf049c7ba6e475bbfb84dad3",
+          "0x2d73b28b72bfe4e8c0e8b360fe42ca5d04c3868fa0e6cf3a18432d9bdf867234",
+          "0xdf0d5121d59b045b78dea714c44a0498447892c65097d04795dcf3edbd1e3a20"
+        ],
+        "withdrawals": []
+      }
+    }
+  },
+  "trace": {
+    "source": "owner-configured BASE_RPC_URL",
+    "recordedAt": "2026-10-07T08:22:06.105135+00:00",
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "debug_traceTransaction",
+      "params": [
+        "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+        {
+          "tracer": "callTracer"
+        }
+      ]
+    },
+    "response": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+        "code": -32601,
+        "message": "The method debug_traceTransaction does not exist/is not available"
+      }
+    }
+  },
+  "alternateTraces": [
+    {
+      "source": "owner-configured BASE_RPC_URL",
+      "recordedAt": "2026-10-07T08:22:06.831025+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "trace_transaction",
+        "params": [
+          "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5"
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32601,
+          "message": "The method trace_transaction does not exist/is not available"
+        }
+      }
+    },
+    {
+      "source": "owner-configured BASE_RPC_URL",
+      "recordedAt": "2026-10-07T08:22:07.521393+00:00",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "trace_replayTransaction",
+        "params": [
+          "0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+          [
+            "trace"
+          ]
+        ]
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32601,
+          "message": "The method trace_replayTransaction does not exist/is not available"
+        }
+      }
+    }
+  ],
+  "explorerObservation": {
+    "source": "https://sepolia.basescan.org/tx/0x11bc80b4316d50d9d456df26d91e3cfd30475cae66534bc42c84f64cf64336c5",
+    "acquisition": "web search excerpt; original page inaccessible",
+    "text": "Status: Fail. Error encountered during contract execution [out of gas]. Gas Limit & Usage by Txn: 500,000 | 500,000 (100%).",
+    "provenance": "recorded_authentic",
+    "limitation": "Explorer observation is secondary execution interpretation, not an original call trace."
+  }
+}

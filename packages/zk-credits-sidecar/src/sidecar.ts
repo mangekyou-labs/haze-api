@@ -27,6 +27,8 @@ export interface SidecarMetricsSnapshot extends BaseProofMetricsSnapshot {
 
 export interface SidecarOptions {
   localToken: string;
+  /** Called after an authenticated shutdown response is sent. */
+  onShutdown?: () => void;
   gatewayBaseUrl: string;
   prepaidClient: PrepaidTransport;
   /** Limits this process to one authenticated, valid spend request for the internal trial. */
@@ -163,6 +165,22 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       return;
     }
     const token = extractLocalToken(req);
+    if ((req.method === 'GET' && pathname === '/runtime') || (req.method === 'POST' && pathname === '/shutdown')) {
+      if (token !== options.localToken) {
+        sendJson(res, 401, { error: 'invalid_local_token' });
+        return;
+      }
+      if (pathname === '/runtime') {
+        sendJson(res, 200, { service: 'zk-credits-sidecar', pid: process.pid });
+      } else if (options.onShutdown) {
+        res.once('finish', () => { setImmediate(() => options.onShutdown!()); });
+        sendJson(res, 202, { service: 'zk-credits-sidecar', status: 'stopping' });
+      } else {
+        sendJson(res, 404, { error: 'shutdown_unavailable' });
+      }
+      return;
+    }
+
     if (req.method === 'GET' && pathname === '/v1/models') {
       if (token !== options.localToken) {
         sendJson(res, 401, { error: 'invalid_local_token' });
@@ -259,6 +277,10 @@ export function createSidecarServer(options: SidecarOptions): RunningSidecar {
       if (!server) return;
       const activeServer = server;
       server = null;
+      if (!activeServer.listening) {
+        await Promise.all(inFlight);
+        return;
+      }
       await new Promise<void>((resolve, reject) => activeServer.close((error) => {
         if (error) reject(error);
         else resolve();

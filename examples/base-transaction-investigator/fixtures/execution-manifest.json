@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-07T13:28:44.340557+00:00",
+  "provenance": "recorded_authentic",
+  "paymentMode": "none: read-only public evidence collection",
+  "normalization": "Normalized call trees rename call_type to type and nest flat trace_address paths. No call, error, input or output is invented. Original API bytes are retained.",
+  "artifacts": [
+    {
+      "artifact": "tenderly-nested-failure.raw.json",
+      "sha256": "72184e95e63f1b5469a70f6b1ed598d6194e19b88bf6a9819d44909805de12c2",
+      "source": "https://api.tenderly.co/api/v1/public-contract/8453/tx/0x79c9d880aa711cbfea0f45739850e1a440a0f54274b19cbaef6fdcbf3a7007f1"
+    },
+    {
+      "artifact": "tenderly-execution-error.raw.json",
+      "sha256": "686eb02f3151a0c71c3ea6fa7ce146e38efa291df3bc42b7dd930e9cf6d97560",
+      "source": "https://api.tenderly.co/api/v1/public-contract/8453/tx/0xbe6303260ce0b774ed246e294dc77737c5283a188ed84c812b19aa1011b6ef01"
+    },
+    {
+      "artifact": "tenderly-unverified-contract.raw.json",
+      "sha256": "b9038b758426bb02700ad60c9475a94115eb33b41315200ff7f20b14adc9d4e7",
+      "source": "https://api.tenderly.co/api/v1/public-contracts/8453/0x06596d58d6641fe51ed768f67f919e896838fe87"
+    },
+    {
+      "artifact": "authentic-nested-failure.json",
+      "sha256": "adab7291006c756bc99d3c6c1bd50dcc843efb5147be4484d717f63d341b3c36",
+      "source": "Derived from tenderly-nested-failure.raw.json and manifest.json RPC recording"
+    },
+    {
+      "artifact": "authentic-execution-error.json",
+      "sha256": "50b812b027b628a238ad4fd272fb46fcf18cc01ae1750e5c59038e1fa1051b91",
+      "source": "Derived from tenderly-execution-error.raw.json and https://base.gateway.tenderly.co read-only eth_chainId/eth_getTransactionByHash/eth_getTransactionReceipt/eth_getBlockByNumber"
+    }
+  ],
+  "cases": [
+    {
+      "name": "nested-failure",
+      "fixture": "authentic-nested-failure.json",
+      "rawArtifact": "tenderly-nested-failure.raw.json",
+      "chainId": 8453,
+      "transactionHash": "0x79c9d880aa711cbfea0f45739850e1a440a0f54274b19cbaef6fdcbf3a7007f1",
+      "blockNumber": "0xc8b54b",
+      "blockHash": "0x8e306e91d8cfc3607b36e32fae453ae018fcf485b0bf37f7b3cb9f24713e632d",
+      "failingReference": "calls.0.calls.0.calls.0",
+      "originalError": "execution reverted",
+      "expectedFacts": [
+        "Original nested CALL failed with execution reverted",
+        "Original returned Error(string): p address!",
+        "Token transfer selector 0x23b872dd appears in parent call; underlying policy cause is not established"
+      ]
+    },
+    {
+      "name": "execution-error",
+      "fixture": "authentic-execution-error.json",
+      "rawArtifact": "tenderly-execution-error.raw.json",
+      "chainId": 8453,
+      "transactionHash": "0xbe6303260ce0b774ed246e294dc77737c5283a188ed84c812b19aa1011b6ef01",
+      "blockNumber": "0x2a0e310",
+      "blockHash": "0x45e5bdcfc527412f123757691b2cab5d65a2c6e3e0da13ccfdac6f9cad6183d6",
+      "failingReference": "root",
+      "originalError": "out of gas",
+      "expectedFacts": [
+        "Failed receipt and original call trace agree on transaction/block",
+        "Original root CALL error: out of gas; diagnosis does not rely on full gas consumption alone"
+      ]
+    },
+    {
+      "name": "unverified-contract",
+      "fixture": "authentic-nested-failure.json",
+      "metadataArtifact": "tenderly-unverified-contract.raw.json",
+      "chainId": 8453,
+      "transactionHash": "0x79c9d880aa711cbfea0f45739850e1a440a0f54274b19cbaef6fdcbf3a7007f1",
+      "blockNumber": "0xc8b54b",
+      "blockHash": "0x8e306e91d8cfc3607b36e32fae453ae018fcf485b0bf37f7b3cb9f24713e632d",
+      "address": "0x06596d58d6641fe51ed768f67f919e896838fe87",
+      "expectedFacts": [
+        "Tenderly type explicitly equals unverified_contract at collection time",
+        "Standard Error(string) is decoded without a contract ABI"
+      ],
+      "limitations": [
+        "Provider-local verification status at collection time; not a claim about all registries or status at execution",
+        "No source-level causal explanation is established"
+      ]
+    }
+  ]
+}

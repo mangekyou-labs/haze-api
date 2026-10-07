@@ -1,3 +1,4 @@
+import { bindCredentialStateDirectory } from './runtime-owner.js';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -18,7 +19,11 @@ export function nativeCredentialStore(stateDirectory: string): CredentialStore {
   };
   return {
     async read() { try { return await (await entry()).getPassword(); } catch { throw new Error(STORE_ERROR); } },
-    async write(value) { try { await (await entry()).setPassword(value); } catch { throw new Error(STORE_ERROR); } },
+    async write(value) {
+      const saved = JSON.parse(value) as { credential: CreditCredential };
+      await bindCredentialStateDirectory({ credential: saved.credential, stateDirectory });
+      try { await (await entry()).setPassword(value); } catch { throw new Error(STORE_ERROR); }
+    },
   };
 }
 
@@ -39,7 +44,7 @@ export async function importStoredCredential(file: unknown, store: CredentialSto
 
 export async function readStoredCredential(store: CredentialStore): Promise<CreditCredential> {
   const raw = await store.read();
-  if (!raw) throw new Error('No credential in OS storage. Download your activated credential and run zk-credits setup first.');
+  if (!raw) throw new Error('No credential in OS storage. Download your activated credential and run zk-credits setup first: ZK_CREDITS_CREDENTIAL_PATH=/path/to/activated-credential.json zk-credits setup.');
   try {
     const saved = JSON.parse(raw) as { version?: unknown; credential?: CreditCredential };
     if (saved.version !== 1 || !saved.credential) throw new Error();

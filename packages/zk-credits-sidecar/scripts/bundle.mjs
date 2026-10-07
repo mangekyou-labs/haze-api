@@ -1,5 +1,5 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
-import { builtinModules, createRequire } from 'node:module';
+import { installedPackageResolver } from './resolve-installed.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -21,40 +21,11 @@ await writeFile(rpcModulePath, rpcModule.replace(defaultDeclaration, `export con
 
 const outputPath = resolve(packageDirectory, 'dist/zk-credits.js');
 const entryPoint = resolve(packageDirectory, 'dist/cli.js');
-const nodeBuiltins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
 // Ship the matching credential format implementation rather than resolving an
 // older published shared package at runtime.
 const runtimeExternalPackages = ['@napi-rs/keyring', '@x402/core', '@zk-credits/x402-zk-prepaid', 'snarkjs'];
 
-function isRuntimeExternal(path) {
-  return runtimeExternalPackages.some((packageName) => (
-    path === packageName || path.startsWith(`${packageName}/`)
-  ));
-}
-
-const resolveBareImportsWithoutPnp = {
-  name: 'resolve-bare-imports-without-pnp',
-  setup(context) {
-    context.onResolve({ filter: /.*/ }, (args) => {
-      if (args.path.startsWith('.') || args.path.startsWith('/') || args.path.startsWith('node:')) {
-        return undefined;
-      }
-      if (nodeBuiltins.has(args.path)) {
-        return { path: args.path, external: true };
-      }
-      if (isRuntimeExternal(args.path)) {
-        return { path: args.path, external: true };
-      }
-
-      const importer = args.importer || entryPoint;
-      try {
-        return { path: createRequire(importer).resolve(args.path) };
-      } catch {
-        return undefined;
-      }
-    });
-  },
-};
+const resolveBareImportsWithoutPnp = installedPackageResolver(runtimeExternalPackages);
 
 await build({
   absWorkingDir: packageDirectory,
@@ -93,3 +64,11 @@ for (const name of ['local-x402-agent', 'codex-sdk-options']) {
     logLevel: 'warning',
   });
 }
+
+// Package the reviewed task runtime and public policy without fixture assets.
+const { execFileSync } = await import('node:child_process');
+const example = resolve(packageDirectory, '../../examples/base-transaction-investigator');
+execFileSync(process.execPath, [resolve(example, 'build.mjs')], { cwd: packageDirectory, stdio: 'inherit' });
+await build({ entryPoints: [resolve(example, 'live.mjs')], outfile: resolve(packageDirectory, 'dist/investigator.mjs'),
+  bundle: true, platform: 'node', format: 'esm', target: 'node20',
+  external: ['zk-credits/x402'], legalComments: 'external' });

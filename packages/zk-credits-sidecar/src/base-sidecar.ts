@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { createDecipheriv, generateKeyPair as generateKeyPairCallback, privateDecrypt, randomBytes } from 'node:crypto';
+import { createDecipheriv, generateKeyPair as generateKeyPairCallback, privateDecrypt, randomBytes, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import {
   BASE_MEMBERSHIP_TREE_CAPACITY,
@@ -112,6 +112,28 @@ export interface BasePrepaidClientOptions {
    * a public signal, or a credential identifier.
    */
   lifecycle?: ZkPrepaidLifecycleObserver;
+  /** Caller-owned durable policy and accounting boundary; failures propagate. */
+  authorization?: BaseAuthorizationBridge;
+}
+
+export interface BaseAuthorizationRequest extends BasePaymentContext {
+  attemptId: string;
+  body: Uint8Array;
+}
+
+export type BaseUsageObservation = {
+  attemptId: string;
+  slot: number;
+} & (
+  | { type: 'provisional' | 'released' | 'retired' }
+  | { type: 'settlement'; outcome: 'confirmed' | 'failed' | 'unknown'; reservationId?: string }
+);
+
+export interface BaseAuthorizationBridge {
+  /** Persist reservation and validate actual terms before any fresh proof. */
+  beforeProof(request: BaseAuthorizationRequest): Promise<void>;
+  /** Contains no request content, credential, proof, signature or replay key. */
+  observe(event: BaseUsageObservation): Promise<void>;
 }
 
 export interface BasePrepaidClient {
@@ -130,6 +152,8 @@ export interface BasePaymentContext {
 export interface BasePreparedPayment {
   payment: PaymentPayload;
   responsePrivateKey: string;
+  attemptId: string;
+  slot: number;
 }
 
 function field(value: string, label: string): string {
@@ -192,8 +216,13 @@ export function createBasePaymentFactory(options: BasePrepaidClientOptions): (co
     }
     const slotLedger = options.slotLedger;
     if (!slotLedger) throw new Error('A durable slot ledger is required for the Base pilot');
+    const attemptId = randomUUID();
+    const bytes = new Uint8Array(requestBodyBytes(body));
+    await options.authorization?.beforeProof({ attemptId, method, url, body: bytes, requirements: structuredClone(requirements) });
     const selectedSlot = slotLedger.allocateProvisional();
+    let retired = false;
     try {
+      await options.authorization?.observe({ type: 'provisional', attemptId, slot: selectedSlot });
       const nonce = randomNonce();
       const responseKeys = await responseKey();
       const requestSignal = await deriveRequestSignal({
@@ -243,6 +272,8 @@ export function createBasePaymentFactory(options: BasePrepaidClientOptions): (co
         throw new Error('Proof public signals do not match the canonical statement');
       }
       await slotLedger.commit(selectedSlot);
+      retired = true;
+      await options.authorization?.observe({ type: 'retired', attemptId, slot: selectedSlot });
       const payment = buildPaymentPayload({
         requirements,
         proof: proofForPayment(proof.proof),
@@ -250,9 +281,12 @@ export function createBasePaymentFactory(options: BasePrepaidClientOptions): (co
         nonce,
         responseKey: responseKeys.publicKey,
       });
-      return { payment, responsePrivateKey: responseKeys.privateKey };
+      return { payment, responsePrivateKey: responseKeys.privateKey, attemptId, slot: selectedSlot };
     } catch (error) {
-      slotLedger.release(selectedSlot);
+      if (!retired) {
+        slotLedger.release(selectedSlot);
+        await options.authorization?.observe({ type: 'released', attemptId, slot: selectedSlot });
+      }
       throw error;
     }
   };
@@ -273,6 +307,8 @@ interface ReplayEnvelope {
 interface PendingPayment {
   payment: PaymentPayload;
   expiresAt: number;
+  attemptId: string;
+  slot: number;
 }
 
 function decryptReplay(envelopeValue: string, privateKey: string, paymentResponse: string | null): Response | null {
@@ -392,9 +428,40 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
     });
   };
 
+  const observeSettlement = async (response: Response, init?: RequestInit): Promise<void> => {
+    const header = new Headers(init?.headers).get(PAYMENT_SIGNATURE_HEADER);
+    if (!header || !options.authorization) return;
+    let payment: PaymentPayload;
+    try { payment = decodeHeader<PaymentPayload>(header); } catch { return; }
+    const key = pendingByNonce.get(payment.payload.nonce);
+    const pending = key ? pendingPayments.get(key) : undefined;
+    if (!pending) return;
+    let outcome: 'confirmed' | 'failed' | 'unknown' = 'unknown';
+    let reservationId: string | undefined;
+    try {
+      const encoded = response.headers.get(PAYMENT_RESPONSE_HEADER);
+      const result = encoded ? decodeHeader<Record<string, unknown>>(encoded) : undefined;
+      if (result && result.network === pending.payment.accepted.network && result.transaction === ''
+          && (result.reservationId === undefined || (typeof result.reservationId === 'string' && result.reservationId.length > 0 && result.reservationId.length <= 256))
+          && typeof result.success === 'boolean' && !('payer' in result)) {
+        // A failed response can describe an ambiguous ready/commit failure.
+        outcome = result.success ? 'confirmed' : 'unknown';
+        reservationId = result.reservationId as string | undefined;
+      }
+    } catch { /* Missing or malformed settlement leaves consumption unknown. */ }
+    await options.authorization.observe({ type: 'settlement', attemptId: pending.attemptId, slot: pending.slot, outcome,
+      ...(reservationId === undefined ? {} : { reservationId }) });
+  };
+
   const fetchWithReplay = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     prunePending();
-    const response = await fetcher(input, init);
+    let response: Response;
+    try { response = await fetcher(input, { ...init, redirect: 'error' }); }
+    catch (error) {
+      await observeSettlement(new Response(null, { status: 503 }), init);
+      throw error;
+    }
+    await observeSettlement(response, init);
     if (response.status !== 409) return trackPaymentResponse(response, init);
     let replayAvailable = false;
     try {
@@ -452,7 +519,7 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
         const nonce = payment.payload.nonce;
         const expiresAt = Date.now() + REPLAY_TTL_MS;
         replayKeys.set(nonce, { privateKey: prepared.responsePrivateKey, expiresAt });
-        pendingPayments.set(key, { payment, expiresAt });
+        pendingPayments.set(key, { payment, expiresAt, attemptId: prepared.attemptId, slot: prepared.slot });
         pendingByNonce.set(nonce, key);
         prunePending();
         return payment;
@@ -466,7 +533,25 @@ export function createBasePrepaidClient(options: BasePrepaidClientOptions): Base
     },
   });
 
-  return { client, committedSlots: () => options.slotLedger?.committedSlots() ?? [] };
+  return {
+    client: {
+      clearRequirements: client.clearRequirements,
+      async fetch(input, init) {
+        const source = input instanceof Request ? input : undefined;
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const body = init?.body ?? (source?.body ? new Uint8Array(await source.clone().arrayBuffer()) : undefined);
+        const snapshot = body instanceof ArrayBuffer ? new Uint8Array(body.slice(0))
+          : body instanceof Uint8Array ? new Uint8Array(body) : body;
+        return client.fetch(url, {
+          ...(source ? { method: source.method, headers: new Headers(source.headers), signal: source.signal } : {}),
+          ...init,
+          headers: new Headers(init?.headers ?? source?.headers),
+          ...(snapshot === undefined ? {} : { body: snapshot }),
+        });
+      },
+    },
+    committedSlots: () => options.slotLedger?.committedSlots() ?? [],
+  };
 }
 
 interface PublicTreeArtifact {

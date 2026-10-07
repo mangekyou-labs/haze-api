@@ -1,0 +1,18 @@
+{
+  "challengeObserved": 1,
+  "confirmed": 0,
+  "failed": 0,
+  "unknown": 1,
+  "retired": 1,
+  "modelDeliveryObserved": false,
+  "recoveredPriorTask": false,
+  "build": "0e6ac139ca065efe7e0c01f9161ef8c4bb7b49de914590dbde585171278cfd31",
+  "validationDate": "2026-10-07",
+  "source": "installed locally packed candidate, actual network invocation",
+  "chainId": 8453,
+  "transactionHash": "0x79c9d880aa711cbfea0f45739850e1a440a0f54274b19cbaef6fdcbf3a7007f1",
+  "completion": "partial",
+  "stoppingReason": "inference_unavailable",
+  "liveAcceptance": "NOT_PASSED",
+  "exactExecutionDataPurchases": "DISABLED"
+}

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import { homedir } from 'node:os';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { codingTaskEvidence, codingTaskProviderArgs, validateCodingTaskArgs } from './task-evidence.js';
 import { launchCodexProcess } from './codex-launcher.js';
 import { launchClineProcess } from './cline-launcher.js';
 import {
@@ -11,16 +11,14 @@ import {
   resolveCodexHome,
   writeCodexProfile,
 } from './codex-profile.js';
-import { createBasePrepaidClient, createFileWitnessProvider, validateBaseCreditWitness, type BaseWitnessProvider } from './base-sidecar.js';
+import { validateBaseCreditWitness } from './base-sidecar.js';
+import { createSidecarRuntime, RuntimeCredentialError, witnessProviderForSource } from './sidecar-runtime.js';
 import { createLocalX402Agent } from './local-x402-agent.js';
-import { createBaseEventWitnessProvider } from './base-event-sync.js';
 import { createPinnedBaseProofGenerator } from './proof-coordinator.js';
 import { createBaseProofMetrics } from './proof-metrics.js';
-import { createZkPrepaidLifecycleMetrics } from '@zk-credits/x402-zk-prepaid';
-import { BaseSlotLedger } from './slot-ledger.js';
-import { type CreditCredential } from '@zk-credits/shared/base';
 import { nativeCredentialStore, importCredentialPath, readStoredCredential } from './credential-store.js';
 import { applyRpcConfig, checkBaseSepoliaRpc, writeRpcConfig, RPC_GUIDANCE, resolveBaseSepoliaRpc } from './rpc-config.js';
+import { diagnoseSidecar, stopSidecar } from './sidecar-diagnostics.js';
 import { runCliCommand } from './cli-runtime.js';
 import { createNodeSidecarLifecycle } from './node-sidecar-lifecycle.js';
 import { activateSidecarServer } from './server-startup.js';
@@ -30,12 +28,11 @@ import {
   readSetupConfig,
   resolveSetupInputs,
   writeSetupConfig,
-  type SetupWitnessSource,
 } from './setup-config.js';
 import { ensureSidecarReady } from './sidecar-lifecycle.js';
 import { readLoopbackToken, writeLoopbackToken } from './sidecar-state.js';
 import { createSidecarServer } from './sidecar.js';
-import { buildBaseRegisteredTrialRequestBody, runBaseRegisteredTrialExchange } from './base-registered-trial.js';
+import { buildBaseRegisteredTrialRequestBody } from './base-registered-trial.js';
 import { loadCircuitManifest } from './artifact-bundle.js';
 import { BASE_SEPOLIA_NETWORK } from '@zk-credits/x402-zk-prepaid';
 import { requireGatewayKnownRoot as checkGatewayKnownRoot } from './gateway-root-check.js';
@@ -101,28 +98,6 @@ async function chooseSetupCandidate(
   }
 }
 
-async function witnessProviderForSource(
-  source: SetupWitnessSource,
-  cachePath: string,
-): Promise<BaseWitnessProvider> {
-  if (source.kind === 'file') {
-    let value: unknown;
-    try {
-      value = JSON.parse(await readFile(source.path, 'utf8')) as unknown;
-    } catch {
-      throw new Error('The Base witness file could not be read as JSON');
-    }
-    return createFileWitnessProvider(value);
-  }
-  return createBaseEventWitnessProvider({
-    rpcUrl: source.rpcUrl,
-    contractAddress: source.contractAddress,
-    deploymentBlock: source.deploymentBlock === undefined ? undefined : BigInt(source.deploymentBlock),
-    confirmations: source.confirmations === undefined ? undefined : BigInt(source.confirmations),
-    cachePath,
-  });
-}
-
 /** Reads a local secret value without terminal echo or shell history. */
 async function readHiddenValue(prompt: string): Promise<string> {
   if (!process.stdin.isTTY || !process.stdin.setRawMode) {
@@ -167,8 +142,11 @@ function printHelp(): void {
   zk-credits cline [cline arguments...]
   zk-credits config rpc
   zk-credits setup [codex|x402] [--legacy] [--model <model>]
-  zk-credits codex [codex arguments...]
+  zk-credits codex [--task-evidence] [codex arguments...]
+  zk-credits investigate --chain <base|base-sepolia> <transaction-hash>
   zk-credits status
+  zk-credits doctor
+  zk-credits stop
   zk-credits serve [--port <port>] [--internal-trial-one-proof]
   zk-credits x402-agent
   zk-credits founder-demo-agent
@@ -183,11 +161,23 @@ the request-aware x402 adapter and local proof engine. It requires explicit
 confirmation before one billable internal exchange; the task and response are
 displayed locally and never added to activation evidence.
 "zk-credits x402-agent" is a small task-running starter for the participant's
-own x402 agent loop. It asks for tasks locally and sends each through the same
+own x402 agent loop. It starts its own metrics server on the selected sidecar port;
+stop an existing sidecar before launching it. It asks for tasks locally and sends each through the same
 request-aware adapter and local proof engine; aggregate metrics stay on the
 loopback-only authenticated endpoint.
 "zk-credits serve --internal-trial-one-proof" limits this sidecar process to
 one authenticated, valid spend request and one local proof attempt.
+"zk-credits doctor" reports health, authenticated PID, setup and RPC configuration
+presence, and log location without starting a server or revealing secrets.
+"zk-credits stop" gracefully drains the authenticated sidecar. For older versions,
+inspect the listener with lsof -nP -iTCP:3210 -sTCP:LISTEN, verify its PID with
+ps -p <PID> -o pid,ppid,etime,command, then kill -TERM <PID>. Foreground: Ctrl+C.
+Use ZK_CREDITS_SIDECAR_PORT for doctor, stop, status and env with a custom port.
+If serve reports missing setup, run:
+  ZK_CREDITS_CREDENTIAL_PATH=/path/to/activated-credential.json zk-credits setup
+If the sidecar is stopped after setup, run zk-credits serve.
+For RPC witness synchronization failures, run zk-credits config rpc and then
+zk-credits stop followed by zk-credits serve. BASE_RPC_URL overrides the saved RPC.
 Base Sepolia uses the launch endpoint baked into the package automatically. RPC endpoints
 are rate-limited; run "zk-credits config rpc" to use your own endpoint.
 Provider guide: https://docs.base.org/base-chain/node-operators/node-providers
@@ -199,51 +189,6 @@ The pinned proving archive is packaged, checked locally and installed without
 GitHub sign-in. Setup synchronizes the public Base witness and checks its root.
 No version of the published 0.2.8 package implements this new passwordless flow.
 `);
-}
-
-interface BaseClientRuntime {
-  credential: CreditCredential;
-  witnessProvider: BaseWitnessProvider;
-  slotLedger: BaseSlotLedger;
-  proofMetrics: ReturnType<typeof createBaseProofMetrics>;
-  exchangeMetrics: ReturnType<typeof createZkPrepaidLifecycleMetrics>;
-  prove: Awaited<ReturnType<typeof createPinnedBaseProofGenerator>>;
-}
-
-/** Loads the same credential, witness, proof, and durable ledger used by serve. */
-async function loadBaseClientRuntime(): Promise<BaseClientRuntime> {
-  const credential = await readStoredCredential(nativeCredentialStore(stateDirectory()));
-  const witnessPath = process.env.ZK_CREDITS_WITNESS_PATH;
-  const artifactDirectory = process.env.ZK_CREDITS_ARTIFACT_DIR;
-  if (!artifactDirectory) {
-    throw new Error('Set ZK_CREDITS_ARTIFACT_DIR to the directory holding the installed pinned proving bundle');
-  }
-  const baseRpcUrl = process.env.BASE_RPC_URL;
-  const baseContractAddress = process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS;
-  const witnessProvider = witnessPath
-    ? createFileWitnessProvider(JSON.parse(await readFile(witnessPath, 'utf8')))
-    : baseRpcUrl && baseContractAddress
-      ? await witnessProviderForSource(
-          {
-            kind: 'base-events',
-            rpcUrl: baseRpcUrl,
-            contractAddress: baseContractAddress,
-            ...(process.env.BASE_DEPLOYMENT_BLOCK && /^\d+$/u.test(process.env.BASE_DEPLOYMENT_BLOCK)
-              ? { deploymentBlock: process.env.BASE_DEPLOYMENT_BLOCK }
-              : {}),
-            ...(process.env.BASE_CONFIRMATIONS && /^\d+$/u.test(process.env.BASE_CONFIRMATIONS)
-              ? { confirmations: process.env.BASE_CONFIRMATIONS }
-              : {}),
-          },
-          join(stateDirectory(), 'base-event-sync.json'),
-        )
-      : (() => { throw new Error('Set ZK_CREDITS_WITNESS_PATH or configure BASE_RPC_URL and BASE_PRIVATE_CREDIT_BOND_ADDRESS'); })();
-  const proofMetrics = createBaseProofMetrics();
-  const exchangeMetrics = createZkPrepaidLifecycleMetrics();
-  const slotLedger = await BaseSlotLedger.open({ path: join(stateDirectory(), 'base-slots.json') });
-  const prove = await createPinnedBaseProofGenerator({ artifactDirectory, metrics: proofMetrics });
-  validateBaseCreditWitness(await witnessProvider.witnessForCredential(credential));
-  return { credential, witnessProvider, slotLedger, proofMetrics, exchangeMetrics, prove };
 }
 
 const GATEWAY_COUNTER_NAMES = [
@@ -478,16 +423,13 @@ async function trialRegisteredAdapter(task: string): Promise<void> {
     return;
   }
   try {
-    const runtime = await loadBaseClientRuntime();
-    if (
-      runtime.credential.tierId !== 0
-      || runtime.credential.deploymentDomain !== '84532'
-      || runtime.credential.expiry <= Math.floor(Date.now() / 1000)
-    ) {
+    const runtime = await createSidecarRuntime();
+    try {
+    if (runtime.snapshot().tierId !== 0) {
       console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: 'credential_gate' }));
       return;
     }
-    const startingSlots = runtime.slotLedger.snapshot();
+    const startingSlots = runtime.snapshot().slots;
     if (startingSlots.committed >= startingSlots.capacity) {
       console.log(JSON.stringify({
         path: 'founder-demo-agent',
@@ -520,7 +462,7 @@ async function trialRegisteredAdapter(task: string): Promise<void> {
       console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: 'sidecar_running', launcherStatus }));
       return;
     }
-    const witness = await runtime.witnessProvider.witnessForCredential(runtime.credential);
+    const witnessRoot = await runtime.witnessRoot();
     const readiness = await gatewayReadiness(gateway);
     if (!readiness.passed) {
       console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: 'readiness', launcherStatus, readiness }));
@@ -531,31 +473,28 @@ async function trialRegisteredAdapter(task: string): Promise<void> {
       console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: 'admin_status', launcherStatus, readiness, adminStatus: adminBefore.status }));
       return;
     }
-    if (witness.root !== adminBefore.snapshot.currentRoot) {
+    if (witnessRoot !== adminBefore.snapshot.currentRoot) {
       console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: 'root_mismatch', launcherStatus, readiness, adminStatus: adminBefore.status }));
       return;
     }
 
-    const baselineSlots = runtime.slotLedger.snapshot();
-    const baselineProof = runtime.proofMetrics.snapshot();
-    const baselineLifecycle = runtime.exchangeMetrics.snapshot();
+    const baseline = runtime.snapshot();
+    const baselineSlots = baseline.slots;
+    const baselineProof = baseline.metrics;
+    const baselineLifecycle = baseline.metrics.exchange;
     const requestUrl = new URL('/v1/chat/completions', gateway).toString();
     const requestBody = buildBaseRegisteredTrialRequestBody(task);
-    const exchange = await runBaseRegisteredTrialExchange({
+    const exchange = await runtime.runFounderTrial({
       url: requestUrl,
       body: requestBody,
       headers: { 'content-type': 'application/json' },
-      credential: runtime.credential,
-      witnessProvider: runtime.witnessProvider,
-      prove: runtime.prove,
-      slotLedger: runtime.slotLedger,
-      lifecycle: runtime.exchangeMetrics.observe,
       onResponse: displayAgentResponse,
     });
     const adminAfter = await gatewayTrialSnapshot(gateway, adminToken);
-    const proofAfter = runtime.proofMetrics.snapshot();
-    const lifecycleAfter = runtime.exchangeMetrics.snapshot();
-    const slotAfter = runtime.slotLedger.snapshot();
+    const after = runtime.snapshot();
+    const proofAfter = after.metrics;
+    const lifecycleAfter = after.metrics.exchange;
+    const slotAfter = after.slots;
     const localDeltas = {
       proofAttempts: proofAfter.attempts - baselineProof.attempts,
       proofSuccesses: proofAfter.successes - baselineProof.successes,
@@ -605,8 +544,9 @@ async function trialRegisteredAdapter(task: string): Promise<void> {
       gatewayCounterDelta: counterDelta ?? null,
       failurePhase,
     }));
-  } catch {
-    console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: 'local_setup' }));
+    } finally { await runtime.close(); }
+  } catch (error) {
+    console.log(JSON.stringify({ path: 'founder-demo-agent', status: 'stopped', failurePhase: error instanceof RuntimeCredentialError ? 'credential_gate' : 'local_setup' }));
   }
 }
 
@@ -615,22 +555,18 @@ async function serve(args: readonly string[]): Promise<void> {
   const internalTrialOneProof = args.includes('--internal-trial-one-proof');
   const statePaths = sidecarStatePaths(stateDirectory());
   const localToken = createLoopbackToken();
-  const { credential, witnessProvider, proofMetrics, exchangeMetrics, slotLedger, prove } = await loadBaseClientRuntime();
-  const prepaid = createBasePrepaidClient({
-    credential,
-    witnessProvider,
-    prove,
-    slotLedger,
-    internalTrialOneProof,
-    lifecycle: exchangeMetrics.observe,
-  });
+  const runtime = await createSidecarRuntime({ internalTrialOneProof });
   const gatewayBaseUrl = process.env.ZK_CREDITS_GATEWAY_URL || DEFAULT_GATEWAY_URL;
   const sidecar = createSidecarServer({
     localToken,
     gatewayBaseUrl,
-    prepaidClient: prepaid.client,
+    prepaidClient: runtime.client,
     internalTrialOneProof,
-    metrics: () => ({ ...proofMetrics.snapshot(), exchange: exchangeMetrics.snapshot() }),
+    metrics: () => runtime.snapshot().metrics,
+    onShutdown: () => { void shutdown().catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : 'Sidecar shutdown failed');
+      process.exitCode = 1;
+    }); },
   });
   let address: string;
   try {
@@ -640,26 +576,55 @@ async function serve(args: readonly string[]): Promise<void> {
     });
   } catch (error: unknown) {
     await sidecar.close();
+    await runtime.close();
     throw error;
   }
   console.log(`ZK Credits sidecar listening on ${address}/v1`);
   console.log('Run eval "$(zk-credits env)" in the client shell.');
 
-  const shutdown = async (): Promise<void> => {
-    await sidecar.close();
-    process.exit(0);
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => {
+    shutdownPromise ??= sidecar.close().then(() => runtime.close()).then(() => { process.exit(0); });
+    return shutdownPromise;
   };
   process.once('SIGINT', () => { void shutdown(); });
   process.once('SIGTERM', () => { void shutdown(); });
 }
 
+async function runCodingTask(args: readonly string[]): Promise<void> {
+  validateCodingTaskArgs(args);
+  const runtime = await createSidecarRuntime();
+  const localToken = createLoopbackToken();
+  const sidecar = createSidecarServer({ localToken,
+    gatewayBaseUrl: process.env.ZK_CREDITS_GATEWAY_URL || DEFAULT_GATEWAY_URL, prepaidClient: runtime.client });
+  try {
+    // A random port and unpublished token isolate this process from other agents.
+    const address = await sidecar.listen(0);
+    const exitCode = await launchCodexProcess([
+      ...codingTaskProviderArgs(address), ...args,
+    ], undefined, { ...process.env, ZK_CREDITS_TASK_TOKEN: localToken });
+    await sidecar.close(); // drain outstanding requests before taking counters
+    console.log(JSON.stringify(codingTaskEvidence(runtime.snapshot().metrics, exitCode)));
+    process.exitCode = exitCode;
+  } finally { await sidecar.close(); await runtime.close(); }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  if (args[0] === '--help' || args[0] === '-h' || !args[0]) {
+  const localHelp = ['doctor', 'stop', 'status', 'serve', 'setup', 'config', 'investigate'].includes(args[0] ?? '')
+    && args.slice(1).some((arg) => arg === '--help' || arg === '-h');
+  if (args[0] === '--help' || args[0] === '-h' || !args[0] || localHelp) {
     printHelp();
     return;
   }
   const sidecarHome = stateDirectory();
+  if (args[0] === 'doctor' || args[0] === 'stop') {
+    if (args.length !== 1) throw new Error(`Usage: zk-credits ${args[0]} (use ZK_CREDITS_SIDECAR_PORT to select a port)`);
+    const options = { baseUrl: loopbackBaseUrl(), stateDirectory: sidecarHome, write: (line: string) => console.log(line) };
+    if (args[0] === 'doctor') await diagnoseSidecar(options);
+    else await stopSidecar(options);
+    return;
+  }
   if (args[0] === 'config' && args[1] === 'rpc' && args.length === 2) {
     console.log(RPC_GUIDANCE);
     const rpc = await checkBaseSepoliaRpc(await readHiddenValue('Base Sepolia RPC URL (hidden): '));
@@ -669,8 +634,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (args[0] !== 'setup' && args[0] !== 'status' && args[0] !== 'env') {
-    await applySavedSetupConfig(process.env, sidecarHome);
+  if (args[0] === 'investigate') {
+    const { runLiveInvestigation, formatLiveReport } = await import(new URL('./investigator.mjs', import.meta.url).href);
+    const report = await runLiveInvestigation(args.slice(1));
+    console.log(formatLiveReport(report));
+    if (report.paymentEvidence.confirmed === 0 || report.paymentEvidence.unknown > 0 || !report.paymentEvidence.modelDeliveryObserved) process.exitCode = 1;
+    return;
+  }
+
+  if (args[0] === 'codex' && args.includes('--task-evidence')) {
+    if (!await isCodexProfileInstalled(resolveCodexHome(process.env, homedir()))) throw new Error('Run zk-credits setup codex first');
+    await runCodingTask(args.slice(1).filter(arg => arg !== '--task-evidence'));
+    return;
   }
   if (args[0] === 'serve') {
     await serve(args.slice(1));
@@ -686,6 +661,10 @@ async function main(): Promise<void> {
     if (args.length !== 1) throw new Error('x402-agent does not accept arguments; it reads tasks locally');
     await runX402Agent();
     return;
+  }
+
+  if (args[0] !== 'setup' && args[0] !== 'status' && args[0] !== 'env') {
+    await applySavedSetupConfig(process.env, sidecarHome);
   }
 
   const statePaths = sidecarStatePaths(sidecarHome);
@@ -767,6 +746,10 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : 'zk-credits failed');
+  if ((error as NodeJS.ErrnoException)?.code === 'EADDRINUSE') {
+    console.error('The local port is already occupied. Run zk-credits doctor to identify the listener. Stop the existing sidecar with zk-credits stop (older sidecars: inspect the PID before kill -TERM <PID>), then retry. x402-agent starts its own local metrics server and does not reuse serve.');
+  } else {
+    console.error(error instanceof Error ? error.message : 'zk-credits failed');
+  }
   process.exitCode = 1;
 });

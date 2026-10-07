@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-07",
+  "source": "https://mainnet.base.org",
+  "chainId": 8453,
+  "transactionHash": "0x79c9d880aa711cbfea0f45739850e1a440a0f54274b19cbaef6fdcbf3a7007f1",
+  "blockNumber": "0xc8b54b",
+  "blockHash": "0x8e306e91d8cfc3607b36e32fae453ae018fcf485b0bf37f7b3cb9f24713e632d",
+  "provenance": "recorded_authentic",
+  "artifact": "recorded-revert.json",
+  "sha256": "72a19a03143c3e65916b719bd3a1e49f98068d57b4dfad1b339e14292fa946ca",
+  "operations": [
+    "eth_getTransactionByHash",
+    "eth_getTransactionReceipt",
+    "eth_getBlockByNumber",
+    "eth_call",
+    "debug_traceTransaction"
+  ],
+  "cases": [
+    {
+      "name": "decoded_historical_replay",
+      "expectedFacts": [
+        "Receipt status 0x0",
+        "Historical end-of-block replay Error(string): p address!"
+      ],
+      "limitations": [
+        "Historical replay is not original execution trace.",
+        "No original causal diagnosis established."
+      ]
+    },
+    {
+      "name": "missing_trace",
+      "expectedFacts": [
+        "Receipt status 0x0",
+        "Public trace method unsupported"
+      ],
+      "omitOperations": [
+        "eth_call"
+      ],
+      "limitations": [
+        "Failure cause is insufficiently evidenced."
+      ]
+    }
+  ],
+  "standardABI": {
+    "signature": "Error(string)",
+    "selector": "0x08c379a0",
+    "source": "https://docs.soliditylang.org/en/latest/abi-spec.html#errors",
+    "contractVerificationRequired": false
+  },
+  "syntheticCases": "Corruption, timeout and transport doubles in investigator.test.mjs are synthetic; never authentic."
+}

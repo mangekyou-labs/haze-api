@@ -76,9 +76,11 @@ export class BaseSlotLedger {
     let raw: string;
     try {
       raw = await readFile(ledger.path, 'utf8');
-    } catch {
-      return ledger;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ledger;
+      throw error;
     }
+    if (Buffer.byteLength(raw, 'utf8') > 64 * 1024) throw new Error('Slot ledger exceeds its bounded state limit');
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw) as unknown;
@@ -91,6 +93,7 @@ export class BaseSlotLedger {
       || record.version !== LEDGER_VERSION
       || record.capacity !== ledger.capacity
       || !Array.isArray(record.committed)
+      || record.committed.length > ledger.capacity
     ) {
       throw new Error('Slot ledger is malformed or belongs to another capacity');
     }

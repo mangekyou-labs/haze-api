@@ -9,7 +9,7 @@ interface SpawnedProcess {
 export type SpawnCommand = (
   command: string,
   args: readonly string[],
-  options: { stdio: 'inherit' },
+  options: { stdio: 'inherit'; env?: NodeJS.ProcessEnv },
 ) => SpawnedProcess;
 
 const spawnCommand: SpawnCommand = (command, args, options) => spawn(command, args, options);
@@ -18,8 +18,9 @@ const spawnCommand: SpawnCommand = (command, args, options) => spawn(command, ar
 export async function launchCodexProcess(
   args: readonly string[],
   spawnImpl: SpawnCommand = spawnCommand,
+  environment?: NodeJS.ProcessEnv,
 ): Promise<number> {
-  const child = spawnImpl('codex', ['--profile', CODEX_PROFILE_NAME, ...args], { stdio: 'inherit' });
+  const child = spawnImpl('codex', ['--profile', CODEX_PROFILE_NAME, ...args], environment ? { stdio: 'inherit', env: environment } : { stdio: 'inherit' });
   return new Promise<number>((resolve, reject) => {
     child.once('error', (error) => {
       if (error.code === 'ENOENT') {
