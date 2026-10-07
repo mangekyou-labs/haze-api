@@ -1,6 +1,6 @@
 # Base transaction investigator: execution-data sources
 
-Research decision: [haze-api #40](https://github.com/mangekyou-labs/haze-api/issues/40), within [map #39](https://github.com/mangekyou-labs/haze-api/issues/39). Checked 7 October 2026. This records evidence and feasible choices; it does not select a provider or authorize purchases.
+Research decision: [Find a useful x402 execution-data source for Base transactions](https://github.com/mangekyou-labs/haze-api/issues/40), within [Base transaction investigator: useful x402 workflow and concise developer README](https://github.com/mangekyou-labs/haze-api/issues/39). Checked 7 October 2026. This records evidence and feasible choices; it does not select a provider or authorize purchases.
 
 ## Finding
 
