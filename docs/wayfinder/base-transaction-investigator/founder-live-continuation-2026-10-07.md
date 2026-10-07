@@ -1,5 +1,10 @@
 # Live investigator continuation — 2026-10-07
 
+Historical snapshot: the owner subsequently requested direct settlement
+investigation. The [later reconciliation](founder-settlement-reconciliation-2026-10-07.md)
+established a cancelled claim and persisted definitive failure; the outcome is
+no longer unknown. The observations below describe the earlier inspection.
+
 [Verify a useful live diagnosis and its own prepaid exchange](https://github.com/mangekyou-labs/haze-api/issues/57)
 remains open. This continuation inspected the existing attempt without spending
 another credit. It does not establish live acceptance.
