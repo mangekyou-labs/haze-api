@@ -57,6 +57,15 @@ behind_head`; database, root synchronization, verifier assets and provider
 configuration checks passed. Configuration readiness does not establish funded
 provider capacity.
 
+The owner subsequently replaced the local provider key and explicitly authorized
+a generation request despite its reported zero account balance. One direct
+OpenRouter request to the configured model returned HTTP 200 and the requested
+`OK` response, with 13 tokens and a reported cost of $0.00000343. The zero balance
+therefore did not establish that this replacement key could not generate. The
+replacement differs from the hosted gateway's key. This diagnostic verifies
+local provider delivery only: it bypasses the prepaid gateway and does not
+establish the investigator's payment or settlement acceptance.
+
 Continue after provider capacity and gateway readiness are restored. Preserve
 the failed task and retired slot; repeating its hash recovers the prior report.
 Use a separate eligible failed transaction for a new bounded task, after read-only
