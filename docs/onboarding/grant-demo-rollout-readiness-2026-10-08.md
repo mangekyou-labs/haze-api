@@ -36,4 +36,25 @@ Push only the isolated candidate branch, deploy that exact gateway revision (inc
 
 Use the reviewed local sidecar candidate for recording; public npm 0.2.11 lacks the candidate's investigator/task evidence features. Prior successful paid investigator output remains usable when labeled as prior evidence. Current repeated invocations return partial recovered-stopped results and are not fresh paid exchanges.
 
-No production promotion, gateway rollout, new Stripe Checkout, recording, publication or submission has occurred as of this preparation.
+## Approved public rollout
+
+The user approved the prepared push and public rollout. Branch `founder-sandbox-rollout-2026-10-08` was pushed to `mangekyou-labs/haze-api`. Render deployment `dep-db3k31d9fdbs73e53n2g` became live at 2026-10-08T07:10:44Z with exact candidate commit `041a1072e799f791131fb042a595f5dc435b24af`; `BASE_SYNC_MAX_BLOCK_RANGE` was explicitly set to `10`.
+
+Vercel production deployment `dpl_DZjZaCNLq7nHLxcGGADXJSFY6uR7` became READY. The public sandbox GET now returns 401 (authentication required) instead of 404; gateway readiness returns 200. Production runtime was set explicitly from configured local authentication/Stripe TEST values, the verified Render billing token, and the public gateway/auth URLs.
+
+Existing Stripe TEST endpoint `we_1U29551I3zjIgUTMzbuhAMq8` was updated to `https://hazecredits.vercel.app/api/sandbox/webhook`, enabled for `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Its signing secret was preserved. Actual delivery must still prove that the configured signing secret matches.
+
+Authenticated hosted account status succeeds, with zero balance/reservations/bundles. Sponsor readiness currently reports `insufficient_usdc`: zero canonical Base Sepolia test USDC, zero allowance, and sufficient gas. Sponsor address: `0xfB630DFFbA6E1F5d75a73519014A941B89431d28`. The real browser reached GitHub login and needs the human to complete authentication.
+
+No genuine new Stripe Checkout, successful bundle funding, recording, npm publication or submission has occurred yet. Earlier hosting evidence above describes the pre-rollout checks.
+
+
+## Continuation after human authentication
+
+Two browser sessions remain open through `/Users/kyler/.codex/skills/playwright/scripts/playwright_cli.sh`: `haze-founder` is at real GitHub OAuth login, and `haze-faucet` is at Circle's human CAPTCHA with Base Sepolia and the sponsor address already selected. The faucet request has not transferred tokens; no CAPTCHA bypass or alternate identity was attempted.
+
+After the human completes these steps, use `/tmp/haze-founder-readiness/public-funder-status.py` to verify the transfer. `/tmp/haze-founder-readiness/approve-sandbox.cjs` is prepared to approve exactly 20 canonical test USDC to the hosted bond, validates chain/token/sponsor, includes Builder Code attribution, and reports only public transaction metadata. It has not been executed. Do not run another faucet request or change sponsor keys to evade limits.
+
+Continue in the authenticated dashboard with a genuine Stripe TEST Checkout, verify its actual webhook delivery and balance increment, then generate/download/re-import the browser credential and fund its bundle. Preserve the existing canonical sidecar credential accounting state. Do not install the new browser credential over an existing sidecar credential for this acceptance check.
+
+Deployment access scripts under `/tmp/haze-founder-readiness/` read local secret configuration privately; never dump their runtime values or attach credential files. Approved public deployments are complete; further permission for the same rollout is unnecessary. Human authentication/CAPTCHA remain external prerequisites, not deployment approval requests.
