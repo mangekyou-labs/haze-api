@@ -59,6 +59,11 @@ export function createBaseBondSponsor(): BaseBondSponsor {
   const address = contractAddress();
   return {
     async reconcileBundle(commitment: string) {
+      const configuredRange = process.env.BASE_SYNC_MAX_BLOCK_RANGE?.trim();
+      if (configuredRange && (!/^\d+$/u.test(configuredRange) || BigInt(configuredRange) <= 0n)) {
+        throw new Error('BASE_SYNC_MAX_BLOCK_RANGE must be a positive whole number');
+      }
+      const maxBlockRange = configuredRange ? BigInt(configuredRange) : 2_000n;
       const latest = await publicClient.getBlockNumber();
       const confirmations = BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
       if (latest <= confirmations) return undefined;
@@ -66,8 +71,8 @@ export function createBaseBondSponsor(): BaseBondSponsor {
       const deployment = process.env.BASE_DEPLOYMENT_BLOCK && /^\d+$/u.test(process.env.BASE_DEPLOYMENT_BLOCK)
         ? BigInt(process.env.BASE_DEPLOYMENT_BLOCK) : 0n;
       const wanted = toHex(BigInt(commitment), { size: 32 }).toLowerCase();
-      for (let fromBlock = deployment; fromBlock <= target; fromBlock += 2_000n) {
-        const toBlock = fromBlock + 1_999n < target ? fromBlock + 1_999n : target;
+      for (let fromBlock = deployment; fromBlock <= target; fromBlock += maxBlockRange) {
+        const toBlock = fromBlock + maxBlockRange - 1n < target ? fromBlock + maxBlockRange - 1n : target;
         const logs = await publicClient.getContractEvents({
           address,
           abi: PRIVATE_CREDIT_BOND_ABI,
