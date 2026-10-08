@@ -8,7 +8,7 @@ Define an implementation-ready Base transaction investigator: it diagnoses a fai
 
 ## Notes
 
-- Recording priority on 2026-10-07: preserve the simpler coding-agent grant demo and public sandbox onboarding in [Run the uncounted founder demo and prepare truthful funding materials](https://github.com/mangekyou-labs/haze-api/issues/35). The investigator remains an optional follow-up; its live paid diagnosis has not passed and is not a prerequisite for the coding recording.
+- Recording priority on 2026-10-07: preserve the simpler coding-agent grant demo and public sandbox onboarding in [Run the uncounted founder demo and prepare truthful funding materials](https://github.com/mangekyou-labs/haze-api/issues/35). The investigator remains an optional follow-up; its live paid diagnosis passed on 2026-10-08 and is not a prerequisite for the coding recording.
 
 - Planning is resolved. Reviewed offline implementation is integrated locally; the founder command and separate live/recording gates are tracked below. Deployment and publication remain separate.
 - Owner selected paid execution data plus prepaid inference on 2026-10-07. The current prompt-and-answer starter is a transport demonstration, not this investigator.
@@ -39,7 +39,7 @@ Define an implementation-ready Base transaction investigator: it diagnoses a fai
 
 - [Package one founder-facing live investigator command](https://github.com/mangekyou-labs/haze-api/issues/56#issuecomment-6040500073): packaged and validated locally; [validation](founder-live-validation-2026-10-07.md).
 - [Verify a useful live diagnosis and its own prepaid exchange](https://github.com/mangekyou-labs/haze-api/issues/57): complete. Two installed live investigations returned cited reports and each confirmed its own prepaid model response. [Validation and recovery evidence](founder-live-validation-2026-10-08.md) includes separate funding verification and reviewed build identity. Recording remains separate.
-- [Add the verified investigator segment to the founder recording guide](https://github.com/mangekyou-labs/haze-api/issues/58): depends on live verification; optional checklist prepared, recording boxes unchecked.
+- [Add the verified investigator segment to the founder recording guide](https://github.com/mangekyou-labs/haze-api/issues/58): recording guide updated to the verified live evidence, with timing and narration; recording boxes remain unchecked.
 
 ## Not yet specified
 
