@@ -38,7 +38,7 @@ Use the reviewed local sidecar candidate for recording; public npm 0.2.11 lacks 
 
 ## Approved public rollout
 
-The user approved the prepared push and public rollout. Branch `founder-sandbox-rollout-2026-10-08` was pushed to `mangekyou-labs/haze-api`. Render deployment `dep-db3k31d9fdbs73e53n2g` became live at 2026-10-08T07:10:44Z with exact candidate commit `041a1072e799f791131fb042a595f5dc435b24af`; `BASE_SYNC_MAX_BLOCK_RANGE` was explicitly set to `10`.
+The user approved the prepared push and public rollout. Branch `founder-sandbox-rollout-2026-10-08` was pushed to `mangekyou-labs/haze-api`. Render deployment `dep-db3k31d9fdbs73e53n2g` became live at 2026-10-08T07:10:44Z with exact candidate commit `041a1072e799f791131fb042a595f5dc435b24af`; `BASE_SYNC_MAX_BLOCK_RANGE` was explicitly set to `10`. Render automatic deploys from the older tracked branch were disabled to preserve this exact reviewed revision; re-enable only after the candidate is integrated into the intended deployment branch.
 
 Vercel production deployment `dpl_DZjZaCNLq7nHLxcGGADXJSFY6uR7` became READY. The public sandbox GET now returns 401 (authentication required) instead of 404; gateway readiness returns 200. Production runtime was set explicitly from configured local authentication/Stripe TEST values, the verified Render billing token, and the public gateway/auth URLs.
 
