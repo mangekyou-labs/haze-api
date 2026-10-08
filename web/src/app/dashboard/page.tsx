@@ -49,10 +49,10 @@ export default async function DashboardPage() {
       <div className="mx-auto w-full max-w-4xl flex-1 px-6 py-12">
         <div className="mb-8 flex items-center justify-between gap-4">
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Invite-only research pilot</p>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">Pilot onboarding</h1>
+            <p className="font-mono text-xs uppercase tracking-[0.18em] text-cyan-300/80">Base Sepolia</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">Set up your credits</h1>
             <p className="mt-1 text-sm text-zinc-400">
-              {session.user?.email ?? session.user?.name} · experimental Base Sepolia, no payment
+              {session.user?.email ?? session.user?.name}
             </p>
           </div>
           <form
@@ -70,48 +70,19 @@ export default async function DashboardPage() {
           </form>
         </div>
 
-        <p className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-sm leading-6 text-zinc-400">
-          This pilot is invite-only and experimental. Founder-issued
-          invites provision Base Sepolia test credits; there is no payment
-          step for product calls, no card, and no wallet flow. External slots A
-          and C receive a fixed $25 research honorarium for a 30-minute session
-          even if setup fails. It is not product revenue or payment intent.
-          Your credential secret and backup
-          password never leave this browser. Pilot telemetry does not collect
-          prompts, responses, secrets, proofs, nullifiers, request signals, or
-          payer/spend-plane joins. For valid spends, the payment proof is
-          designed for payer and credential unlinkability; the gateway and the
-          upstream provider still receive requests and can observe their
-          content and traffic metadata.
-        </p>
-
         <PilotOnboardingFlow
           network={network}
           gatewayBaseUrl={PUBLIC_GATEWAY_URL}
         />
 
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Supported clients</p>
-          <h2 className="mt-2 text-lg font-semibold text-zinc-100">One spend path, two client shapes</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-            Use the project sidecar for <code className="font-mono text-xs text-cyan-300">POST /v1/chat/completions</code>,
-            or register the custom <code className="font-mono text-xs text-cyan-300">zk-prepaid</code> adapter in
-            an x402-native agent. The deployed resource server advertises x402 v2, zk-prepaid, eip155:84532,
-            prepaid-claim, and escrow at <code className="font-mono text-xs text-cyan-300">/supported</code>;
-            generic x402 clients, unmodified agents, public facilitators, Bazaar, MCP, and the standard exact
-            rail are unsupported.
-          </p>
-        </section>
-
-        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-500">Already have a credential?</p>
-          <h2 className="mt-2 text-lg font-semibold text-zinc-100">Restore an encrypted credential locally</h2>
+          <h2 className="mt-2 text-lg font-semibold text-zinc-100">Restore your credential</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-            Version-2 activated credentials and legacy version-1 exports are both
-            accepted. Decryption happens in your browser.
+            Open your recovery file to restore your credential on this device.
           </p>
           <a href="/recover" className="mt-4 inline-flex min-h-10 items-center rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300">
-            Restore an encrypted credential
+            Restore your credential
           </a>
         </section>
       </div>

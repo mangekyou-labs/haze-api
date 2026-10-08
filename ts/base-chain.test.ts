@@ -19,6 +19,7 @@ vi.mock('viem', async (importOriginal) => {
   };
 });
 
+import { FundingPreBroadcastError } from './pilot-funding.js';
 import { createBaseBondSponsor } from './base-chain.js';
 
 const TRANSACTION = `0x${'ab'.repeat(32)}` as const;
@@ -35,6 +36,11 @@ describe('Base bond sponsor attribution', () => {
       waitForTransactionReceipt: mocks.waitForTransactionReceipt,
       getBlockNumber: mocks.getBlockNumber,
       getContractEvents: mocks.getContractEvents,
+      simulateContract: vi.fn().mockResolvedValue({}),
+      estimateContractGas: vi.fn().mockResolvedValue(100000n),
+      estimateFeesPerGas: vi.fn().mockResolvedValue({ maxFeePerGas: 1000000000n }),
+      getBalance: vi.fn().mockResolvedValue(1000000000000000000n),
+      getTransactionCount: vi.fn().mockResolvedValue(0),
     });
     mocks.writeContract.mockResolvedValue(TRANSACTION);
     mocks.waitForTransactionReceipt.mockResolvedValue({ status: 'success', logs: [] });
@@ -61,7 +67,31 @@ describe('Base bond sponsor attribution', () => {
       'fundBundle',
       'releaseBond',
     ]);
-    expect(mocks.waitForTransactionReceipt).toHaveBeenCalledWith({ hash: TRANSACTION, confirmations: 3 });
+    expect(mocks.waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: TRANSACTION, confirmations: 3 }));
+  });
+
+  it('releases definitively before a write when gas or pending-nonce reads fail', async () => {
+    // Construction creates the client; manipulate its local RPC stubs.
+    const sponsor = createBaseBondSponsor();
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    rpc.getBalance.mockResolvedValue(1n);
+    await expect(sponsor.fundBundle('1', 0)).rejects.toThrow('insufficient_gas');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+    rpc.getBalance.mockResolvedValue(1000000000000000000n);
+    rpc.getTransactionCount.mockRejectedValue(new Error('RPC unavailable'));
+    await expect(sponsor.fundBundle('1', 0)).rejects.toBeInstanceOf(FundingPreBroadcastError);
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('persists original and replacement hashes while waiting for confirmation', async () => {
+    const replacementHash = `0x${'cd'.repeat(32)}`;
+    mocks.waitForTransactionReceipt.mockImplementation(async ({ onReplaced }) => {
+      await onReplaced({ transaction: { hash: replacementHash } });
+      return { status: 'success', transactionHash: replacementHash, logs: [] };
+    });
+    const persisted = vi.fn(async (_hash: string) => {});
+    await expect(createBaseBondSponsor().fundBundle('1', 0, persisted)).rejects.toThrow('base_funding_event_missing');
+    expect(persisted.mock.calls).toEqual([[TRANSACTION], [replacementHash]]);
   });
 
   it('fails closed when no Builder Code is configured', () => {
@@ -69,6 +99,28 @@ describe('Base bond sponsor attribution', () => {
 
     expect(() => createBaseBondSponsor()).toThrow('BASE_BUILDER_CODE is not configured');
     expect(mocks.createWalletClient).not.toHaveBeenCalled();
+  });
+
+  it('reconciles within the configured RPC log range without gaps', async () => {
+    vi.stubEnv('BASE_SYNC_MAX_BLOCK_RANGE', '10');
+    vi.stubEnv('BASE_DEPLOYMENT_BLOCK', '100');
+    mocks.getBlockNumber.mockResolvedValue(128n);
+    mocks.getContractEvents.mockImplementation(async ({ fromBlock, toBlock }) => {
+      if (toBlock - fromBlock + 1n > 10n) throw new Error('RPC log range exceeds ten blocks');
+      return fromBlock === 120n ? [{
+        args: { commitment: `0x${'0'.repeat(63)}1`, expiry: 1_800_000_000n },
+        transactionHash: TRANSACTION,
+      }] : [];
+    });
+    try {
+      await expect(createBaseBondSponsor().reconcileBundle('1')).resolves.toEqual({
+        transaction: TRANSACTION, expiryAt: 1_800_000_000_000,
+      });
+      expect(mocks.getContractEvents.mock.calls.map(([range]) => [range.fromBlock, range.toBlock])).toEqual([
+        [100n, 109n], [110n, 119n], [120n, 125n],
+      ]);
+      expect(mocks.writeContract).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it('reconciles only events inside the three-confirmation window', async () => {

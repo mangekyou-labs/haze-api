@@ -145,34 +145,12 @@ describe('kill switch', () => {
     expect(provider.calls).toBe(0);
   });
 
-  it('blocks invite redemption and detached funding', async () => {
+  it('keeps retired invite and detached funding routes unavailable while paused', async () => {
     const store = new MemoryLaunchControlStore();
-    const { gateway, invites } = await launched(store, new CountingProvider(), { invites: true });
-    process.env.BILLING_INTERNAL_TOKEN = INTERNAL_TOKEN;
-    try {
-      const issued = await invites!.issue({ githubAccountId: SECRET_GITHUB_ID });
-      const redemption = await request(gateway.app)
-        .post('/v1/pilot/invites/redeem')
-        .set('authorization', `Bearer ${INTERNAL_TOKEN}`)
-        .send({ code: issued.code, githubAccountId: SECRET_GITHUB_ID });
-      expect(redemption.status).toBe(200);
-
-      await store.pause('operator review', NOW);
-
-      const blockedRedemption = await request(gateway.app)
-        .post('/v1/pilot/invites/redeem')
-        .set('authorization', `Bearer ${INTERNAL_TOKEN}`)
-        .send({ code: issued.code, githubAccountId: SECRET_GITHUB_ID });
-      expect(blockedRedemption.status).toBe(503);
-      expect(blockedRedemption.body.error).toBe('pilot_paused');
-
-      const funding = await request(gateway.app)
-        .post('/v1/pilot/funding')
-        .send({ fundingToken: redemption.body.fundingToken, commitment: SECRET_COMMITMENT });
-      expect(funding.status).toBe(503);
-      expect(funding.body.error).toBe('pilot_paused');
-    } finally {
-      delete process.env.BILLING_INTERNAL_TOKEN;
+    const { gateway } = await launched(store, new CountingProvider(), { invites: true });
+    await store.pause('operator review', NOW);
+    for (const path of ['/v1/pilot/invites/redeem', '/v1/pilot/funding']) {
+      expect((await request(gateway.app).post(path).send({})).status).toBe(404);
     }
   });
 
