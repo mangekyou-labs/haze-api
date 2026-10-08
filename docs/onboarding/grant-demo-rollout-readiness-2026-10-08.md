@@ -1,6 +1,6 @@
 # Founder demo rollout readiness — 2026-10-08
 
-Recording remains gated on hosted Checkout, webhook, balance and bundle-funding acceptance. Local tests do not establish these gates.
+Hosted Checkout, verified webhook crediting, Base Sepolia funding, duplicate-request checks and reload recovery passed on 2026-10-08. Recording prerequisites are complete using the reviewed local candidate and existing configured credential. Filming, video review, package publication and submission remain unfinished. See [final hosted evidence](#hosted-acceptance-passed--0854-utc); earlier sections preserve the rollout history.
 
 ## Reviewed candidate
 
@@ -18,7 +18,7 @@ Known operational limits: ambiguous sponsor attempts remain held until reconcili
 - Disposable local Postgres integration: 14 passed; no hosted database was mutated.
 - Graph refreshed; existing SQL-parser/source extraction warnings remain.
 
-## Hosting evidence
+## Initial hosting evidence (before approved rollout)
 
 The replacement Vercel credential authenticates successfully. Public `hazecredits.vercel.app` belongs to project `prj_OdIixKoziusP4cY4YqlhblKsfrTM` (`zk-credits-web`), whose root directory is unset. The root checkout's other linked project does not own that domain.
 
@@ -30,7 +30,7 @@ Deployment ID: `dpl_BnV4y51pS1ksAGSfmWruShFtM9fA`. Vercel authentication protect
 
 Render service `srv-d9sku9dbedkc73dofd7g` tracks `feature-base-zk-credits`, currently commit `2f3117db7dade105b34c0bb37540efadb2337411`; redeploying that branch would omit the candidate. Its configured log range is not `10` and must be aligned for rollout. The service is generally ready, but sandbox routes remain undeployed.
 
-## Remaining external gates
+## Initial external gates (completed by final hosted acceptance)
 
 Push only the isolated candidate branch, deploy that exact gateway revision (including migration 0020), configure the verified public web runtime and deploy it, then configure the Stripe TEST webhook at `/api/sandbox/webhook`. Complete a genuine Checkout and verify webhook delivery, account balance, bundle funding, and retry/recovery behavior. Do not substitute fabricated events.
 
@@ -42,16 +42,16 @@ The user approved the prepared push and public rollout. Branch `founder-sandbox-
 
 Vercel production deployment `dpl_DZjZaCNLq7nHLxcGGADXJSFY6uR7` became READY. The public sandbox GET now returns 401 (authentication required) instead of 404; gateway readiness returns 200. Production runtime was set explicitly from configured local authentication/Stripe TEST values, the verified Render billing token, and the public gateway/auth URLs.
 
-Existing Stripe TEST endpoint `we_1U29551I3zjIgUTMzbuhAMq8` was updated to `https://hazecredits.vercel.app/api/sandbox/webhook`, enabled for `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Its signing secret was preserved. Actual delivery must still prove that the configured signing secret matches.
+Existing Stripe TEST endpoint `we_1U29551I3zjIgUTMzbuhAMq8` was updated to `https://hazecredits.vercel.app/api/sandbox/webhook`, enabled for `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Its signing secret was preserved. At this stage, actual delivery still needed to prove that the configured signing secret matched.
 
-Authenticated hosted account status succeeds, with zero balance/reservations/bundles. Sponsor readiness currently reports `insufficient_usdc`: zero canonical Base Sepolia test USDC, zero allowance, and sufficient gas. Sponsor address: `0xfB630DFFbA6E1F5d75a73519014A941B89431d28`. The real browser reached GitHub login and needs the human to complete authentication.
+At this stage, authenticated hosted account status succeeded, with zero balance/reservations/bundles. Sponsor readiness reported `insufficient_usdc`: zero canonical Base Sepolia test USDC, zero allowance, and sufficient gas. Sponsor address: `0xfB630DFFbA6E1F5d75a73519014A941B89431d28`. The real browser had reached GitHub login and awaited human authentication.
 
-No genuine new Stripe Checkout, successful bundle funding, recording, npm publication or submission has occurred yet. Earlier hosting evidence above describes the pre-rollout checks.
+At this stage, no genuine new Stripe Checkout, successful bundle funding, recording, npm publication or submission had occurred. Earlier hosting evidence above describes the pre-rollout checks.
 
 
-## Continuation after human authentication
+## Earlier continuation while awaiting human authentication
 
-Two browser sessions remain open through `/Users/kyler/.codex/skills/playwright/scripts/playwright_cli.sh`: `haze-founder` is at real GitHub OAuth login, and `haze-faucet` is at Circle's human CAPTCHA with Base Sepolia and the sponsor address already selected. The faucet request has not transferred tokens; no CAPTCHA bypass or alternate identity was attempted.
+At this earlier stage, two browser sessions remained open through `/Users/kyler/.codex/skills/playwright/scripts/playwright_cli.sh`: `haze-founder` is at real GitHub OAuth login, and `haze-faucet` is at Circle's human CAPTCHA with Base Sepolia and the sponsor address already selected. The faucet request has not transferred tokens; no CAPTCHA bypass or alternate identity was attempted.
 
 After the human completes these steps, use `/tmp/haze-founder-readiness/public-funder-status.py` to verify the transfer. `/tmp/haze-founder-readiness/approve-sandbox.cjs` is prepared to approve exactly 20 canonical test USDC to the hosted bond, validates chain/token/sponsor, includes Builder Code attribution, and reports only public transaction metadata. It has not been executed. Do not run another faucet request or change sponsor keys to evade limits.
 
@@ -59,7 +59,7 @@ Continue in the authenticated dashboard with a genuine Stripe TEST Checkout, ver
 
 Deployment access scripts under `/tmp/haze-founder-readiness/` read local secret configuration privately; never dump their runtime values or attach credential files. Approved public deployments are complete; further permission for the same rollout is unnecessary. Human authentication/CAPTCHA remain external prerequisites, not deployment approval requests.
 
-## Hosted acceptance progress — 08:47 UTC
+## Intermediate hosted acceptance — 08:47 UTC
 
 Real GitHub OAuth completed after retrying an expired/unreadable PKCE check (`InvalidCheck`). No authentication configuration change or bypass was needed. The authenticated dashboard initially showed $0.00.
 
@@ -68,3 +68,17 @@ A genuine hosted Stripe TEST Checkout completed for 2,000 USD cents (`livemode=f
 The browser generated and downloaded a recovery capsule locally. Its contents remain private and are excluded from git. Bundle funding is still gated on the sponsor's 20 test USDC: the faucet CAPTCHA expired before submission, and the human was asked to solve it and immediately send the already-filled Base Sepolia request. No approval transaction or bundle funding has occurred yet.
 
 The downloaded capsule re-import passed (`Backup verified locally`). A real activation attempt with the unfunded sponsor stopped at `Bundle status: Waiting for test USDC`; dashboard totals stayed $20.00 available and $0.00 held. This verifies the pre-send insufficient-liquidity path preserves simulated funds. It does not establish successful funding or post-send recovery.
+
+## Hosted acceptance passed — 08:54 UTC
+
+Circle displayed `Tokens sent`, and a chain read confirmed 20,000,000 canonical USDC base units in the configured sponsor wallet. Exact 20-test-USDC approval confirmed in transaction `0xcd1f33bc0e69b171560c7f9eb80af3c75ab1b2ed5743555e8e119aff4c8a617b`.
+
+Retrying the existing waiting bundle succeeded: [Base Sepolia funding transaction](https://sepolia.basescan.org/tx/0xbd4485354e9bfde9aa3ea98bf9b0591aab77589d98944443d41754ebde69a557). An independent RPC receipt/contract read confirmed success with 63 confirmations at verification, the configured sponsor and bond, Builder Code suffix, active tier 0, a 20,000,000-unit USDC bond and matching credential expiry (2026-11-07). The browser downloaded and locally verified its activated 250-call credential.
+
+Hosted account totals are now zero available and zero reserved, with exactly one funded bundle. Two duplicate activation requests both returned HTTP 200 and the same funded transaction, with no additional deduction or bundle. Stripe's genuine completion event was redelivered through its event-retry endpoint; pending webhooks returned to zero, and account totals remained zero. No locally fabricated signed event was used. Reloading the page and importing the activated credential restored the same funded bundle and verified activation metadata locally.
+
+This clears the external Checkout/webhook/balance/funding gates for recording. Local tests cover ambiguous post-broadcast outcomes; no hosted fault was deliberately injected, so this is not evidence of a live timeout/restart recovery drill. The documented owner-polling and slow historical scan limitations remain. Sponsor USDC and allowance are now zero after funding: show the confirmed activation, or replenish before attempting another new bundle. Never imply a new activation occurred when showing this completed one.
+
+Recording build: use the reviewed local sidecar with the existing canonical configured credential; do not overwrite it with this browser acceptance credential. Keep onboarding funding evidence separate from the recording task's spend evidence. A fresh, still-broken recording fixture is prepared at `/var/folders/f3/vyr34p2x2hb0239kv43c2dc40000gn/T/haze-founder-recording-2026-10-08-iri0l9ef`, with an initial git commit and the expected two failing/two passing tests. No new paid coding run was needed; the earlier paid rehearsal remains valid, and the recorded run must show its own result and payment counters.
+
+No recording, public package publication, grant submission or award has occurred. Issue 35 remains open for recording and submission work.

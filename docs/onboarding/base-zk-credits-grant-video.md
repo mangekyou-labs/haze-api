@@ -29,9 +29,9 @@ simulated balance separately.
 
 - [ ] Prepare the Base USDC indexer sample and show its failing duplicate-log test.
 - [ ] Activate a bundle and download the activated credential privately.
-- [ ] Install the npm package, import the credential with setup, and check readiness.
+- [ ] Use the reviewed local candidate; reuse the existing configured credential and check readiness. Import privately only if setup is needed.
 - [ ] Run the indexer fix through Codex; show the code diff and passing tests.
-- [ ] Record: failing test → activation → npm setup → agent fixes and tests →
+- [ ] Record: failing test → confirmed activation → candidate readiness → agent fixes and tests →
   x402 evidence from that same task. Confirm committed claims; keep raw payment
   payloads private.
 - [ ] Label the prototype Base Sepolia and experimental. Describe the $5,000
@@ -43,13 +43,14 @@ simulated balance separately.
 
 ## After downloading the activated credential
 
-Requires Node.js 20 or newer and native OS credential storage.
+Requires Node.js 20 or newer and native OS credential storage. The recording machine already has a configured credential: reuse it. On a separate device needing setup, use the reviewed local candidate, replacing `/path/to/haze` below; import privately before recording.
 
 ```sh
-npm install --global zk-credits
-ZK_CREDITS_CREDENTIAL_PATH=/path/to/activated-credential.json zk-credits setup codex
-zk-credits codex
+ZK_CREDITS_CREDENTIAL_PATH=/path/to/activated-credential.json \
+  node /path/to/haze/packages/zk-credits-sidecar/dist/zk-credits.js setup codex
 ```
+
+For the actual coding run, use the verified model/options in the live preflight report.
 
 Setup handles packaged proving artifacts, the default release RPC, witness
 checks, OS credential storage, and Codex configuration. An OS access approval
@@ -62,16 +63,15 @@ npm release does not yet include this flag. It launches a fresh sidecar on a
 random loopback port with a private environment token, then prints only counters
 from that process after Codex exits. `exchange_verified` means the agent exited
 successfully and a settled model response was observed; review the actual diff
-and passing tests separately. A real paid coding run is still unverified. The [founder demo command](base-zk-credits-founder-demo.md#perform-one-genuine-task)
+and passing tests separately. A [real paid coding rehearsal passed on 2026-10-08](grant-demo-live-preflight-2026-10-08.md):
+four unchanged tests passed with five committed claims and five successful
+responses. Use that report's verified invocation. [Hosted sandbox acceptance also passed](grant-demo-rollout-readiness-2026-10-08.md#hosted-acceptance-passed--0854-utc), including real Checkout/webhook delivery, funding, duplicate requests and reload recovery. The [founder demo command](base-zk-credits-founder-demo.md#perform-one-genuine-task)
 performs a separate inference request; its summary cannot stand in for this
 task's exchange. Show only reviewed evidence from the run being recorded.
 
 ## Sandbox activation before recording
 
-Public Stripe sandbox activation is implemented and verified with local tests
-and a disposable Postgres database. Live test-mode Checkout, webhook delivery,
-and Base Sepolia funding still require external verification against [the approved funding design](../superpowers/specs/2026-10-07-grant-demo-sandbox-design.md)
-before it appears in the video:
+Public Stripe TEST activation passed hosted acceptance on 2026-10-08 against [the approved funding design](../superpowers/specs/2026-10-07-grant-demo-sandbox-design.md). The [rollout report](grant-demo-rollout-readiness-2026-10-08.md) records real Checkout, webhook crediting, confirmed funding, duplicate delivery/activation and reload recovery:
 
 - [x] Remove invite entry; expose test checkout to signed-in users.
 - [x] Show simulated balance and each bundle's funding status.
@@ -79,8 +79,9 @@ before it appears in the video:
 - [x] Deduct the reserved simulated amount once after confirmed funding;
   recover failures and unknown outcomes without duplicate funding or deduction.
 
-Use only the flow actually working at recording time. A faucet supplies test
-USDC separately from simulated Stripe payments.
+The acceptance bundle is funded for 250 calls and expires November 7, 2026. Show its confirmed activation; the sponsor pool is now empty, so another new bundle requires replenishment. A faucet supplies test USDC separately from simulated Stripe payments. No hosted timeout/restart fault was injected; ambiguous-outcome behavior has local test coverage and documented operational limits.
+
+For recording, use the reviewed local sidecar and existing canonical configured credential. Do not import the browser acceptance credential over it or claim the recorded coding spends came from that browser bundle. Keep the onboarding acceptance and task-specific spend evidence distinct. Public npm 0.2.11 lacks the local evidence/investigator features; do not present the generic public install as feature-equivalent.
 
 ## Optional investigator segment — live prerequisite passed
 
@@ -105,7 +106,9 @@ The validated example command is:
 zk-credits investigate --chain base 0xc4744cb2714fa9238da819c4299f091302c0dc170acb0886bb975234ac10c69b
 ```
 
-A repeated hash can recover the saved report without a new paid call. The
+A repeated hash can recover prior evidence and accounting without a new paid call.
+The current preflight returned `partial (recovered_stopped)` for both hashes;
+it did not regenerate the complete model report. The
 [successful invocation report](../wayfinder/base-transaction-investigator/founder-live-report-2026-10-08.txt)
 and [fresh rehearsal report](../wayfinder/base-transaction-investigator/founder-live-rehearsal-2026-10-08.txt)
 each show one 402 challenge, validated model delivery, one confirmed consumed
@@ -146,9 +149,13 @@ Recording work remains unchecked:
   identity-to-spend joins; label experimental/testnet payment. Exact execution-data
   purchases stay disabled.
 
-Live rehearsal has passed; filming and sharing have not. Stripe Checkout and
-webhooks, public onboarding deployment, the paid coding task and registry
-publication remain separately unverified. The existing gateway was reconfigured
-and redeployed during live validation; that does not establish a public sandbox
-launch. The investigator can use the existing funded credential without a new
-checkout or funding.
+Prior paid investigator and coding rehearsals passed. Public onboarding, genuine Stripe TEST Checkout/webhooks, and Base Sepolia bundle funding also passed the later hosted acceptance. Filming, sharing and equivalent registry publication have not occurred. The investigator can use the existing configured credential without another checkout or funding, but repeated validated hashes currently recover partial prior evidence rather than a fresh paid report.
+
+## Prepared recording sequence — 2026-10-08
+
+1. Open the fresh broken fixture at `/var/folders/f3/vyr34p2x2hb0239kv43c2dc40000gn/T/haze-founder-recording-2026-10-08-iri0l9ef`. Run `npm test`: two tests fail and two pass. The repository sample and prior successful rehearsal remain unchanged.
+2. Show the public dashboard's confirmed 250-call Base Sepolia activation and its explorer transaction. Label Stripe dollars simulated; keep account identifiers and credential files off camera. This is the completed acceptance activation, not a new payment during filming.
+3. Return to the fixture and run the verified local-candidate invocation in the live preflight report, using the existing configured credential. Review `git diff` and four passing unchanged tests, then show only that run's aggregate x402 counters. Preserve canonical accounting; do not reset state or run the investigator concurrently.
+4. Close with the experimental Base Sepolia scope and one concrete next milestone. Keep the coding segment; optionally show the saved investigator report separately, explicitly labeled as its prior validated run. Review the clip for private data before sharing.
+
+Hosted prework is complete; recording and submission boxes remain unchecked until those actions occur. Recheck official grant requirements before submission.
