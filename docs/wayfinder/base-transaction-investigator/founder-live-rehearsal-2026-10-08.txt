@@ -1,0 +1,36 @@
+Investigation: 96721a1e-91bf-4eb4-8220-9d2977758c3e
+Transaction: 0x96e2a530350fd2f99741b7a40659531217393e2a33242ad81f1df2f749d07b1d
+Evidence chain: Base mainnet
+Result: complete (public_evidence_interpreted)
+
+Observed: Receipt records failed execution. [e2]
+Observed: Original execution returned Error("ERC20: transfer amount exceeds balance"). [e4]
+Observed: Evidence records status = "0x0". [e2]
+Observed: Evidence records from = "0xc292fbdd3d2e4c1ad9c31db9692bb888cee46fa8". [e1]
+Observed: Evidence records to = "0x76667c97613d41ed04c0951e957e91f1f6cd8cbd". [e1]
+Observed: Evidence records value = "0x0". [e1]
+Observed: Evidence records type = "0x0". [e1] [e2]
+Observed: Evidence records gasUsed = "0x3c63f". [e2]
+Observed: Evidence records gasUsed = "0x3c63f". [e2]
+Observed: Evidence records timestamp = "0x66ca5ce3". [e3]
+Observed: Evidence records number = "0x1200000". [e3]
+Supported: Original execution reverted with Error("ERC20: transfer amount exceeds balance"). This establishes the returned error, not its underlying cause. [e4]
+Hypothesis: The transaction reverted because the sender lacked sufficient ERC20 token balance to complete the transfer.
+Next check: Verify the token contract at 0x76667c97613d41ed04c0951e957e91f1f6cd8cbd on Base (chainId 8453) to determine its name, symbol, and decimals. [e1] [e4]
+Next check: Check the balance of the sender (0xc292fbdd3d2e4c1ad9c31db9692bb888cee46fa8) for that specific token at block 0x1200000 to confirm it was lower than the attempted transfer amount. [e1] [e4]
+Next check: Check what function was called on the target contract; the input data is omitted, so the exact function selector is not directly visible. [e1] [e4]
+Uncertainty: Validated revert data or call trace explaining failure.
+Uncertainty: Evidence e1 field input omitted from model summary.
+Uncertainty: Evidence e2 field logs omitted from model summary.
+[e1] transaction: live_rpc; SHA-256 6790d31b435afd8b85b6720c09928e48b735ced8fa5595fa8c736a49ee93fa8b
+[e2] receipt: live_rpc; SHA-256 8beea72d2c178edfed75911c924a16faed07ca867c2191f35e8767db98979f82
+[e3] block: live_rpc; SHA-256 9b6a3e23622b7c3e5efdf150d93a3272e76c1956acd7f02b405ef46d6b0800ce
+[e4] original_execution: live_public_execution; SHA-256 f1d323e71fe95f05050e98d73ca8027d5b2f9c62d32057181673bb56b69b772b
+
+Payment: custom zk-prepaid; bundle funding on Base Sepolia, credit consumption offchain.
+Execution-data purchases: disabled.
+Confirmed consumed credits: 1 (this invocation)
+Failed outcomes: 0
+Retired slots: 1
+Unknown outcomes: 0
+Task payment evidence: {"challengeObserved":1,"confirmed":1,"failed":0,"unknown":0,"retired":1,"modelDeliveryObserved":true,"recoveredPriorTask":false,"build":"14533b1ebbca1bf21194fd289539ab08dbaeac711c2e6f2719e453bb874f972e"}

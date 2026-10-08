@@ -752,7 +752,13 @@ test("configured model evidence tools execute sequentially with fixed identity a
   const { runtime, calls } = await setup({
     transport: async ({ calls, init }) => {
       const body = JSON.parse(init.body);
-      assert.equal(body.parallel_tool_calls, false);
+      assert.equal(Object.hasOwn(body, "parallel_tool_calls"), false);
+      const schema = body.response_format.json_schema.schema;
+      assert.deepEqual(schema.properties.observedFacts.items.required, ["text", "evidenceIds", "field", "value"]);
+      assert.deepEqual(schema.properties.hypotheses.items.required, ["id", "text", "missingEvidence", "developerCheck"]);
+      assert.ok(schema.properties.suggestedChecks.items.properties.text);
+      assert.equal(schema.properties.supportedDiagnoses.items.properties.field.const, "data");
+      assert.equal(schema.properties.supportedDiagnoses.items.properties.evidenceIds.maxItems, 1);
       assert.ok(body.tools.some((t) => t.function.name === "receipt"));
       return new Response(
         JSON.stringify({

@@ -1,0 +1,34 @@
+Investigation: 62e6f6e6-87d0-4516-8ef6-9fdc9746231f
+Transaction: 0xc4744cb2714fa9238da819c4299f091302c0dc170acb0886bb975234ac10c69b
+Evidence chain: Base mainnet
+Result: complete (public_evidence_interpreted)
+
+Observed: Receipt records failed execution. [e2]
+Observed: Original execution returned Error("AerodromeV3: insufficient received"). [e4]
+Observed: Evidence records status = "0x0". [e2]
+Observed: Evidence records data = "0x08c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000224165726f64726f6d6556333a20696e73756666696369656e74207265636569766564000000000000000000000000000000000000000000000000000000000000". [e4]
+Observed: Evidence records to = "0xfc0abb8b822cbe977567241c19cee3ab5b6e49f1". [e1]
+Observed: Evidence records from = "0x7d5e22072910fc0bd97c49355dd947f7e4e46809". [e1]
+Observed: Evidence records value = "0x0". [e1]
+Observed: Evidence records gasUsed = "0x242da". [e2]
+Observed: Evidence records blockTimestamp = "0x66ca5ce3". [e1]
+Supported: Original execution reverted with Error("AerodromeV3: insufficient received"). This establishes the returned error, not its underlying cause. [e4]
+Hypothesis: The transaction likely failed due to slippage protection: the actual amount received from the AerodromeV3 swap was below the caller's minimum expected amount.
+Next check: Verify the transaction input data (calldata) to confirm the swap parameters such as `amountIn`, `minAmountOut`, and the token path used. The input was omitted from this report; cross-reference with a block explorer or archive node. [e1]
+Next check: Check if the L1 fee (0xb688fa2d) or gas dynamics contributed to economic viability; however, the revert is a logic revert, not an out-of-gas condition. [e2]
+Uncertainty: Validated revert data or call trace explaining failure.
+Uncertainty: Evidence e1 field input omitted from model summary.
+Uncertainty: Evidence e2 field logs omitted from model summary.
+Uncertainty: A model diagnosis lacked a reproducible evidence reference.
+[e1] transaction: live_rpc; SHA-256 36595668f734187351358941e5ca98f58504cea61100e8f447c2f0615866c567
+[e2] receipt: live_rpc; SHA-256 7f940707886a5385f9f9b2ace895e3671c2625b7fd44ed8d4e0ad4ff62a4d3c4
+[e3] block: live_rpc; SHA-256 9b6a3e23622b7c3e5efdf150d93a3272e76c1956acd7f02b405ef46d6b0800ce
+[e4] original_execution: live_public_execution; SHA-256 8d725b075e99488ec3c43e3407c92e180bf9fa101f3e16f5cf34855495a1abd0
+
+Payment: custom zk-prepaid; bundle funding on Base Sepolia, credit consumption offchain.
+Execution-data purchases: disabled.
+Confirmed consumed credits: 1 (this invocation)
+Failed outcomes: 0
+Retired slots: 1
+Unknown outcomes: 0
+Task payment evidence: {"challengeObserved":1,"confirmed":1,"failed":0,"unknown":0,"retired":1,"modelDeliveryObserved":true,"recoveredPriorTask":false,"build":"14533b1ebbca1bf21194fd289539ab08dbaeac711c2e6f2719e453bb874f972e"}

@@ -38,7 +38,7 @@ Define an implementation-ready Base transaction investigator: it diagnoses a fai
 ## Founder live follow-up
 
 - [Package one founder-facing live investigator command](https://github.com/mangekyou-labs/haze-api/issues/56#issuecomment-6040500073): packaged and validated locally; [validation](founder-live-validation-2026-10-07.md).
-- [Verify a useful live diagnosis and its own prepaid exchange](https://github.com/mangekyou-labs/haze-api/issues/57): open. The existing claim was cancelled and [reconciled as failed](founder-settlement-reconciliation-2026-10-07.md): zero unknown outcomes, zero confirmed consumption, one permanently retired slot. Live model delivery still needs funded provider capacity and gateway readiness; recording remains gated.
+- [Verify a useful live diagnosis and its own prepaid exchange](https://github.com/mangekyou-labs/haze-api/issues/57): complete. Two installed live investigations returned cited reports and each confirmed its own prepaid model response. [Validation and recovery evidence](founder-live-validation-2026-10-08.md) includes separate funding verification and reviewed build identity. Recording remains separate.
 - [Add the verified investigator segment to the founder recording guide](https://github.com/mangekyou-labs/haze-api/issues/58): depends on live verification; optional checklist prepared, recording boxes unchecked.
 
 ## Not yet specified
