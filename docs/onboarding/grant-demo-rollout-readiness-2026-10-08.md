@@ -58,3 +58,11 @@ After the human completes these steps, use `/tmp/haze-founder-readiness/public-f
 Continue in the authenticated dashboard with a genuine Stripe TEST Checkout, verify its actual webhook delivery and balance increment, then generate/download/re-import the browser credential and fund its bundle. Preserve the existing canonical sidecar credential accounting state. Do not install the new browser credential over an existing sidecar credential for this acceptance check.
 
 Deployment access scripts under `/tmp/haze-founder-readiness/` read local secret configuration privately; never dump their runtime values or attach credential files. Approved public deployments are complete; further permission for the same rollout is unnecessary. Human authentication/CAPTCHA remain external prerequisites, not deployment approval requests.
+
+## Hosted acceptance progress — 08:47 UTC
+
+Real GitHub OAuth completed after retrying an expired/unreadable PKCE check (`InvalidCheck`). No authentication configuration change or bypass was needed. The authenticated dashboard initially showed $0.00.
+
+A genuine hosted Stripe TEST Checkout completed for 2,000 USD cents (`livemode=false`), session `cs_test_a1no2wQNez6TYFXKFT7KAE8MpHVaqwuZbBWjZzgZvgeJTvpZQKjDufObRt`. Its completion event `evt_1UOCye1I3zjIgUTM8CPyQjtD` reports zero pending webhooks, and the dashboard now shows $20.00 available / $0.00 held. This establishes actual Checkout, webhook signature/runtime, gateway credit and account display acceptance.
+
+The browser generated and downloaded a recovery capsule locally. Its contents remain private and are excluded from git. Bundle funding is still gated on the sponsor's 20 test USDC: the faucet CAPTCHA expired before submission, and the human was asked to solve it and immediately send the already-filled Base Sepolia request. No approval transaction or bundle funding has occurred yet.
