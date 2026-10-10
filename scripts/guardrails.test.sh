@@ -199,7 +199,7 @@ expect_ok   "accepts an ignored env file" bash -c 'cd "$1" && source "$2" && gw_
 printf 'SECRET=abc\n' > "$SANDBOX/mode.env"
 chmod 644 "$SANDBOX/mode.env"
 expect_ok "forces mode 600 on a permissive file" gw_require_private_mode "$SANDBOX/mode.env"
-mode=$(stat -f '%Lp' "$SANDBOX/mode.env" 2>/dev/null || stat -c '%a' "$SANDBOX/mode.env")
+mode=$(stat -c '%a' "$SANDBOX/mode.env" 2>/dev/null || stat -f '%Lp' "$SANDBOX/mode.env")
 if [[ "$mode" == "600" ]]; then pass "the file is 600 afterwards"; else fail "mode is $mode, expected 600"; fi
 expect_ok "is idempotent on a re-run" gw_require_private_mode "$SANDBOX/mode.env"
 

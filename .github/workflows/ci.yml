@@ -64,6 +64,11 @@ jobs:
         working-directory: packages/x402-zk-prepaid
         run: npm ci && npm run build
       - run: npm ci
+      - name: Install sidecar dependencies used by gateway proof tests
+        working-directory: packages/zk-credits-sidecar
+        run: npm ci
+      - name: Prepare hash-pinned proof test artifacts
+        run: npx --no-install tsx ../scripts/prepare-proof-test-artifacts.mts
       - run: npm run typecheck
       - run: npm test -- --run
 
@@ -87,6 +92,12 @@ jobs:
         working-directory: packages/x402-zk-prepaid
         run: npm ci && npm run build
       - run: npm ci
+      - name: Install gateway dependencies used by investigator and acceptance tests
+        working-directory: ts
+        run: npm ci
+      - name: Install packaged investigator build dependencies
+        working-directory: examples/base-transaction-investigator
+        run: npm ci
       - name: Create synthetic launch RPC for package build checks
         run: |
           node --input-type=module -e "import { writeFile } from 'node:fs/promises'; await writeFile('../../.env.launch.local', 'BASE_RPC_URL=https://rpc.invalid/base-sepolia\n', { mode: 0o600 });"
@@ -169,5 +180,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
-      - run: FOUNDRY_OFFLINE=true forge build
+      # A fresh runner must download the pinned compiler before offline tests.
+      - run: forge build
       - run: FOUNDRY_OFFLINE=true forge test

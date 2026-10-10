@@ -189,7 +189,7 @@ gw_require_password_file() {
     _gw_report "$label must be a regular, non-symlinked file"
     return 1
   fi
-  mode=$(stat -f '%Lp' "$value" 2>/dev/null || stat -c '%a' "$value" 2>/dev/null || echo '')
+  mode=$(stat -c '%a' "$value" 2>/dev/null || stat -f '%Lp' "$value" 2>/dev/null || echo '')
   if [[ "$mode" != "600" ]]; then
     _gw_report "$label has mode ${mode:-unknown}; it requires 600"
     return 1
@@ -242,7 +242,7 @@ gw_require_private_mode() {
   local path="$1" mode
   touch "$path"
   chmod 600 "$path"
-  mode=$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path" 2>/dev/null || echo '')
+  mode=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path" 2>/dev/null || echo '')
   if [[ -n "$mode" && "$mode" != "600" ]]; then
     _gw_report "$path has mode $mode; a secret file requires 600"
     return 1

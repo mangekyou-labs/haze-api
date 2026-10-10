@@ -48,12 +48,14 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
   const [commitment, setCommitment] = useState<string | null>(null);
   const [step, setStep] = useState<'capsule' | 'backup' | 'fund' | 'active'>('capsule');
   const [activation, setActivation] = useState<Activation | null>(null);
-  const [bundle, setBundle] = useState<Bundle | null>(null);
+  const [selectedBundle, setBundle] = useState<Bundle | null>(null);
+  const bundle = snapshot?.bundles.find(b => b.commitment === commitment) ?? selectedBundle;
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkoutPending, setCheckoutPending] = useState(false);
   const downloaded = useRef<string | null>(null);
+  const checkoutReturn = useRef<string | null | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     const next = await jsonRequest<Snapshot>('/api/sandbox');
@@ -62,28 +64,38 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
   }, []);
   useEffect(() => {
     let mounted = true;
-    void refresh().catch(cause => { if (mounted) setError(message(cause)); });
-    const checkout = new URLSearchParams(window.location.search).get('checkout');
+    checkoutReturn.current ??= new URLSearchParams(window.location.search).get('checkout');
+    const checkout = checkoutReturn.current;
     if (checkout) {
       sessionStorage.removeItem('zk-credits:checkout-request');
-      setCheckoutPending(checkout === 'success');
-      setNotice(checkout === 'success' ? 'Checkout completed. Waiting for the verified payment to update your balance.' : 'Checkout cancelled. Your balance was not changed.');
       window.history.replaceState(null, '', window.location.pathname);
     }
+    void jsonRequest<Snapshot>('/api/sandbox').then(next => {
+      if (!mounted) return;
+      setSnapshot(next);
+      if (checkout) {
+        const waiting = checkout === 'success' && next.availableCents <= 0;
+        setCheckoutPending(waiting);
+        setNotice(checkout === 'success'
+          ? waiting ? 'Checkout completed. Waiting for the verified payment to update your balance.' : 'Your simulated balance is ready.'
+          : 'Checkout cancelled. Your balance was not changed.');
+      }
+    }).catch(cause => { if (mounted) setError(message(cause)); });
     return () => { mounted = false; };
   }, [refresh]);
   const pending = snapshot?.bundles.some(b => b.state === 'unknown' || b.state === 'funding') || bundle?.state === 'unknown' || bundle?.state === 'funding';
   useEffect(() => {
     if (!pending && !checkoutPending) return;
-    const timer = window.setInterval(() => void refresh().catch(() => {}), 5000);
+    const timer = window.setInterval(() => void refresh().then(next => {
+      if (checkoutPending && next.availableCents > 0) {
+        setCheckoutPending(false); setNotice('Your simulated balance is ready.');
+      }
+    }).catch(() => {}), 5000);
     const stop = checkoutPending ? window.setTimeout(() => {
       setCheckoutPending(false); setNotice('If your top-up has not arrived, refresh status in a moment. Payment verification may still be processing.');
     }, 60_000) : undefined;
     return () => { window.clearInterval(timer); if (stop) window.clearTimeout(stop); };
   }, [pending, checkoutPending, refresh]);
-  useEffect(() => {
-    if (checkoutPending && snapshot && snapshot.availableCents > 0) { setCheckoutPending(false); setNotice('Your simulated balance is ready.'); }
-  }, [checkoutPending, snapshot]);
 
   const finish = useCallback(async (file: RecoveryCapsuleFile, metadata: Activation) => {
     if (downloaded.current === metadata.commitment) return;
@@ -98,7 +110,6 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
     if (!commitment || !snapshot) return;
     const current = snapshot.bundles.find(b => b.commitment === commitment);
     if (!current) return;
-    setBundle(current);
     if (current.activation && capsule) void finish(capsule, current.activation).catch(cause => setError(message(cause)));
   }, [commitment, snapshot, capsule, finish]);
 
