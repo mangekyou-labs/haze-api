@@ -252,7 +252,7 @@ async function resolveWitnessSource(
   const explicitPath = environment.ZK_CREDITS_WITNESS_PATH?.trim();
   if (explicitPath) {
     if (options.manifest.deployment) {
-      throw new Error('Base Sepolia V2 setup requires a witness synchronized from the pinned public Base events');
+      throw new Error('Base Sepolia V2 setup requires a witness synchronized from the pinned public Base events. Unset ZK_CREDITS_WITNESS_PATH, run zk-credits config rpc, and retry zk-credits setup');
     }
     const source: SetupWitnessSource = {
       kind: 'file',
@@ -289,7 +289,7 @@ async function resolveWitnessSource(
     }
   }
   if (options.manifest.deployment) {
-    throw new Error('Base Sepolia V2 setup requires BASE_RPC_URL to sync the pinned V2 bond from its deployment block');
+    throw new Error('Base Sepolia V2 setup requires BASE_RPC_URL to sync the pinned V2 bond from its deployment block. Run zk-credits config rpc, then retry zk-credits setup');
   }
   if (saved?.witness.kind === 'file') {
     try {

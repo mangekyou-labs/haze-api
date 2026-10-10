@@ -156,6 +156,9 @@ function printHelp(): void {
 against the x402 zk-prepaid loopback sidecar. The gateway spend path is
 non-streaming POST /v1/chat/completions; Codex Responses requests pass through
 the sidecar's bounded local compatibility bridge.
+"zk-credits codex --task-evidence" selects the supported model and reasoning
+defaults automatically, then prints this session's aggregate payment counters
+after Codex exits. Enter your coding task interactively; no model flags are needed.
 "zk-credits founder-demo-agent" asks for one local task and runs it through
 the request-aware x402 adapter and local proof engine. It requires explicit
 confirmation before one billable internal exchange; the task and response are

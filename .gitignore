@@ -45,4 +45,5 @@ target/
 # Testing
 .playwright-cli/
 *.png
+!docs/images/zk-credits-codex.png
 .claude/

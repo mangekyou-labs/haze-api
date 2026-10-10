@@ -1,4 +1,5 @@
 import type { SidecarMetricsSnapshot } from './sidecar.js';
+import { DEFAULT_CODEX_MODEL } from './codex-profile.js';
 
 /** Only aggregate counters from a dedicated, fresh sidecar are exportable.
  * No gateway-global deltas or identifying run labels enter this record. */
@@ -20,7 +21,10 @@ export function codingTaskEvidence(metrics: SidecarMetricsSnapshot, exitCode: nu
 export function codingTaskProviderArgs(address: string): string[] {
   const url = new URL(address);
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port) throw new Error('invalid_task_sidecar');
-  return ['-c', 'model_provider="zk_task"', '-c',
+  // Apply the bounded route's defaults at launch, including for older setups.
+  // A user's global Codex model/reasoning settings must not break this path.
+  return ['-c', `model=${JSON.stringify(DEFAULT_CODEX_MODEL)}`,
+    '-c', 'model_reasoning_effort="none"', '-c', 'model_provider="zk_task"', '-c',
     `model_providers.zk_task={name="Haze coding task",base_url=${JSON.stringify(`${url.origin}/v1`)},wire_api="responses",env_key="ZK_CREDITS_TASK_TOKEN"}`];
 }
 

@@ -273,7 +273,22 @@ from product revenue, willingness to pay, and credible payment intent.
 The original paid-pilot definitions of activated design partner and renewal
 intent remain historical definitions and do not describe this research cohort.
 
-## Pilot invite
+## Simulated balance
+
+Account-linked sandbox purchasing power denominated in simulated USD. It is
+separate from the sponsor’s test USDC and the credential’s spend credits.
+
+## Balance reservation
+
+A hold on simulated purchasing power while one bundle funding attempt is
+unresolved. Confirmation deducts it once; definitive failure releases it.
+
+## Billing plane
+
+The account-linked relationship between sandbox top-ups and bundle funding
+history. Payment-proof unlinkability does not conceal this relationship.
+
+## Pilot invite (historical detached flow)
 
 A founder-issued, single-use onboarding code bound to one GitHub account. It
 defaults to seven days of validity, is stored only as a SHA-256 digest, and is
@@ -293,11 +308,20 @@ _Avoid_: API key, purchase, order, license
 
 ## Funding attempt
 
-The use of a funding capability to sponsor one bundle for its bound commitment.
+A recorded try to sponsor one bundle for a commitment. In the public sandbox,
+an authenticated account reserves simulated balance before the attempt; the
+historical invite flow used a detached funding capability.
 An attempt remains unresolved when a transaction may have been broadcast but
 its outcome is unknown; it cannot authorize another broadcast until that
-uncertainty is reconciled. A confirmed funding result may be recorded after the
-capability expires.
+uncertainty is reconciled. A confirmed sandbox result deducts the reservation
+exactly once. Historical capability expiry does not prevent recording its
+already-broadcast result.
+
+## Bundle funding sponsor
+
+The operator-controlled actor that supplies the onchain bond for a bundle.
+Its test USDC and gas are separate from a principal's simulated balance and
+the credential's spend credits.
 
 ## Recovery capsule
 
@@ -317,13 +341,13 @@ may request access approval. Unavailable storage fails without a plaintext
 runtime fallback. Version-1 and version-2 encrypted exports remain legacy paths.
 _Avoid_: funded key, issued key, receipt
 
-## Control plane
+## Control plane (historical detached flow)
 
 The GitHub-facing side of onboarding: invite issuance, redemption, and the
 authenticated session that supplies the GitHub account id. It never stores a
 commitment, a funding token, or a credential secret.
 
-## Provisioning plane
+## Provisioning plane (historical detached flow)
 
 The detached side of onboarding: funding capabilities and the Base Sepolia
 funding transaction. It never stores a GitHub account id, an invite id, or any

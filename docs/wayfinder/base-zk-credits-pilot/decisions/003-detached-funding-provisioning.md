@@ -1,6 +1,7 @@
 # Decision: separate the invite control plane from detached funding provisioning
 
-Status: decided  
+Status: historical invite flow; superseded for public sandbox by [004](004-account-linked-sandbox-billing.md)
+
 Decision date: 2026-09-20
 
 ## Decision

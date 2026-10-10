@@ -25,6 +25,8 @@ describe('coding-task evidence', () => {
   });
   it('uses an environment token and a distinct provider rather than saved sidecar auth', () => {
     const args = codingTaskProviderArgs('http://127.0.0.1:43125');
+    expect(args).toContain('model="openai/gpt-4o-mini"');
+    expect(args).toContain('model_reasoning_effort="none"');
     expect(args.join(' ')).toContain('model_provider="zk_task"');
     expect(args.join(' ')).toContain('env_key="ZK_CREDITS_TASK_TOKEN"');
     expect(args.join(' ')).not.toContain('experimental_bearer_token');

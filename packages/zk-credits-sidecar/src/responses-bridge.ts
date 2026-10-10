@@ -134,7 +134,7 @@ export function translateResponsesRequest(body: unknown): ResponsesTranslation {
   const allowed = [
     'model', 'instructions', 'input', 'stream', 'tools', 'tool_choice', 'max_output_tokens',
     'parallel_tool_calls', 'store', 'client_metadata', 'prompt_cache_key', 'include', 'reasoning',
-    'temperature', 'top_p', 'stop', 'seed', 'presence_penalty', 'frequency_penalty', 'logit_bias',
+    'temperature', 'top_p', 'stop', 'seed', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'text',
   ] as const;
   if (!hasOnlyKeys(body, allowed)) return { ok: false, error: 'unsupported_request_field' };
   if (typeof body.model !== 'string' || body.model.length === 0) return { ok: false, error: 'model_required' };
@@ -158,6 +158,15 @@ export function translateResponsesRequest(body: unknown): ResponsesTranslation {
   }
   if (body.parallel_tool_calls !== undefined && typeof body.parallel_tool_calls !== 'boolean') {
     return { ok: false, error: 'invalid_parallel_tool_calls' };
+  }
+  // Current Codex emits this display hint even for providers whose model
+  // catalog disables verbosity. Validate it without changing the fixed Chat
+  // Completions service class or accepting structured-output controls.
+  if (body.text !== undefined
+    && (!isRecord(body.text) || !hasOnlyKeys(body.text, ['verbosity'])
+      || (body.text.verbosity !== undefined
+        && (typeof body.text.verbosity !== 'string' || !['low', 'medium', 'high'].includes(body.text.verbosity))))) {
+    return { ok: false, error: 'unsupported_text_controls' };
   }
 
   const messages: JsonRecord[] = [];

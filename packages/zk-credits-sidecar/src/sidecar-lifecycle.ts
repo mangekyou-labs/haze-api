@@ -26,5 +26,5 @@ export async function ensureSidecarReady(
     if (await dependencies.isHealthy()) return dependencies.readToken();
   }
 
-  throw new Error(`ZK Credits sidecar did not become ready; inspect ${dependencies.logPath}`);
+  throw new Error(`ZK Credits sidecar did not become ready; inspect ${dependencies.logPath}. Run zk-credits doctor, then zk-credits serve in the foreground to see the startup error. Missing setup: run zk-credits setup. RPC witness sync failure: run zk-credits config rpc and retry.`);
 }

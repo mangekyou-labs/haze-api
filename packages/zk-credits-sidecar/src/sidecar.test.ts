@@ -98,6 +98,7 @@ describe('loopback x402 sidecar', () => {
       client_metadata: { session_id: 'private-session-id' },
       include: ['reasoning.encrypted_content'],
       reasoning: { effort: 'none', summary: 'none' },
+      text: { verbosity: 'low' },
       parallel_tool_calls: true,
       tool_choice: 'auto',
       tools: [
@@ -165,6 +166,7 @@ describe('loopback x402 sidecar', () => {
         tools: [{ type: 'function', function: { name: 'read_file', description: 'Read a file', strict: true } }],
       });
       expect(translated).not.toHaveProperty('parallel_tool_calls');
+      expect(translated).not.toHaveProperty('text');
       expect(translated).not.toHaveProperty('stream');
       expect(JSON.stringify(translated)).not.toMatch(/private-message-id|private-cache-key|private-session-id|web_search|namespace|apply_patch/u);
     } finally {
@@ -232,6 +234,9 @@ describe('loopback x402 sidecar', () => {
       for (const body of [
         { ...valid, input: [{ type: 'message', role: 'user', content: [{ type: 'input_image', image_url: 'data:...' }] }] },
         { ...valid, reasoning: { effort: 'high' } },
+        { ...valid, text: { verbosity: 'unsupported' } },
+        { ...valid, text: { verbosity: ['low'] } },
+        { ...valid, text: { format: { type: 'json_schema' } } },
         { ...valid, unknown_control: true },
         { ...valid, store: true },
         { ...valid, stream: false },

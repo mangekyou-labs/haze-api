@@ -1,7 +1,16 @@
 # Base Builder Grant demo video
 
-Aim for 2–3 minutes: activate credits, connect a coding agent, and show a useful
-task completed through Haze on Base Sepolia. Treat this as technical evidence.
+Aim for 2–3 minutes: show the existing activation, connect a coding agent, and
+show a useful task completed through Haze. Treat this as technical evidence.
+
+**Current step-by-step plan:** [founder checklist](grant-demo-founder-checklist.md)
+mirrors [the live ticket](https://github.com/mangekyou-labs/haze-api/issues/35).
+Publish the [prepared 0.2.12 tarball](../releases/zk-credits-0.2.12.md), verify its
+registry integrity, then install that exact version. The founder command is
+`zk-credits codex --task-evidence`; supported model/reasoning defaults are now
+automatic. Publication has not occurred. The new tarball's paid rehearsal fixed
+the code but timed out before its aggregate summary; it does not replace the
+earlier complete paid acceptance or the filmed run's required evidence.
 
 ## x402 use case: fix a Base USDC transfer indexer
 
@@ -27,47 +36,36 @@ simulated balance separately.
 
 ## Recording checklist
 
-- [ ] Prepare the Base USDC indexer sample and show its failing duplicate-log test.
-- [ ] Activate a bundle and download the activated credential privately.
-- [ ] Use the reviewed local candidate; reuse the existing configured credential and check readiness. Import privately only if setup is needed.
-- [ ] Run the indexer fix through Codex; show the code diff and passing tests.
-- [ ] Record: failing test → confirmed activation → candidate readiness → agent fixes and tests →
-  x402 evidence from that same task. Confirm committed claims; keep raw payment
-  payloads private.
-- [ ] Label the prototype Base Sepolia and experimental. Describe the $5,000
-  Base Builder Grant as the funding target, and name one concrete next milestone.
-- [ ] Review the video for credentials, keys, proofs, nullifiers, request signals,
-  private content, and identity-to-spend joins before sharing.
-- [ ] Verify the current official grant round and submission requirements before
-  applying. Keep a recorded demo separate from any submission or award claim.
+Use [the full ordered checklist](grant-demo-founder-checklist.md) for exact
+commands, pass/fail criteria, stop conditions and publication handover. It covers:
 
-## After downloading the activated credential
+- [ ] Publish/verify/install 0.2.12 and privately check credential readiness.
+- [ ] Prepare a fresh sample with two failing and two passing tests.
+- [ ] Record existing activation, the installed coding command, the implementation
+  fix, four unchanged passing tests and that same session's aggregate exchange.
+- [ ] Record the investigator with its own fresh evidence or an explicit prior-run
+  label; preserve missing-evidence notices and distinguish hypotheses.
+- [ ] Review exported clips, prepare private materials and check the current grant route.
 
-Requires Node.js 20 or newer and native OS credential storage. The recording machine already has a configured credential: reuse it. On a separate device needing setup, use the reviewed local candidate, replacing `/path/to/haze` below; import privately before recording.
+Existing configured credentials need no reimport. Only on a genuinely
+unconfigured device, import privately with:
 
 ```sh
-ZK_CREDITS_CREDENTIAL_PATH=/path/to/activated-credential.json \
-  node /path/to/haze/packages/zk-credits-sidecar/dist/zk-credits.js setup codex
+ZK_CREDITS_CREDENTIAL_PATH=/path/to/activated-credential.json zk-credits setup codex
 ```
 
-For the actual coding run, use the verified model/options in the live preflight report.
+Requires Node.js 20 or newer and native OS credential storage. Setup handles
+packaged proving artifacts, release RPC, witness checks, OS credential storage
+and Codex configuration. An OS access approval may appear. Stop on setup failure;
+use `zk-credits doctor` for diagnostics.
 
-Setup handles packaged proving artifacts, the default release RPC, witness
-checks, OS credential storage, and Codex configuration. An OS access approval
-may appear. Stop if setup fails; use `zk-credits doctor` for diagnostics.
-`zk-credits config rpc` is an optional recovery step for RPC problems.
-
-The local sidecar candidate implements `zk-credits codex --task-evidence`.
-Build and use that candidate as described in the sample README; the published
-npm release does not yet include this flag. It launches a fresh sidecar on a
-random loopback port with a private environment token, then prints only counters
-from that process after Codex exits. `exchange_verified` means the agent exited
-successfully and a settled model response was observed; review the actual diff
-and passing tests separately. A [real paid coding rehearsal passed on 2026-10-08](grant-demo-live-preflight-2026-10-08.md):
-four unchanged tests passed with five committed claims and five successful
-responses. Use that report's verified invocation. [Hosted sandbox acceptance also passed](grant-demo-rollout-readiness-2026-10-08.md#hosted-acceptance-passed--0854-utc), including real Checkout/webhook delivery, funding, duplicate requests and reload recovery. The [founder demo command](base-zk-credits-founder-demo.md#perform-one-genuine-task)
-performs a separate inference request; its summary cannot stand in for this
-task's exchange. Show only reviewed evidence from the run being recorded.
+The dedicated task wrapper opens a random loopback port and prints aggregate
+counters after Codex exits. `exchange_verified` requires successful agent exit
+and a settled model response; review the actual diff and tests separately.
+The [earlier complete paid rehearsal](grant-demo-live-preflight-2026-10-08.md)
+passed four unchanged tests and five committed claims/responses. Those counts
+belong to that run. The separate founder-demo smoke request also cannot
+substitute for the recorded task's evidence.
 
 ## Sandbox activation before recording
 
@@ -81,9 +79,9 @@ Public Stripe TEST activation passed hosted acceptance on 2026-10-08 against [th
 
 The acceptance bundle is funded for 250 calls and expires November 7, 2026. Show its confirmed activation; the sponsor pool is now empty, so another new bundle requires replenishment. A faucet supplies test USDC separately from simulated Stripe payments. No hosted timeout/restart fault was injected; ambiguous-outcome behavior has local test coverage and documented operational limits.
 
-For recording, use the reviewed local sidecar and existing canonical configured credential. Do not import the browser acceptance credential over it or claim the recorded coding spends came from that browser bundle. Keep the onboarding acceptance and task-specific spend evidence distinct. Public npm 0.2.11 lacks the local evidence/investigator features; do not present the generic public install as feature-equivalent.
+For recording, install the published 0.2.12 package and reuse the existing canonical configured credential. Do not import the browser acceptance credential over it or claim the recorded coding spends came from that browser bundle. Keep the onboarding acceptance and task-specific spend evidence distinct. Public npm 0.2.11 lacks the local evidence/investigator features; do not present the generic public install as feature-equivalent.
 
-## Optional investigator segment — live prerequisite passed
+## Investigator segment — prior live prerequisite passed
 
 Keep the coding demo above. [Package one founder-facing live investigator command](https://github.com/mangekyou-labs/haze-api/issues/56#issuecomment-6040500073)
 provides the installed local candidate; [Verify a useful live diagnosis and its own prepaid exchange](https://github.com/mangekyou-labs/haze-api/issues/57#issuecomment-6051600225)
@@ -96,9 +94,9 @@ Use a 30–45 second second segment only if the coding task and onboarding leave
 room within 2–3 minutes. Otherwise keep the coding video at 2–3 minutes and
 make a separate 60–90 second investigator clip. Close Codex before starting the
 investigator with the same credential. An already configured credential needs
-no repeated activation or setup. Use the reviewed local build identified in
-the validation, rather than assuming an npm version contains the same code;
-coordinate publication through [the release gate](https://github.com/mangekyou-labs/haze-api/issues/36).
+no repeated activation or setup. Use the reviewed 0.2.12 release handover and verify its installed version. Package
+publication does not by itself authorize hosted pilot launch through
+[the release gate](https://github.com/mangekyou-labs/haze-api/issues/36).
 
 The validated example command is:
 
@@ -149,9 +147,11 @@ Recording work remains unchecked:
   identity-to-spend joins; label experimental/testnet payment. Exact execution-data
   purchases stay disabled.
 
-Prior paid investigator and coding rehearsals passed. Public onboarding, genuine Stripe TEST Checkout/webhooks, and Base Sepolia bundle funding also passed the later hosted acceptance. Filming, sharing and equivalent registry publication have not occurred. The investigator can use the existing configured credential without another checkout or funding, but repeated validated hashes currently recover partial prior evidence rather than a fresh paid report.
+Prior paid investigator and coding rehearsals passed. Public onboarding, genuine Stripe TEST Checkout/webhooks, and Base Sepolia bundle funding also passed the later hosted acceptance. Version 0.2.12 is published with verified artifact integrity; filming and sharing remain pending. The investigator can use the existing configured credential without another checkout or funding, but repeated validated hashes currently recover partial prior evidence rather than a fresh paid report.
 
-## Prepared recording sequence — 2026-10-08
+## Historical local-candidate preparation — superseded by the founder checklist
+
+The following records earlier local preparation, not the current recording instructions.
 
 1. Open the fresh broken fixture at `/var/folders/f3/vyr34p2x2hb0239kv43c2dc40000gn/T/haze-founder-recording-2026-10-08-iri0l9ef`. Run `npm test`: two tests fail and two pass. The repository sample and prior successful rehearsal remain unchanged.
 2. Show the public dashboard's confirmed 250-call Base Sepolia activation and its explorer transaction. Label Stripe dollars simulated; keep account identifiers and credential files off camera. This is the completed acceptance activation, not a new payment during filming.
