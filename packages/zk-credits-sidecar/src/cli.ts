@@ -11,13 +11,11 @@ import {
   resolveCodexHome,
   writeCodexProfile,
 } from './codex-profile.js';
-import { validateBaseCreditWitness } from './base-sidecar.js';
-import { createSidecarRuntime, RuntimeCredentialError, witnessProviderForSource } from './sidecar-runtime.js';
+import { createSidecarRuntime, RuntimeCredentialError } from './sidecar-runtime.js';
+import { setupActivatedCredential } from './activated-credential-setup.js';
 import { createLocalX402Agent } from './local-x402-agent.js';
-import { createPinnedBaseProofGenerator } from './proof-coordinator.js';
-import { createBaseProofMetrics } from './proof-metrics.js';
-import { nativeCredentialStore, importCredentialPath, readStoredCredential } from './credential-store.js';
-import { applyRpcConfig, checkBaseSepoliaRpc, writeRpcConfig, RPC_GUIDANCE, resolveBaseSepoliaRpc } from './rpc-config.js';
+import { nativeCredentialStore } from './credential-store.js';
+import { applyRpcConfig, checkBaseSepoliaRpc, writeRpcConfig, RPC_GUIDANCE } from './rpc-config.js';
 import { diagnoseSidecar, stopSidecar } from './sidecar-diagnostics.js';
 import { runCliCommand } from './cli-runtime.js';
 import { createNodeSidecarLifecycle } from './node-sidecar-lifecycle.js';
@@ -26,19 +24,15 @@ import { createLoopbackToken, sidecarStatePaths } from './sidecar-config.js';
 import {
   applySetupConfig,
   readSetupConfig,
-  resolveSetupInputs,
-  writeSetupConfig,
 } from './setup-config.js';
 import { ensureSidecarReady } from './sidecar-lifecycle.js';
 import { readLoopbackToken, writeLoopbackToken } from './sidecar-state.js';
 import { createSidecarServer } from './sidecar.js';
 import { buildBaseRegisteredTrialRequestBody } from './base-registered-trial.js';
-import { loadCircuitManifest } from './artifact-bundle.js';
 import { BASE_SEPOLIA_NETWORK } from '@zk-credits/x402-zk-prepaid';
-import { requireGatewayKnownRoot as checkGatewayKnownRoot } from './gateway-root-check.js';
+import { DEFAULT_GATEWAY_URL, resolveGatewayOrigin } from './gateway-root-check.js';
 import { evaluateGatewayReadiness, isGatewayStatusFresh } from './gateway-trial-status.js';
 
-const DEFAULT_GATEWAY_URL = 'https://zk-credits-gateway.onrender.com';
 const DEFAULT_PORT = 3210;
 
 function stateDirectory(): string {
@@ -228,11 +222,7 @@ function safeCount(value: unknown): number | undefined {
 }
 
 function gatewayOrigin(): URL {
-  const origin = new URL(process.env.ZK_CREDITS_GATEWAY_URL || DEFAULT_GATEWAY_URL);
-  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash || origin.pathname !== '/') {
-    throw new Error('The internal trial requires a plain HTTPS gateway origin');
-  }
-  return origin;
+  return resolveGatewayOrigin(process.env);
 }
 
 async function readGatewayJson(url: URL, headers?: HeadersInit): Promise<{ status: number | null; body?: unknown }> {
@@ -244,10 +234,6 @@ async function readGatewayJson(url: URL, headers?: HeadersInit): Promise<{ statu
   } catch {
     return { status: null };
   }
-}
-
-async function requireGatewayKnownRoot(root: string): Promise<void> {
-  await checkGatewayKnownRoot(root, gatewayOrigin());
 }
 
 async function gatewayReadiness(origin: URL): Promise<{
@@ -688,45 +674,14 @@ async function main(): Promise<void> {
       return Boolean(await credentialStore.read());
     },
     validateSetupPrerequisites: async () => {
-      await applyRpcConfig(process.env, sidecarHome);
-      const saved = await readSetupConfig(setupConfigPath(sidecarHome));
-      const rpc = resolveBaseSepoliaRpc(process.env, saved?.witness.kind === 'base-events' ? saved.witness.rpcUrl : undefined);
-      await checkBaseSepoliaRpc(rpc);
-      process.env.BASE_RPC_URL = rpc;
-      const credentialPath = process.env.ZK_CREDITS_CREDENTIAL_PATH;
-      const legacyPassword = args.includes('--legacy') ? await readHiddenValue('Legacy export password: ') : undefined;
-      const credential = credentialPath
-        ? await importCredentialPath(credentialPath, credentialStore, legacyPassword)
-        : await readStoredCredential(credentialStore);
-      const manifest = await loadCircuitManifest();
-      const config = await resolveSetupInputs({
+      await setupActivatedCredential({
         environment: process.env,
         homeDirectory: homedir(),
         stateDirectory: sidecarHome,
-        configPath: setupConfigPath(sidecarHome),
-        manifest,
-        validateWitness: async (source) => {
-          const provider = await witnessProviderForSource(
-            source,
-            join(stateDirectory(), 'base-event-sync.json'),
-          );
-          const witness = validateBaseCreditWitness(await provider.witnessForCredential(credential));
-          if (manifest.deployment) await requireGatewayKnownRoot(witness.root);
-        },
+        credentialStore,
         chooseCandidate: chooseSetupCandidate,
+        ...(args.includes('--legacy') ? { readLegacyPassword: () => readHiddenValue('Legacy export password: ') } : {}),
       });
-      const artifactDirectory = config.artifactDirectory;
-      try {
-        await createPinnedBaseProofGenerator({
-          artifactDirectory,
-          metrics: createBaseProofMetrics(),
-        });
-      } catch (error) {
-        if (error instanceof Error) throw new Error(`Pinned proving bundle check failed: ${error.message}`);
-        throw new Error('Pinned proving bundle check failed. Reinstall the bundle from your pilot invite.');
-      }
-      await writeSetupConfig(setupConfigPath(sidecarHome), config);
-      applySetupConfig(process.env, config);
 
       console.log('Pinned proving bundle and witness validated for this activated credential.');
       console.log('Local setup paths saved to ' + setupConfigPath(sidecarHome));
