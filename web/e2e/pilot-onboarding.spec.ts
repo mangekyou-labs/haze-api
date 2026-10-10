@@ -113,3 +113,15 @@ test('shows funder recovery and retries the same commitment after definitive fai
   await download;
   expect(commitments[0]).toBe(commitments[1]);
 });
+
+test('refreshes a successful checkout return until verified balance arrives', async ({ page }) => {
+  const snapshot = await mockSandbox(page, 0);
+  await signIn(page);
+  await page.goto('/dashboard?checkout=success');
+  await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  snapshot.balanceCents = 2000;
+  snapshot.availableCents = 2000;
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+});

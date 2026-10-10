@@ -179,6 +179,12 @@ jobs:
         working-directory: contracts
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+      - run: npm ci
       - uses: foundry-rs/foundry-toolchain@v1
       # A fresh runner must download the pinned compiler before offline tests.
       - run: forge build

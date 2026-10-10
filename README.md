@@ -158,6 +158,7 @@ npm ci --prefix ts
 npm ci --prefix packages/zk-credits-sidecar
 npm ci --prefix examples/base-transaction-investigator
 npm ci --prefix web
+npm ci --prefix contracts
 ```
 
 Configure the gateway using [`.env.example`](.env.example) and the web app using
