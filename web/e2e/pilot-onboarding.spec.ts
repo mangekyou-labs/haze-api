@@ -1,144 +1,115 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { verifyActivatedCredential, verifyRecoveryCapsule, type ActivatedCredentialFile, type RecoveryCapsuleFile } from '@zk-credits/shared/base';
+import { verifyActivatedCredential, verifyRecoveryCapsule } from '@zk-credits/shared/base';
 
-const PASSWORD = 'correct horse battery staple';
 const CONTRACT = '0x0000000000000000000000000000000000000001';
-const alert = (page: Page) => page.locator('p[role="alert"]');
-const FUNDING_RESPONSE = {
-  network: 'eip155:84532',
-  chainId: 84532,
-  contractAddress: CONTRACT,
-  deploymentDomain: '84532',
-  tierId: 0,
-  expiry: 1_900_000_000,
-  transactionHash: '0xfunded',
-};
-
-async function signIn(page: Page): Promise<void> {
+const HASH = `0x${'ab'.repeat(32)}`;
+async function signIn(page: Page) {
   await page.goto('/sign-in');
   await page.getByRole('button', { name: /Continue with dev account/u }).click();
   await page.waitForURL('**/dashboard');
 }
-
-test('requires GitHub sign-in and a redeemed invite before anything is funded', async ({ page }) => {
-  await page.goto('/dashboard');
-  await page.waitForURL('**/sign-in');
-
-  await signIn(page);
-  await expect(page.getByRole('heading', { name: 'Pilot onboarding' })).toBeVisible();
-
-  // Uninvited: the gateway rejects the code and no funding path opens.
-  await page.route('**/api/invites/redeem', (route) => route.fulfill({
-    status: 400,
-    contentType: 'application/json',
-    body: JSON.stringify({ error: 'invalid_invite_code' }),
-  }));
-  await page.fill('#invite-code', 'not-a-real-invite-code');
-  await page.getByRole('button', { name: 'Redeem invite' }).click();
-  await expect(alert(page)).toContainText('invalid_invite_code');
-  await expect(page.getByRole('button', { name: /Generate and download recovery capsule/u })).toHaveCount(0);
-  await expect(page.getByText('Locked', { exact: true }).first()).toBeVisible();
-});
-
-test('completes invite, capsule backup, detached funding, and local verification', async ({ page }) => {
-  await signIn(page);
-  await page.route('**/api/invites/redeem', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ fundingToken: 'funding-token-value-0123456789', expiresAt: Date.now() + 30 * 60 * 1000 }),
-  }));
-  await page.route('**/api/pilot/funding', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify(FUNDING_RESPONSE),
-  }));
-
-  await page.fill('#invite-code', 'pilot-invite-code-0123456789');
-  await page.getByRole('button', { name: 'Redeem invite' }).click();
-  await expect(page.getByText(/Invite redeemed/u)).toBeVisible();
-
-  await expect(page.locator('input[type=password]')).toHaveCount(0);
-  await expect(page.getByText(/Anyone possessing this recovery file/)).toBeVisible();
-  const capsuleDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: /Generate and download recovery capsule/u }).click();
-  const capsuleFile = await capsuleDownload;
-  expect(capsuleFile.suggestedFilename()).toMatch(/^zk-credits-recovery-capsule-/u);
-
-  const capsulePath = (await capsuleFile.path())!;
-  const capsule = JSON.parse(readFileSync(capsulePath, 'utf8')) as RecoveryCapsuleFile;
+async function mockSandbox(page: Page, available = 2000) {
+  const state = { balanceCents: available, reservedCents: 0, availableCents: available, bundlePriceCents: 2000,
+    bundles: [] as Record<string, unknown>[], funder: { address: CONTRACT, tokenAddress: CONTRACT, usdcBalance: '20000000', ready: true, reason: null, faucetUrl: 'https://faucet.circle.com/' } };
+  await page.route('**/api/sandbox', route => route.fulfill({ json: state }));
+  return state;
+}
+async function backup(page: Page) {
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download recovery file' }).click();
+  const path = (await (await download).path())!;
+  const capsule = JSON.parse(readFileSync(path, 'utf8'));
   const { commitment } = await verifyRecoveryCapsule(capsule);
+  await expect(page.getByRole('button', { name: 'Activate my credits' })).toHaveCount(0);
+  await page.locator('#capsule-file').setInputFiles(path);
+  await expect(page.getByText('Backup verified locally.', { exact: true })).toBeVisible();
+  return { path, capsule, commitment };
+}
+function bundle(commitment: string, state: string, reason: string | null = null) {
+  return { commitment, state, reason, transactionHash: state === 'unknown' || state === 'funded' ? HASH : null,
+    activation: state === 'funded' ? { commitment, network: 'eip155:84532', chainId: 84532, contractAddress: CONTRACT, deploymentDomain: '84532', tierId: 0, expiry: 1_900_000_000, transactionHash: HASH } : null };
+}
 
-  // Backup gating: funding stays locked until the capsule is re-imported.
-  await expect(page.getByText('Locked', { exact: true }).last()).toBeVisible();
-  await page.locator('#capsule-file').setInputFiles(capsulePath);
-  await expect(page.getByText(/Backup verified locally/u)).toBeVisible();
-
-  const credentialDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: /Fund my pilot credential/u }).click();
-  await expect(page.getByRole('heading', { name: 'Verified locally' })).toBeVisible();
-  const credentialFile = await credentialDownload;
-  expect(credentialFile.suggestedFilename()).toMatch(/^zk-credits-credential-/u);
-
-  // The browser wrapped the same capsule with the authoritative metadata.
-  const activated = JSON.parse(readFileSync((await credentialFile.path())!, 'utf8')) as ActivatedCredentialFile;
-  expect(activated.kind).toBe('activated-credential');
-  expect(activated.capsule).toEqual(capsule.capsule);
-  expect(activated.activation).toEqual({
-    commitment,
-    tierId: 0,
-    expiry: FUNDING_RESPONSE.expiry,
-    deploymentDomain: FUNDING_RESPONSE.deploymentDomain,
-    network: FUNDING_RESPONSE.network,
-    contractAddress: FUNDING_RESPONSE.contractAddress,
-    transactionHash: FUNDING_RESPONSE.transactionHash,
-  });
-  const verified = await verifyActivatedCredential(activated);
-  expect(verified.commitment).toBe(commitment);
-
-  // The funding capability is erased once funding succeeds.
-  expect(await page.evaluate(() => sessionStorage.getItem('zk-credits:funding-token'))).toBeNull();
-
-  // Control-plane view: no commitment value, no funding token, and no payment action.
-  const html = await page.content();
-  expect(html).not.toContain(commitment);
-  expect(html).not.toContain('funding-token-value');
-  expect(html).not.toMatch(/stripe/iu);
-  expect(await page.locator('a[href*="checkout"], form[action*="checkout"], a[href*="billing"], form[action*="billing"]').count()).toBe(0);
+test('requires sign-in and simulated balance, without invite entry', async ({ page }) => {
+  await page.goto('/dashboard'); await page.waitForURL('**/sign-in');
+  await mockSandbox(page, 0); await signIn(page);
+  await expect(page.locator('#invite-code')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+  await backup(page);
+  await expect(page.getByRole('button', { name: 'Activate my credits' })).toBeDisabled();
 });
 
-test('survives funding rejection and retries the same detached capability', async ({ page }) => {
-  await signIn(page);
-  await page.route('**/api/invites/redeem', (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ fundingToken: 'funding-token-value-0123456789', expiresAt: Date.now() + 30 * 60 * 1000 }),
-  }));
+test('funds after local backup and downloads a verified credential', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
   let attempts = 0;
-  await page.route('**/api/pilot/funding', (route) => {
-    attempts += 1;
-    if (attempts === 1) {
-      return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'funding_unavailable' }) });
-    }
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FUNDING_RESPONSE) });
+  await page.route('**/api/pilot/funding', route => {
+    const body = route.request().postDataJSON();
+    expect(Object.keys(body)).toEqual(['commitment']);
+    attempts++;
+    const funded = bundle(body.commitment, 'funded');
+    snapshot.bundles = [funded]; snapshot.balanceCents = 0; snapshot.availableCents = 0;
+    return route.fulfill({ json: funded });
   });
+  await signIn(page);
+  const { capsule, commitment } = await backup(page);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  const activatedPath = (await (await download).path())!;
+  const activated = JSON.parse(readFileSync(activatedPath, 'utf8'));
+  expect((await verifyActivatedCredential(activated)).commitment).toBe(commitment);
+  expect(activated.capsule).toEqual(capsule.capsule);
+  expect(attempts).toBe(1);
+  await expect(page.getByRole('button', { name: 'Download activated credential again' })).toBeVisible();
+  const storage = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
+  expect(storage).not.toContain(capsule.capsule.secret);
+  expect(storage).not.toContain(commitment);
+  await page.reload();
+  const recovered = page.waitForEvent('download');
+  await page.locator('#capsule-file').setInputFiles(activatedPath);
+  await recovered;
+  expect(attempts).toBe(1);
+});
 
-  await page.fill('#invite-code', 'pilot-invite-code-0123456789');
-  await page.getByRole('button', { name: 'Redeem invite' }).click();
-  await expect(page.locator('input[type=password]')).toHaveCount(0);
-  await expect(page.getByText(/Anyone possessing this recovery file/)).toBeVisible();
-  const capsuleDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: /Generate and download recovery capsule/u }).click();
-  const capsulePath = (await (await capsuleDownload).path())!;
-  await page.locator('#capsule-file').setInputFiles(capsulePath);
+test('holds unknown outcomes across reload and recovers without another activation', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  let attempts = 0;
+  await page.route('**/api/pilot/funding', route => {
+    attempts++;
+    const pending = bundle(route.request().postDataJSON().commitment, 'unknown', 'confirmation_pending');
+    snapshot.bundles = [pending]; snapshot.availableCents = 0; snapshot.reservedCents = 2000;
+    return route.fulfill({ json: pending });
+  });
+  await signIn(page);
+  const { path, commitment } = await backup(page);
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByRole('button', { name: 'Waiting for confirmation…' })).toBeDisabled();
+  await page.reload();
+  await page.locator('#capsule-file').setInputFiles(path);
+  await expect(page.getByRole('button', { name: 'Waiting for confirmation…' })).toBeDisabled();
+  snapshot.bundles = [bundle(commitment, 'funded')]; snapshot.balanceCents = 0; snapshot.reservedCents = 0;
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await download;
+  expect(attempts).toBe(1);
+});
 
-  await page.getByRole('button', { name: /Fund my pilot credential/u }).click();
-  await expect(alert(page)).toContainText('funding_unavailable');
-  expect(await page.evaluate(() => sessionStorage.getItem('zk-credits:funding-token'))).toBe('funding-token-value-0123456789');
-
-  const retryDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: /Fund my pilot credential/u }).click();
-  await expect(page.getByRole('heading', { name: 'Verified locally' })).toBeVisible();
-  await retryDownload;
-  expect(attempts).toBe(2);
+test('shows funder recovery and retries the same commitment after definitive failure', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  let attempts = 0; const commitments: string[] = [];
+  await page.route('**/api/pilot/funding', route => {
+    const commitment = route.request().postDataJSON().commitment;
+    commitments.push(commitment); attempts++;
+    const result = attempts === 1 ? bundle(commitment, 'waiting_funds', 'insufficient_usdc') : bundle(commitment, 'funded');
+    snapshot.bundles = [result];
+    return route.fulfill({ json: result });
+  });
+  await signIn(page); await backup(page);
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByText('Bundle status: Waiting for test USDC')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Get Base Sepolia USDC from the faucet' })).toHaveAttribute('href', 'https://faucet.circle.com/');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Retry activation' }).click();
+  await download;
+  expect(commitments[0]).toBe(commitments[1]);
 });

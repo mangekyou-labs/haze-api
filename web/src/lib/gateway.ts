@@ -2,8 +2,8 @@
  * Server-only gateway client for the web control plane.
  *
  * The browser never talks to the gateway directly: every call carries the
- * internal service token from this process, and none of them add a session,
- * account identifier, or credential material beyond what the endpoint needs.
+ * internal service token from this process. Sandbox billing carries the
+ * authenticated account id; credential secrets never leave the browser.
  */
 
 import { gatewayInternalHeaders } from '@/lib/runtime-config';
@@ -14,7 +14,7 @@ interface GatewayCall {
   path: string;
   method: 'GET' | 'POST';
   body?: unknown;
-  /** Control-plane calls authenticate; the sessionless funding call does not. */
+  /** Public protocol reads can explicitly omit internal authorization. */
   authorize?: boolean;
 }
 

@@ -1,6 +1,6 @@
 /** Active Base / x402 gateway entry point. Historical Stellar runtime lives in
- * ts/archive/stellar and is excluded from the active build. The research pilot
- * runtime has no Stripe checkout, order, refund, dispute, or wallet-link path. */
+ * ts/archive/stellar and is excluded from the active build. Sandbox billing
+ * uses simulated dollars; bundle bonds use Base Sepolia test USDC. */
 
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -16,7 +16,9 @@ import {
   PostgresBaseEventStore,
 } from './base-event-sync.js';
 import { createBasePublicClient } from './base-chain.js';
-import { PostgresInviteStore, PilotInviteService } from './pilot-invites.js';
+import { SandboxBillingService } from './sandbox-billing.js';
+import { PostgresSandboxStore } from './sandbox-store.js';
+import { createBundleFundingSponsor } from './bundle-funding-sponsor.js';
 import { FundingPreBroadcastError, PilotFundingService, PostgresFundingCapabilityStore } from './pilot-funding.js';
 import { LaunchControl, PostgresLaunchControlStore, MemoryLaunchControlStore } from './launch-control.js';
 import { resolveSpendCaps } from './launch-environment.js';
@@ -113,12 +115,11 @@ const pilotFunding = pool && baseContractAddress && /^0x[0-9a-fA-F]{40}$/u.test(
       },
     })
   : undefined;
-const pilotInvites = pool && pilotFunding
-  ? new PilotInviteService({
-      store: new PostgresInviteStore(pool),
-      capabilities: { issue: () => pilotFunding.issueCapability() },
-    })
-  : undefined;
+const sandboxBilling = pool && baseContractAddress && /^0x[0-9a-fA-F]{40}$/u.test(baseContractAddress)
+  ? new SandboxBillingService({
+      store: new PostgresSandboxStore(pool), contractAddress: baseContractAddress,
+      sponsor: createBundleFundingSponsor({ pool }),
+    }) : undefined;
 
 // The launch controls are durable whenever Postgres is configured: the manual
 // kill switch and the micro-USD provider-spend caps must survive a restart.
@@ -218,7 +219,7 @@ async function readV2Compatibility(): Promise<Record<string, unknown>> {
 const claimStore = createClaimStore(pool);
 const { app } = await createZkPrepaidGateway({
   claimStore,
-  pilotInvites,
+  sandboxBilling,
   pilotFunding,
   launchControl,
   metrics,

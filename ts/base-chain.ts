@@ -2,18 +2,25 @@
  * persisted or returned by the API. */
 
 import { baseSepolia } from 'viem/chains';
-import { createPublicClient, createWalletClient, decodeEventLog, http, toHex, type Hex } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+import { createPublicClient, createWalletClient, decodeEventLog, erc20Abi, http, toHex, type Hex } from 'viem';
+import { privateKeyToAccount, nonceManager } from 'viem/accounts';
 import { Attribution } from 'ox/erc8021';
+import { FundingPreBroadcastError } from './pilot-funding.js';
+import { FundingRevertedError, type SandboxFunderStatus } from './sandbox-billing.js';
 
 /** Sponsor-side bond operations used to fund pilot test-credit bundles. */
 export interface BaseBondSponsor {
-  fundBundle(commitment: string, tierId: number): Promise<{ transaction: string; expiryAt?: number }>;
+  fundBundle(commitment: string, tierId: number, onBroadcast?: (hash: string) => Promise<void>): Promise<{ transaction: string; expiryAt?: number }>;
   reconcileBundle(commitment: string): Promise<{ transaction: string; expiryAt: number } | undefined>;
+  fundingStatus(): Promise<SandboxFunderStatus>;
+  isConfirmedRevert(hash: string): Promise<boolean>;
   releaseBond(commitment: string): Promise<{ transaction: string }>;
 }
 
 export const PRIVATE_CREDIT_BOND_ABI = [
+  { type: 'function', name: 'tierConfig', stateMutability: 'pure', inputs: [{ name: 'tierId', type: 'uint8' }], outputs: [{ name: 'allowance', type: 'uint256' }, { name: 'bondAmount', type: 'uint256' }] },
+  { type: 'function', name: 'sponsor', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { type: 'function', name: 'usdc', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'fundBundle', stateMutability: 'nonpayable', inputs: [{ name: 'commitment', type: 'bytes32' }, { name: 'tierId', type: 'uint8' }], outputs: [] },
   { type: 'function', name: 'releaseBond', stateMutability: 'nonpayable', inputs: [{ name: 'commitment', type: 'bytes32' }], outputs: [] },
   { type: 'function', name: 'currentRoot', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
@@ -37,7 +44,7 @@ function contractAddress(): `0x${string}` {
 function sponsorAccount() {
   const value = process.env.BASE_SPONSOR_PRIVATE_KEY;
   if (!value || !/^0x[0-9a-fA-F]{64}$/u.test(value)) throw new Error('BASE_SPONSOR_PRIVATE_KEY is not configured');
-  return privateKeyToAccount(value as Hex);
+  return privateKeyToAccount(value as Hex, { nonceManager });
 }
 
 function builderCodeDataSuffix(): Hex {
@@ -58,6 +65,28 @@ export function createBaseBondSponsor(): BaseBondSponsor {
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
   const address = contractAddress();
   return {
+    async fundingStatus() {
+      const [chainId, sponsor, token, tier] = await Promise.all([
+        publicClient.getChainId(),
+        publicClient.readContract({ address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'sponsor' }),
+        publicClient.readContract({ address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'usdc' }),
+        publicClient.readContract({ address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'tierConfig', args: [0] }),
+      ]);
+      const [usdc, allowance, gas] = await Promise.all([
+        publicClient.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] }),
+        publicClient.readContract({ address: token, abi: erc20Abi, functionName: 'allowance', args: [account.address, address] }),
+        publicClient.getBalance({ address: account.address }),
+      ]);
+      const reason = tier[0] !== 250n || tier[1] !== 20_000_000n ? 'unsupported_tier' : chainId !== 84532 ? 'wrong_chain' : sponsor.toLowerCase() !== account.address.toLowerCase() ? 'sponsor_mismatch'
+        : usdc < 20_000_000n ? 'insufficient_usdc' : gas === 0n ? 'insufficient_gas' : allowance < 20_000_000n ? 'insufficient_allowance' : null;
+      return { address: sponsor, tokenAddress: token, usdcBalance: usdc.toString(), gasBalanceWei: gas.toString(), allowance: allowance.toString(),
+        ready: !reason, reason, faucetUrl: token.toLowerCase() === '0x036cbd53842c5426634e7929541ec2318f3dcf7e' ? 'https://faucet.circle.com/' : '' };
+    },
+    async isConfirmedRevert(hash: string) {
+      const receipt = await publicClient.getTransactionReceipt({ hash: hash as Hex });
+      const latest = await publicClient.getBlockNumber();
+      return receipt.status === 'reverted' && latest - receipt.blockNumber + 1n >= BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
+    },
     async reconcileBundle(commitment: string) {
       const configuredRange = process.env.BASE_SYNC_MAX_BLOCK_RANGE?.trim();
       if (configuredRange && (!/^\d+$/u.test(configuredRange) || BigInt(configuredRange) <= 0n)) {
@@ -89,10 +118,30 @@ export function createBaseBondSponsor(): BaseBondSponsor {
       }
       return undefined;
     },
-    async fundBundle(commitment: string, tierId: number) {
-      const hash = await client.writeContract({ address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'fundBundle', args: [toHex(BigInt(commitment), { size: 32 }), tierId] });
-      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: Number(process.env.BASE_CONFIRMATIONS ?? '3') });
-      if (receipt.status !== 'success') throw new Error('base_funding_transaction_failed');
+    async fundBundle(commitment: string, tierId: number, onBroadcast?: (hash: string) => Promise<void>) {
+      const write = { address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'fundBundle' as const, args: [toHex(BigInt(commitment), { size: 32 }), tierId] as const };
+      let nonce: number;
+      try {
+        await publicClient.simulateContract({ ...write, account });
+        const [gas, fees, balance] = await Promise.all([
+          publicClient.estimateContractGas({ ...write, account }),
+          publicClient.estimateFeesPerGas(), publicClient.getBalance({ address: account.address }),
+        ]);
+        if (balance < gas * fees.maxFeePerGas * 125n / 100n) throw new FundingPreBroadcastError('insufficient_gas');
+        nonce = await publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' });
+      } catch (error) {
+        if (error instanceof FundingPreBroadcastError) throw error;
+        throw new FundingPreBroadcastError('preflight_failed');
+      }
+      // A write error can be an RPC timeout after broadcast; callers must hold it.
+      // The caller holds the database sponsor lock across this operation. An
+      // explicit pending nonce avoids a stale in-process cache across gateways.
+      const hash = await client.writeContract({ ...write, nonce });
+      await onBroadcast?.(hash);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: Number(process.env.BASE_CONFIRMATIONS ?? '3'),
+        onReplaced: async replacement => { await onBroadcast?.(replacement.transaction.hash); },
+      });
+      if (receipt.status !== 'success') throw new FundingRevertedError('base_funding_transaction_failed');
       for (const log of receipt.logs) {
         if (log.address.toLowerCase() !== address.toLowerCase()) continue;
         try {
@@ -101,7 +150,7 @@ export function createBaseBondSponsor(): BaseBondSponsor {
             const args = decoded.args as { commitment?: Hex; expiry?: bigint };
             if (args.commitment?.toLowerCase() !== toHex(BigInt(commitment), { size: 32 }).toLowerCase()) continue;
             if (args.expiry === undefined) throw new Error('base_funding_expiry_missing');
-            return { transaction: hash, expiryAt: Number(args.expiry) * 1000 };
+            return { transaction: receipt.transactionHash ?? hash, expiryAt: Number(args.expiry) * 1000 };
           }
         } catch {
           // Ignore logs emitted by other contracts in the transaction receipt.

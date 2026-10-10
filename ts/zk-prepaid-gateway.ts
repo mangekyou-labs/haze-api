@@ -46,7 +46,7 @@ import {
 } from './launch-control.js';
 import { PAYMENT_VALIDATION_METRICS, type LaunchMetrics, type PaymentValidationBoundary } from './metrics.js';
 import { checkReadiness } from './readiness.js';
-import type { PilotInviteService } from './pilot-invites.js';
+import { SandboxBillingService, SandboxError } from './sandbox-billing.js';
 import type { PilotFundingService } from './pilot-funding.js';
 import { createClaimCompletion, ClaimCompletionError, type BufferedResponse } from './claim-completion.js';
 
@@ -95,8 +95,8 @@ export interface ZkPrepaidGatewayOptions {
   rootSnapshot?: () => GatewayRootSnapshot | Promise<GatewayRootSnapshot>;
   /** Per-client POST /v1/root-known quota. Production defaults to 60 requests per minute. */
   rootCheckRequestsPerMinute?: number;
-  /** Control-plane invites; absent means the pilot endpoints fail closed. */
-  pilotInvites?: PilotInviteService;
+  /** Authenticated public sandbox billing; never accepts browser-supplied identity. */
+  sandboxBilling?: SandboxBillingService;
   /** Provisioning-plane detached funding; absent means the pilot endpoints fail closed. */
   pilotFunding?: PilotFundingService;
   /** Internal service token for control-plane calls. Defaults to BILLING_INTERNAL_TOKEN. */
@@ -474,7 +474,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   const proofVerifier = options.verifyProof ?? await loadGroth16Verifier(config, now, readRoots);
   const facilitator = createZkPrepaidFacilitator({ claimStore, verifyProof: proofVerifier, now, hashSignal: signalHash });
   const claimLifecycle: ClaimLifecycle = facilitator.claimLifecycle;
-  const pilotInvites = options.pilotInvites;
+  const sandboxBilling = options.sandboxBilling;
   const pilotFunding = options.pilotFunding;
   const claimCompletion = createClaimCompletion({
     lifecycle: claimLifecycle,
@@ -679,9 +679,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   });
 
   /**
-   * Guards control-plane calls. Real checkout and Stripe billing routes were
-   * removed from the no-product-payment pilot runtime; only invite
-   * redemption remains.
+   * Guards internal administration and authenticated billing relays.
    */
   function internalAuthorized(req: Request): boolean {
     const configured = options.internalServiceToken ?? process.env.BILLING_INTERNAL_TOKEN;
@@ -830,53 +828,45 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     }
   });
 
-  /**
-   * Internal control-plane redemption. The GitHub account is supplied by the
-   * authenticated web session, never by the browser, and the response carries
-   * a one-time detached funding token instead of any credential material.
-   */
-  app.post('/v1/pilot/invites/redeem', async (req, res) => {
-    if (!internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
-    if (await refuseWhenPaused(res)) return;
-    if (!pilotInvites) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
-    const body = isRecord(req.body) ? req.body : {};
-    if (typeof body.code !== 'string' || typeof body.githubAccountId !== 'string') {
-      jsonError(res, 400, 'invalid_invite_request');
-      return;
-    }
-    try {
-      const redeemed = await pilotInvites.redeem({ code: body.code, githubAccountId: body.githubAccountId });
-      res.json({ fundingToken: redeemed.fundingToken, expiresAt: redeemed.expiresAt });
-    } catch (error) {
-      pilotError(res, error);
-    }
+  // Billing endpoints are service-to-service only, even in development.
+  function sandboxRoute(path: string, action: (body: Record<string, unknown>) => Promise<unknown>, paused = false) {
+    app.post(path, async (req, res) => {
+      const token = options.internalServiceToken ?? process.env.BILLING_INTERNAL_TOKEN;
+      if (!token || !internalAuthorized(req)) { jsonError(res, 401, 'internal_auth_required'); return; }
+      if (!sandboxBilling) { jsonError(res, 503, 'sandbox_unavailable'); return; }
+      if (paused && await refuseWhenPaused(res)) return;
+      const body = isRecord(req.body) ? req.body : {};
+      try { res.json(await action(body)); }
+      catch (error) {
+        if (error instanceof SandboxError) jsonError(res, error.status, error.code);
+        else if (error instanceof Error && error.message === 'commitment_already_owned') jsonError(res, 409, 'commitment_already_owned');
+        else jsonError(res, 503, 'sandbox_temporarily_unavailable');
+      }
+    });
+  }
+  function sandboxAccount(body: Record<string, unknown>) {
+    if (typeof body.accountId !== 'string' || !body.accountId.trim() || body.accountId.length > 200) throw new SandboxError('invalid_account');
+    return body.accountId;
+  }
+  sandboxRoute('/v1/sandbox/status', body => sandboxBilling!.snapshot(sandboxAccount(body)));
+  sandboxRoute('/v1/sandbox/topups', body => sandboxBilling!.createTopup(sandboxAccount(body), String(body.requestId ?? '')), true);
+  sandboxRoute('/v1/sandbox/topups/session', async body => {
+    await sandboxBilling!.bindSession(sandboxAccount(body), String(body.topupId ?? ''), String(body.sessionId ?? ''));
+    return { ok: true };
   });
-
-  /**
-   * Sessionless detached funding. The capability token in the body is the only
-   * authorization: the endpoint accepts no session, no cookie, and no account
-   * identifier, and it never receives a GitHub identity.
-   */
-  app.post('/v1/pilot/funding', async (req, res) => {
-    if (await refuseWhenPaused(res)) return;
-    if (!pilotFunding) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
-    const body = isRecord(req.body) ? req.body : {};
-    if (typeof body.fundingToken !== 'string' || typeof body.commitment !== 'string') {
-      jsonError(res, 400, 'invalid_funding_request');
-      return;
-    }
-    try {
-      res.json(await pilotFunding.fund({ fundingToken: body.fundingToken, commitment: body.commitment }));
-    } catch (error) {
-      pilotError(res, error, 'funding_failed');
-    }
+  sandboxRoute('/v1/sandbox/stripe-event', async body => {
+    await sandboxBilling!.creditTopup({ topupId: String(body.topupId ?? ''), sessionId: String(body.sessionId ?? ''),
+      livemode: body.livemode as boolean, mode: String(body.mode ?? ''), paymentStatus: String(body.paymentStatus ?? ''),
+      currency: String(body.currency ?? ''), amountTotal: body.amountTotal as number });
+    return { ok: true };
   });
+  sandboxRoute('/v1/sandbox/funding', body => sandboxBilling!.fund(sandboxAccount(body), String(body.commitment ?? '')), true);
 
   /** Public recovery lookup: immutable funding metadata for one commitment. */
   app.get('/v1/pilot/bundles/:commitment', async (req, res) => {
-    if (!pilotFunding) { jsonError(res, 503, 'pilot_store_unavailable'); return; }
+    if (!pilotFunding && !sandboxBilling) { jsonError(res, 503, 'sandbox_unavailable'); return; }
     try {
-      const bundle = await pilotFunding.lookupByCommitment(req.params.commitment);
+      const bundle = await sandboxBilling?.publicBundle(req.params.commitment) ?? await pilotFunding?.lookupByCommitment(req.params.commitment);
       if (!bundle) { jsonError(res, 404, 'bundle_not_found'); return; }
       res.json(bundle);
     } catch (error) {

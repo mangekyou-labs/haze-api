@@ -26,10 +26,7 @@ export default async function SignInPage() {
             Sign in
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
-            Invite-only experimental pilot on Base Sepolia. GitHub sign-in is
-            required; product calls use test credits and have no payment step.
-            External research sessions have a separate $25 honorarium; the
-            circuit is not independently audited.
+            Sign in with GitHub to set up your credits.
           </p>
 
           <form
@@ -53,9 +50,7 @@ export default async function SignInPage() {
 
           {!oauthConfigured && (
             <p className="mt-3 text-xs text-amber-400/90">
-              GitHub OAuth is not configured on this deployment
-              (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing). Encrypted
-              credential exports can be restored locally.
+              GitHub sign-in is unavailable. Try again later or restore your credential below.
             </p>
           )}
 
@@ -77,12 +72,12 @@ export default async function SignInPage() {
           )}
 
           <p className="mt-6 text-sm text-zinc-500">
-            Already invited and funded?{' '}
+            Already have a credential?{' '}
             <Link
               href="/recover"
               className="text-indigo-400 transition-colors hover:text-indigo-300"
             >
-              Restore an encrypted credential
+              Restore your credential
             </Link>
           </p>
         </div>
