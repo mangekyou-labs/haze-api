@@ -16,6 +16,7 @@ interface GatewayCall {
   body?: unknown;
   /** Public protocol reads can explicitly omit internal authorization. */
   authorize?: boolean;
+  timeoutMs?: number;
 }
 
 export interface GatewayResponse {
@@ -36,6 +37,7 @@ export async function callGateway(call: GatewayCall): Promise<GatewayResponse> {
     headers,
     body: call.body === undefined ? undefined : JSON.stringify(call.body),
     cache: 'no-store',
+    signal: AbortSignal.timeout(call.timeoutMs ?? 20_000),
   });
   let data: Record<string, unknown> = {};
   try {

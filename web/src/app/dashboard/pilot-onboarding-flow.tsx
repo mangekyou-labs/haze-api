@@ -8,6 +8,7 @@ type Activation = { commitment: string; network: string; chainId: number; contra
 type Bundle = { commitment: string; state: 'funding' | 'unknown' | 'funded' | 'waiting_funds' | 'failed'; reason: string | null; transactionHash: string | null; activation: Activation | null };
 type Snapshot = {
   balanceCents: number; reservedCents: number; availableCents: number; bundlePriceCents: number; bundles: Bundle[];
+  topups: { requestId: string; amountCents: number; paid: boolean }[];
   funder: { address: string; tokenAddress: string; usdcBalance: string; ready: boolean; reason: string | null; faucetUrl: string } | null;
 };
 interface NetworkStatus { network: string; chainId: number; contractAddress: string | null; healthy: boolean; generatedAt: string; explorer: { address: string } | null }
@@ -36,13 +37,18 @@ const messages: Record<string, string> = {
 };
 function message(cause: unknown) { const code = cause instanceof Error ? cause.message : 'Something went wrong. Try again.'; return messages[code] ?? code; }
 async function jsonRequest<T>(url: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch(url, { ...(body === undefined ? { cache: 'no-store' as const } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), signal: AbortSignal.timeout(25_000) });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error ?? 'The request failed. Try again.');
   return data as T;
 }
 
-export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: NetworkStatus | null; gatewayBaseUrl: string }) {
+export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string }) {
+  const [network, setNetwork] = useState<NetworkStatus | null>(null);
+  const [networkLoading, setNetworkLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
+  const [topupAmount, setTopupAmount] = useState<number | null>(null);
+  const [selectedAmount, setSelectedAmount] = useState(2000);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [capsule, setCapsule] = useState<RecoveryCapsuleFile | null>(null);
   const [commitment, setCommitment] = useState<string | null>(null);
@@ -55,42 +61,62 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
   const [busy, setBusy] = useState(false);
   const [checkoutPending, setCheckoutPending] = useState(false);
   const downloaded = useRef<string | null>(null);
+  const pendingTopup = useRef<{ requestId: string; amountCents: number } | null>(null);
   const checkoutReturn = useRef<string | null | undefined>(undefined);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/network-status', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(6000)]) })
+      .then(response => response.json()).then(data => { if (!controller.signal.aborted) setNetwork(data); })
+      .catch(() => {}).finally(() => { if (!controller.signal.aborted) setNetworkLoading(false); });
+    return () => controller.abort();
+  }, []);
+
+  const acceptSnapshot = useCallback((next: Snapshot) => {
+    setSnapshot(next);
+    const selected = pendingTopup.current;
+    if (!selected || !next.topups?.some(t => t.requestId === selected.requestId && t.amountCents === selected.amountCents && t.paid)) return;
+    sessionStorage.removeItem(`zk-credits:checkout-request:${selected.amountCents}`);
+    sessionStorage.removeItem('zk-credits:checkout-pending');
+    pendingTopup.current = null;
+    setCheckoutPending(false);
+    setNotice('Your simulated balance is ready.');
+    setError(null);
+  }, []);
   const refresh = useCallback(async () => {
     const next = await jsonRequest<Snapshot>('/api/sandbox');
-    setSnapshot(next);
+    acceptSnapshot(next);
     return next;
-  }, []);
+  }, [acceptSnapshot]);
   useEffect(() => {
     let mounted = true;
+    try { pendingTopup.current = JSON.parse(sessionStorage.getItem('zk-credits:checkout-pending') ?? 'null'); } catch { pendingTopup.current = null; }
     checkoutReturn.current ??= new URLSearchParams(window.location.search).get('checkout');
     const checkout = checkoutReturn.current;
     if (checkout) {
-      sessionStorage.removeItem('zk-credits:checkout-request');
+      if (checkout === 'cancelled') {
+        sessionStorage.removeItem('zk-credits:checkout-pending');
+        pendingTopup.current = null;
+        setNotice('Checkout cancelled. Your balance was not changed.');
+      }
       window.history.replaceState(null, '', window.location.pathname);
+    }
+    if (checkout === 'success' || pendingTopup.current) {
+      setCheckoutPending(true);
+      setNotice(checkout === 'success'
+        ? 'Checkout completed. Waiting for the verified payment to update your balance.'
+        : 'Checking the status of your pending top-up…');
     }
     void jsonRequest<Snapshot>('/api/sandbox').then(next => {
       if (!mounted) return;
-      setSnapshot(next);
-      if (checkout) {
-        const waiting = checkout === 'success' && next.availableCents <= 0;
-        setCheckoutPending(waiting);
-        setNotice(checkout === 'success'
-          ? waiting ? 'Checkout completed. Waiting for the verified payment to update your balance.' : 'Your simulated balance is ready.'
-          : 'Checkout cancelled. Your balance was not changed.');
-      }
+      acceptSnapshot(next);
     }).catch(cause => { if (mounted) setError(message(cause)); });
     return () => { mounted = false; };
-  }, [refresh]);
+  }, [acceptSnapshot]);
   const pending = snapshot?.bundles.some(b => b.state === 'unknown' || b.state === 'funding') || bundle?.state === 'unknown' || bundle?.state === 'funding';
   useEffect(() => {
     if (!pending && !checkoutPending) return;
-    const timer = window.setInterval(() => void refresh().then(next => {
-      if (checkoutPending && next.availableCents > 0) {
-        setCheckoutPending(false); setNotice('Your simulated balance is ready.');
-      }
-    }).catch(() => {}), 5000);
+    const timer = window.setInterval(() => void refresh().catch(() => {}), 5000);
     const stop = checkoutPending ? window.setTimeout(() => {
       setCheckoutPending(false); setNotice('If your top-up has not arrived, refresh status in a moment. Payment verification may still be processing.');
     }, 60_000) : undefined;
@@ -113,20 +139,26 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
     if (current.activation && capsule) void finish(capsule, current.activation).catch(cause => setError(message(cause)));
   }, [commitment, snapshot, capsule, finish]);
 
-  async function topup() {
-    setBusy(true); setError(null);
+  async function topup(amountCents: number) {
+    setBusy(true); setTopupAmount(amountCents); setError(null);
     try {
-      let requestId = sessionStorage.getItem('zk-credits:checkout-request');
-      if (!requestId) { requestId = crypto.randomUUID(); sessionStorage.setItem('zk-credits:checkout-request', requestId); }
-      const result = await jsonRequest<{ url?: string; completed?: boolean }>('/api/sandbox/checkout', { requestId });
-      if (result.completed) { sessionStorage.removeItem('zk-credits:checkout-request'); setCheckoutPending(true); setNotice('Checkout completed. Waiting for verified payment.'); await refresh(); }
+      let requestId = sessionStorage.getItem(`zk-credits:checkout-request:${amountCents}`);
+      if (!requestId) { requestId = crypto.randomUUID(); sessionStorage.setItem(`zk-credits:checkout-request:${amountCents}`, requestId); }
+      pendingTopup.current = { requestId, amountCents };
+      sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify(pendingTopup.current));
+      const result = await jsonRequest<{ url?: string; completed?: boolean }>('/api/sandbox/checkout', { requestId, amountCents });
+      if (result.completed) {
+        setCheckoutPending(true);
+        setNotice('Checkout completed. Waiting for the verified payment to update your balance.');
+        await refresh();
+      }
       else if (result.url) window.location.assign(result.url);
       else throw new Error('checkout_unavailable');
     } catch (cause) {
-      if (cause instanceof Error && cause.message === 'checkout_expired') sessionStorage.removeItem('zk-credits:checkout-request');
+      if (cause instanceof Error && cause.message === 'checkout_expired') sessionStorage.removeItem(`zk-credits:checkout-request:${amountCents}`);
       setError(message(cause));
     }
-    finally { setBusy(false); }
+    finally { setBusy(false); setTopupAmount(null); }
   }
   async function generate() {
     setBusy(true); setError(null); setNotice(null);
@@ -172,11 +204,32 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
     <section className={card}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><h2 className="text-lg font-semibold text-zinc-100">Sandbox balance</h2><p className="mt-1 text-sm text-zinc-400">Stripe test payments add simulated dollars. No real money is charged.</p></div>
-        <button type="button" className={button} disabled={busy || !snapshot} onClick={() => void topup()}>Top up $20 in sandbox</button>
       </div>
+      <fieldset disabled={busy} className="mt-6">
+        <legend className="text-sm font-medium text-zinc-300">Choose an amount</legend>
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
+          {[{ amount: 500, detail: 'Toward a bundle' }, { amount: 2000, detail: '1 bundle' }, { amount: 10000, detail: '5 bundles' }].map(({ amount, detail }) => (
+            <label key={amount} className="relative min-w-0 cursor-pointer">
+              <input type="radio" name="sandbox-topup-amount" aria-label={`$${amount / 100} sandbox top-up`} checked={selectedAmount === amount} onChange={() => setSelectedAmount(amount)} className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" />
+              <span className="flex h-full min-h-32 flex-col sm:min-h-28 rounded-xl border border-zinc-700 bg-zinc-950/40 p-3 transition-colors peer-hover:border-zinc-500 peer-checked:border-stripe peer-checked:bg-stripe/10 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-300 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-zinc-900 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 sm:p-4">
+                <span className="flex items-center justify-between gap-1">
+                  <span className="font-semibold text-lg text-white tabular-nums sm:text-2xl">${amount / 100}</span>
+                  <span aria-hidden="true" className={`absolute bottom-3 right-3 flex h-4 w-4 items-center justify-center rounded-full border sm:bottom-auto sm:right-4 sm:top-5 ${selectedAmount === amount ? 'border-stripe bg-stripe text-white' : 'border-zinc-600'}`}>
+                    {selectedAmount === amount && <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 8 3 3 7-7" /></svg>}
+                  </span>
+                </span>
+                <span className="mt-2 text-xs text-zinc-400 sm:text-sm">{detail}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <button type="button" disabled={busy} aria-busy={topupAmount !== null} onClick={() => void topup(selectedAmount)} className="mt-4 min-h-12 w-full rounded-lg bg-stripe px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-stripe-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-60">
+        {topupAmount !== null ? 'Opening Stripe test Checkout…' : 'Pay with Stripe'}
+      </button>
       <dl className="mt-4 flex flex-wrap gap-8 text-sm"><div><dt className="text-zinc-400">Available</dt><dd className="mt-1 font-mono text-xl text-zinc-100 tabular-nums">{snapshot ? usd(snapshot.availableCents) : 'Loading…'}</dd></div><div><dt className="text-zinc-400">Held for funding</dt><dd className="mt-1 font-mono text-xl text-zinc-100 tabular-nums">{snapshot ? usd(snapshot.reservedCents) : '—'}</dd></div></dl>
-      <p className="mt-3 text-xs text-zinc-400">Use test card 4242 4242 4242 4242, a future expiry, and any CVC. Each 250-credit bundle costs $20 simulated dollars, deducted only after Base confirms.</p>
-      <button type="button" onClick={() => { setError(null); void refresh().catch(cause => setError(message(cause))); }} className="mt-3 min-h-11 text-sm text-cyan-200 underline underline-offset-4">Refresh status</button>
+      <p className="mt-3 text-xs text-zinc-400">$5 adds balance toward a bundle; $20 activates one 250-credit bundle; $100 covers five bundles. Stripe test balance is separate from the shared funder’s Base Sepolia test USDC and gas. Use test card 4242 4242 4242 4242, a future expiry, and any CVC. Each 250-credit bundle costs $20 simulated dollars, deducted only after Base confirms.</p>
+      <button type="button" disabled={checking} aria-busy={checking} onClick={() => { setChecking(true); setError(null); void refresh().catch(cause => setError(message(cause))).finally(() => setChecking(false)); }} className="mt-3 min-h-11 text-sm text-cyan-200 underline underline-offset-4">Refresh status</button>
     </section>
 
     <section className={card}>
@@ -223,7 +276,7 @@ export function PilotOnboardingFlow({ network, gatewayBaseUrl }: { network: Netw
       <a href="https://github.com/mangekyou-labs/haze-api/blob/main/docs/onboarding/base-zk-credits-codex-first-use.md" target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center text-sm text-cyan-200 underline">Open the setup guide</a>
       <p className="mt-2 break-all text-xs text-zinc-500">Gateway: {gatewayBaseUrl}</p>
     </section>
-    <p className="text-xs text-zinc-500">{network?.healthy ? 'Contract reachable' : 'Contract status unavailable'} · Base Sepolia testnet</p>
+    <p className="text-xs text-zinc-500">{networkLoading ? 'Checking contract status…' : `${network?.healthy ? 'Contract reachable' : 'Contract status unavailable'} · Base Sepolia testnet`}</p>
     {notice && <p role="status" className="rounded-xl border border-emerald-300/20 bg-emerald-300/5 p-4 text-sm text-emerald-100">{notice}</p>}
     {error && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-400/10 p-4 text-sm text-red-200">{error}</p>}
   </div>;

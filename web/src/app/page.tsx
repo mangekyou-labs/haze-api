@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { REPO_URL, SiteHeader } from '@/components/site-header';
+import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 
 const STEPS = [
@@ -20,14 +20,14 @@ export default function Home() {
         />
         <div className="relative mx-auto max-w-6xl px-6 pb-20 pt-24 text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/80 px-3 py-1 font-mono text-xs text-zinc-300">
-            API credits &middot; Base Sepolia
+            ZK API credits &middot; Base Sepolia
           </span>
 
           <h1 className="mx-auto mt-6 max-w-3xl text-5xl font-bold tracking-tight text-white sm:text-6xl">
-            ZK API Credits
+            Haze Credits
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-zinc-400">
-            API credits for your coding agent. Prove each spend locally,
+            ZK API credits for your coding agent. Prove each spend locally,
             then use Codex, Cline, or your own x402 agent.
           </p>
 
@@ -38,14 +38,6 @@ export default function Home() {
             >
               Get Started
             </Link>
-            <a
-              href={REPO_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-xl border border-zinc-700 px-6 py-3 font-medium text-zinc-200 transition-colors hover:bg-zinc-800/60"
-            >
-              GitHub
-            </a>
           </div>
 
           <div className="mt-20 grid gap-4 text-left sm:grid-cols-2 lg:grid-cols-3">
@@ -65,10 +57,6 @@ export default function Home() {
             ))}
           </div>
 
-          <p className="mx-auto mt-8 max-w-2xl text-sm leading-6 text-zinc-500">
-            Your credential stays on your device. The gateway and model provider
-            receive your prompts and can observe traffic metadata.
-          </p>
         </div>
       </section>
 

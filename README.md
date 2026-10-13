@@ -28,7 +28,9 @@ Requires **Node.js 20+**, native OS credential storage, and Codex installed for 
 Codex flow.
 
 1. Sign in with GitHub at the [sandbox dashboard](https://hazecredits.vercel.app).
-2. Top up $20 **simulated USD** using Stripe test Checkout.
+2. Choose a $5, $20, or $100 **simulated USD** top-up using Stripe test Checkout.
+   Activation still costs $20 for a 250-credit bundle: $5 contributes toward one,
+   and $100 covers five separate bundles. No real money is charged.
 3. Generate, download, and re-import your recovery file, then activate the bundle.
 4. Install the CLI and import your activated credential:
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { FundingPreBroadcastError, normalizeCommitment } from './pilot-funding.js';
 
 export const SANDBOX_BUNDLE_PRICE_CENTS = 2000;
+export const SANDBOX_TOPUP_AMOUNTS_CENTS = [500, 2000, 10000] as const;
 const LEASE_MS = 120_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const HASH = /^0x[0-9a-f]{64}$/iu;
@@ -43,12 +44,14 @@ export class SandboxBillingService {
   constructor(private readonly options: { store: SandboxStore; sponsor: SandboxSponsor; contractAddress: string; now?: () => number }) {}
   private now() { return this.options.now?.() ?? Date.now(); }
 
-  async createTopup(accountId: string, requestId: string) {
+  async createTopup(accountId: string, requestId: string, amountCents: number = SANDBOX_BUNDLE_PRICE_CENTS) {
+    if (!(SANDBOX_TOPUP_AMOUNTS_CENTS as readonly number[]).includes(amountCents)) throw new SandboxError('invalid_topup_amount');
     if (!UUID.test(requestId)) throw new SandboxError('invalid_request_id');
     return this.options.store.transaction(accountId, account => {
       let topup = account.topups.find(t => t.requestId === requestId);
+      if (topup && topup.amountCents !== amountCents) throw new SandboxError('topup_amount_conflict', 409);
       if (!topup) {
-        topup = { id: randomUUID(), requestId, amountCents: SANDBOX_BUNDLE_PRICE_CENTS, sessionId: null, paid: false };
+        topup = { id: randomUUID(), requestId, amountCents, sessionId: null, paid: false };
         account.topups.push(topup);
       }
       return { ...topup };
@@ -69,11 +72,12 @@ export class SandboxBillingService {
    * Session binding, not event ID, is the credit-once key. */
   async creditTopup(event: { topupId: string; sessionId: string; livemode: boolean; mode: string; paymentStatus: string; currency: string; amountTotal: number }) {
     if (!UUID.test(event.topupId) || event.livemode !== false || event.mode !== 'payment' || event.paymentStatus !== 'paid'
-      || event.currency !== 'usd' || event.amountTotal !== SANDBOX_BUNDLE_PRICE_CENTS) throw new SandboxError('invalid_sandbox_payment');
+      || event.currency !== 'usd' || !(SANDBOX_TOPUP_AMOUNTS_CENTS as readonly number[]).includes(event.amountTotal)) throw new SandboxError('invalid_sandbox_payment');
     const owner = await this.options.store.topupOwner(event.topupId);
     if (!owner) throw new SandboxError('topup_not_found', 404);
     await this.options.store.transaction(owner, account => {
       const topup = account.topups.find(t => t.id === event.topupId)!;
+      if (event.amountTotal !== topup.amountCents) throw new SandboxError('invalid_sandbox_payment');
       if (!topup.sessionId) throw new SandboxError('topup_session_not_bound', 409); // webhook retries after Checkout binding
       if (topup.sessionId !== event.sessionId) throw new SandboxError('topup_session_conflict', 409);
       if (!topup.paid) { account.balanceCents += topup.amountCents; topup.paid = true; }
@@ -171,7 +175,7 @@ export class SandboxBillingService {
     let funder: SandboxFunderStatus | null = null;
     try { funder = await this.options.sponsor.status(); } catch { /* readiness unavailable */ }
     return { balanceCents: account.balanceCents, reservedCents: account.reservedCents, availableCents: account.balanceCents - account.reservedCents,
-      bundlePriceCents: SANDBOX_BUNDLE_PRICE_CENTS, bundles: account.bundles.map(b => this.view(b)).sort((a, b) => b.startedAt - a.startedAt), funder };
+      bundlePriceCents: SANDBOX_BUNDLE_PRICE_CENTS, topups: account.topups.map(({ requestId, amountCents, paid }) => ({ requestId, amountCents, paid })), bundles: account.bundles.map(b => this.view(b)).sort((a, b) => b.startedAt - a.startedAt), funder };
   }
 
   async publicBundle(rawCommitment: string) {

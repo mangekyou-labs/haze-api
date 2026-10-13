@@ -3,9 +3,9 @@ import AuthSessionProvider from '@/components/session-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ZK API Credits',
+  title: 'Haze Credits',
   description:
-    'API credits for Codex, Cline, and x402 agents. Prove each spend locally with ZK API Credits on Base Sepolia.',
+    'API credits for Codex, Cline, and x402 agents. Prove each spend locally with Haze Credits on Base Sepolia.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

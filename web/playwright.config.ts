@@ -31,7 +31,9 @@ export default defineConfig({
     // errors spam the server log). AUTH_SECRET is required by next-auth v5
     // in production mode (`next start`); without it every page 500s with
     // MissingSecret. This value is test-only configuration, not a credential.
-    command: `npm run build && AUTH_URL=http://127.0.0.1:${PORT} AUTH_SECRET=base-zk-credits-e2e-test-secret-not-for-production ENABLE_DEV_LOGIN=1 npm run start -- -p ${PORT}`,
+    // Placeholder OAuth credentials permit testing the redirect UI with GitHub
+    // intercepted by Playwright; they cannot authenticate a real account.
+    command: `npm run build && AUTH_URL=http://127.0.0.1:${PORT} AUTH_SECRET=base-zk-credits-e2e-test-secret-not-for-production ENABLE_DEV_LOGIN=1 GITHUB_CLIENT_ID=e2e-placeholder GITHUB_CLIENT_SECRET=e2e-placeholder npm run start -- -p ${PORT}`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

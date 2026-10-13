@@ -14,7 +14,7 @@ const CONTRACT_PATTERN = /^0x[0-9a-fA-F]{40}$/u;
 
 export async function GET() {
   try {
-    const { status, data } = await callGateway({ method: 'GET', path: '/v1/contract-status' });
+    const { status, data } = await callGateway({ method: 'GET', path: '/v1/contract-status', timeoutMs: 4000 });
     const contractAddress = typeof data.contract === 'string' && CONTRACT_PATTERN.test(data.contract) ? data.contract : null;
     return NextResponse.json({
       network: typeof data.network === 'string' ? data.network : PILOT_NETWORK,

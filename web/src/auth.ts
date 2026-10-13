@@ -38,5 +38,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: authCallbacks,
   pages: {
     signIn: '/sign-in',
+    error: '/sign-in',
   },
 });

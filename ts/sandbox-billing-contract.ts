@@ -29,6 +29,30 @@ export function billingContract(makeStore: () => SandboxStore) {
     }
     return { store, sponsor, billing, service, accountId, commitment, pay, advance: () => { now += 120_001; } };
   }
+  it('credits a $5 top-up once and keeps activation at $20', async () => {
+    const s = setup();
+    const topup = await s.billing.createTopup(s.accountId, randomUUID(), 500);
+    await s.billing.bindSession(s.accountId, topup.id, 'cs_test_small');
+    const event = { topupId: topup.id, sessionId: 'cs_test_small', livemode: false, mode: 'payment', paymentStatus: 'paid', currency: 'usd', amountTotal: 500 };
+    await s.billing.creditTopup(event);
+    await s.service().creditTopup(event);
+    expect(await s.billing.snapshot(s.accountId)).toMatchObject({ balanceCents: 500, bundlePriceCents: 2000 });
+    await expect(s.billing.fund(s.accountId, s.commitment)).rejects.toThrow('insufficient_sandbox_balance');
+  });
+  it('binds top-up retries to their original amount and rejects payment tampering', async () => {
+    const s = setup(); const requestId = randomUUID();
+    const topup = await s.billing.createTopup(s.accountId, requestId, 10000);
+    expect(await s.service().createTopup(s.accountId, requestId, 10000)).toEqual(topup);
+    await expect(s.billing.createTopup(s.accountId, requestId, 500)).rejects.toThrow('topup_amount_conflict');
+    for (const amount of [0, 1999, 500.5, 200000]) await expect(s.billing.createTopup(s.accountId, randomUUID(), amount)).rejects.toThrow('invalid_topup_amount');
+    await s.billing.bindSession(s.accountId, topup.id, 'cs_test_large');
+    const event = { topupId: topup.id, sessionId: 'cs_test_large', livemode: false, mode: 'payment', paymentStatus: 'paid', currency: 'usd', amountTotal: 2000 };
+    await expect(s.billing.creditTopup(event)).rejects.toThrow('invalid_sandbox_payment');
+    await s.billing.creditTopup({ ...event, amountTotal: 10000 });
+    await s.service().creditTopup({ ...event, amountTotal: 10000 });
+    await s.billing.fund(s.accountId, s.commitment);
+    expect(await s.billing.snapshot(s.accountId)).toMatchObject({ balanceCents: 8000, bundlePriceCents: 2000 });
+  });
   it('credits duplicate deliveries and concurrent clicks exactly once across restart', async () => {
     const s = setup(); const event = await s.pay();
     await Promise.all(Array.from({ length: 12 }, () => s.service().creditTopup(event)));
