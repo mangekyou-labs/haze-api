@@ -117,11 +117,96 @@ test('shows funder recovery and retries the same commitment after definitive fai
 test('refreshes a successful checkout return until verified balance arrives', async ({ page }) => {
   const snapshot = await mockSandbox(page, 0);
   await signIn(page);
+  await page.evaluate(() => sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify({ requestId: 'pending-small', amountCents: 2000 })));
   await page.goto('/dashboard?checkout=success');
   await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard$/u);
+  Object.assign(snapshot, { topups: [{ requestId: 'pending-small', amountCents: 2000, paid: true }] });
   snapshot.balanceCents = 2000;
   snapshot.availableCents = 2000;
   await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+});
+
+test('renders the authenticated dashboard while contract status is still loading', async ({ page }) => {
+  await mockSandbox(page, 0);
+  let release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/network-status', async route => {
+    await waiting;
+    await route.fulfill({ json: { healthy: false, contractAddress: null } });
+  });
+  await signIn(page);
+  await expect(page.getByRole('heading', { name: 'Set up your credits' })).toBeVisible();
+  await expect(page.getByText('Checking contract status…')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+  release();
+  await expect(page.getByText('Contract status unavailable · Base Sepolia testnet')).toBeVisible();
+});
+
+test('shows friendly GitHub cancellation and expired sign-in recovery', async ({ page }) => {
+  await page.goto('/sign-in?error=AccessDenied');
+  await expect(page.locator('p[role=alert]')).toContainText('GitHub sign-in was cancelled');
+  await expect(page.getByRole('link', { name: 'Restore your credential', exact: true })).toBeVisible();
+  await page.goto('/sign-in?error=InvalidCheck');
+  await expect(page.locator('p[role=alert]')).toContainText('expired');
+  await expect(page.locator('p[role=alert]')).not.toContainText('InvalidCheck');
+});
+
+test('waits for this top-up verification even when existing balance is positive', async ({ page }) => {
+  const snapshot = await mockSandbox(page, 2000);
+  await signIn(page);
+  await page.evaluate(() => sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify({ requestId: 'pending-large', amountCents: 10000 })));
+  await page.goto('/dashboard?checkout=success');
+  await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toHaveCount(0);
+  Object.assign(snapshot, { topups: [{ requestId: 'pending-large', amountCents: 10000, paid: true }], balanceCents: 12000, availableCents: 12000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+});
+
+test('opens GitHub authorization with immediate pending feedback and one submission', async ({ page }) => {
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  let submissions = 0;
+  await page.route('**/sign-in', async route => {
+    if (route.request().method() === 'POST') { submissions++; await pending; }
+    await route.continue();
+  });
+  await page.route('https://github.com/login/oauth/authorize**', route => route.fulfill({ body: 'GitHub authorization' }));
+  await page.goto('/sign-in');
+  await page.getByRole('button', { name: 'Sign in with GitHub', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Connecting to GitHub…' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Connecting to GitHub…' })).toHaveAttribute('aria-busy', 'true');
+  expect(submissions).toBe(1);
+  release();
+  await page.waitForURL('https://github.com/login/oauth/authorize**');
+  expect(new URL(page.url()).searchParams.get('redirect_uri')).toContain('/api/auth/callback/github');
+});
+
+test('offers all test top-ups and resumes each selected amount after a Checkout failure', async ({ page }) => {
+  await mockSandbox(page, 0);
+  const requests: { requestId: string; amountCents: number }[] = [];
+  await page.route('**/api/sandbox/checkout', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ status: 503, json: { error: 'checkout_unavailable' } });
+  });
+  await signIn(page);
+  for (const dollars of [5, 20, 100]) {
+    const button = page.getByRole('button', { name: `Top up $${dollars} in sandbox`, exact: true });
+    await button.click();
+    await expect(page.locator('p[role=alert]')).toContainText('Retry to resume the same top-up');
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(button).toBeEnabled();
+    const [first, retry] = requests.slice(-2);
+    expect(first.amountCents).toBe(dollars * 100);
+    expect(retry).toEqual(first);
+  }
+  expect(new Set(requests.map(request => request.requestId)).size).toBe(3);
+  await expect(page.getByText('$5 adds balance toward a bundle;', { exact: false })).toBeVisible();
+  await page.goto('/sign-in');
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByText('dev@zkcredits.test', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('site-header').getByRole('link', { name: 'GitHub' })).toHaveCount(0);
+  await expect(page.getByTestId('site-footer').getByRole('link', { name: 'Source code' })).toBeVisible();
 });

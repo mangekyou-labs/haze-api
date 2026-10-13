@@ -9,16 +9,22 @@ export async function POST(req: NextRequest) {
   const accountId = await sandboxAccount(req);
   if (accountId instanceof NextResponse) return accountId;
   let requestId: string;
-  try { requestId = String((await req.json()).requestId ?? ''); }
+  let amountCents: number;
+  try {
+    const body = await req.json();
+    requestId = String(body.requestId ?? '');
+    amountCents = body.amountCents === undefined ? 2000 : body.amountCents;
+    if (![500, 2000, 10000].includes(amountCents)) return NextResponse.json({ error: 'invalid_topup_amount' }, { status: 400 });
+  }
   catch { return NextResponse.json({ error: 'invalid_body' }, { status: 400 }); }
   try {
     const stripe = stripeSandbox();
     const origin = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL ?? (process.env.NODE_ENV !== 'production' ? req.nextUrl.origin : null);
     if (!origin) throw new Error('sandbox_return_url_not_configured');
-    const { status, data } = await callGateway({ method: 'POST', path: '/v1/sandbox/topups', body: { accountId, requestId } });
+    const { status, data } = await callGateway({ method: 'POST', path: '/v1/sandbox/topups', body: { accountId, requestId, amountCents } });
     if (status !== 200) return NextResponse.json(data, { status });
     if (data.paid === true) return NextResponse.json({ completed: true });
-    if (typeof data.id !== 'string' || data.amountCents !== 2000) throw new Error('invalid_topup');
+    if (typeof data.id !== 'string' || data.amountCents !== amountCents) throw new Error('invalid_topup');
     if (typeof data.sessionId === 'string') {
       const previous = await stripe.checkout.sessions.retrieve(data.sessionId);
       if (previous.livemode) throw new Error('invalid_test_session');
@@ -30,7 +36,7 @@ export async function POST(req: NextRequest) {
     const dashboard = new URL('/dashboard', origin).toString();
     const session = await stripe.checkout.sessions.create({
       mode: 'payment', allowed_payment_method_types: ['card'],
-      line_items: [{ price_data: { currency: 'usd', unit_amount: 2000, product_data: { name: '$20 simulated Haze balance (sandbox)' } }, quantity: 1 }],
+      line_items: [{ price_data: { currency: 'usd', unit_amount: amountCents, product_data: { name: `$${amountCents / 100} simulated Haze balance (sandbox)` } }, quantity: 1 }],
       metadata: { topupId: data.id },
       success_url: `${dashboard}?checkout=success`, cancel_url: `${dashboard}?checkout=cancelled`,
     }, { idempotencyKey: data.id });

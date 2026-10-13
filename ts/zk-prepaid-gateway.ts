@@ -849,7 +849,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     return body.accountId;
   }
   sandboxRoute('/v1/sandbox/status', body => sandboxBilling!.snapshot(sandboxAccount(body)));
-  sandboxRoute('/v1/sandbox/topups', body => sandboxBilling!.createTopup(sandboxAccount(body), String(body.requestId ?? '')), true);
+  sandboxRoute('/v1/sandbox/topups', body => sandboxBilling!.createTopup(sandboxAccount(body), String(body.requestId ?? ''), body.amountCents === undefined ? undefined : body.amountCents as number), true);
   sandboxRoute('/v1/sandbox/topups/session', async body => {
     await sandboxBilling!.bindSession(sandboxAccount(body), String(body.topupId ?? ''), String(body.sessionId ?? ''));
     return { ok: true };

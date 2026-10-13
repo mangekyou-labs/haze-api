@@ -1,46 +1,16 @@
-import { auth, signOut } from '@/auth';
+import { signOut } from '@/auth';
+import { renderSession } from '@/lib/session';
 import { redirect } from 'next/navigation';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { PilotOnboardingFlow } from './pilot-onboarding-flow';
-import { callGateway } from '@/lib/gateway';
-import { BASE_SEPOLIA_EXPLORER, PILOT_CHAIN_ID, PILOT_NETWORK } from '@/lib/credits';
-
-interface NetworkStatus {
-  network: string;
-  chainId: number;
-  contractAddress: string | null;
-  healthy: boolean;
-  generatedAt: string;
-  explorer: { address: string } | null;
-}
-
-const CONTRACT_PATTERN = /^0x[0-9a-fA-F]{40}$/u;
 const PUBLIC_GATEWAY_URL = process.env.PUBLIC_GATEWAY_URL?.trim()
   || process.env.NEXT_PUBLIC_GATEWAY_URL?.trim()
   || 'https://zk-credits-gateway.onrender.com';
 
-async function networkStatus(): Promise<NetworkStatus> {
-  try {
-    const { status, data } = await callGateway({ method: 'GET', path: '/v1/contract-status' });
-    const contractAddress = typeof data.contract === 'string' && CONTRACT_PATTERN.test(data.contract) ? data.contract : null;
-    return {
-      network: typeof data.network === 'string' ? data.network : PILOT_NETWORK,
-      chainId: PILOT_CHAIN_ID,
-      contractAddress,
-      healthy: status === 200 && contractAddress !== null,
-      generatedAt: typeof data.generatedAt === 'string' ? data.generatedAt : new Date().toISOString(),
-      explorer: contractAddress ? { address: `${BASE_SEPOLIA_EXPLORER}/address/${contractAddress}` } : null,
-    };
-  } catch {
-    return { network: PILOT_NETWORK, chainId: PILOT_CHAIN_ID, contractAddress: null, healthy: false, generatedAt: new Date().toISOString(), explorer: null };
-  }
-}
-
 export default async function DashboardPage() {
-  const session = await auth();
+  const session = await renderSession();
   if (!session) redirect('/sign-in');
-  const network = await networkStatus();
 
   return (
     <main className="flex min-h-screen flex-col">
@@ -71,7 +41,6 @@ export default async function DashboardPage() {
         </div>
 
         <PilotOnboardingFlow
-          network={network}
           gatewayBaseUrl={PUBLIC_GATEWAY_URL}
         />
 

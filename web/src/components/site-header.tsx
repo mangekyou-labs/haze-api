@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import { auth } from '@/auth';
+import { renderSession } from '@/lib/session';
 
 export const REPO_URL = 'https://github.com/mangekyou-labs/haze-api';
 
 export async function SiteHeader() {
-  const session = await auth();
+  const session = await renderSession();
 
   return (
     <header
@@ -23,14 +23,6 @@ export async function SiteHeader() {
         </Link>
 
         <nav className="flex items-center gap-5 text-sm">
-          <a
-            href={REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-zinc-400 transition-colors hover:text-zinc-100"
-          >
-            GitHub
-          </a>
           {session ? (
             <Link
               href="/dashboard"
