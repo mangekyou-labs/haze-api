@@ -131,6 +131,13 @@ export function createBaseBondSponsor(): BaseBondSponsor {
         nonce = await publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' });
       } catch (error) {
         if (error instanceof FundingPreBroadcastError) throw error;
+        // Readiness can change after billing checks it and before this attempt
+        // acquires the sponsor lock (for example, a previous bundle spends the
+        // remaining allowance). Diagnose only before any funding write; an RPC
+        // failure in this read must not expose provider details or mask the
+        // definitive pre-broadcast outcome.
+        const status = await this.fundingStatus().catch(() => undefined);
+        if (status?.reason) throw new FundingPreBroadcastError(status.reason);
         throw new FundingPreBroadcastError('preflight_failed');
       }
       // A write error can be an RPC timeout after broadcast; callers must hold it.

@@ -94,6 +94,29 @@ describe('Base bond sponsor attribution', () => {
     expect(persisted.mock.calls).toEqual([[TRANSACTION], [replacementHash]]);
   });
 
+  it('reports exhausted allowance when it changes before funding simulation', async () => {
+    const sponsor = createBaseBondSponsor();
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    let allowance = 20_000_000n;
+    rpc.getChainId = vi.fn().mockResolvedValue(84532);
+    rpc.readContract = vi.fn().mockImplementation(async ({ functionName }) => {
+      switch (functionName) {
+        case 'sponsor': return '0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A';
+        case 'usdc': return '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+        case 'tierConfig': return [250n, 20_000_000n];
+        case 'balanceOf': return 20_000_000n;
+        case 'allowance': return allowance;
+        default: throw new Error('unexpected read');
+      }
+    });
+    await expect(sponsor.fundingStatus()).resolves.toMatchObject({ ready: true, reason: null });
+    allowance = 0n;
+    rpc.simulateContract.mockRejectedValue(new Error('transfer allowance exhausted'));
+
+    await expect(sponsor.fundBundle('1', 0)).rejects.toThrow('insufficient_allowance');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
   it('fails closed when no Builder Code is configured', () => {
     delete process.env.BASE_BUILDER_CODE;
 
