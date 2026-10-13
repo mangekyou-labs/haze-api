@@ -133,6 +133,19 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
         catch { throw new FundingPreBroadcastError('funder_unavailable'); }
         if (!status.ready) throw new FundingPreBroadcastError(status.reason ?? 'funder_unavailable');
         if (BigInt(status.allowance) < SANDBOX_BOND_USDC) {
+          const approvalWrite = { address: status.tokenAddress as Hex, abi: erc20Abi,
+            functionName: 'approve' as const, args: [address, SANDBOX_BOND_USDC] as const };
+          try {
+            await publicClient.simulateContract({ ...approvalWrite, account });
+            const [gas, fees, balance] = await Promise.all([
+              publicClient.estimateContractGas({ ...approvalWrite, account }),
+              publicClient.estimateFeesPerGas(), publicClient.getBalance({ address: account.address }),
+            ]);
+            if (balance < gas * fees.maxFeePerGas * 125n / 100n) throw new FundingPreBroadcastError('insufficient_gas');
+          } catch (error) {
+            if (error instanceof FundingPreBroadcastError) throw error;
+            throw new FundingPreBroadcastError('approval_failed');
+          }
           let approvalHash: Hex;
           try {
             const [pendingNonce, latestNonce] = await Promise.all([
@@ -140,8 +153,7 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
               publicClient.getTransactionCount({ address: account.address, blockTag: 'latest' }),
             ]);
             if (pendingNonce !== latestNonce) throw new FundingPreBroadcastError('approval_pending');
-            approvalHash = await client.writeContract({ address: status.tokenAddress as Hex, abi: erc20Abi,
-              functionName: 'approve', args: [address, SANDBOX_BOND_USDC], nonce: pendingNonce });
+            approvalHash = await client.writeContract({ ...approvalWrite, nonce: pendingNonce });
           } catch (error) {
             if (error instanceof FundingPreBroadcastError) throw error;
             // A write timeout may still have sent approval. No bundle was sent.

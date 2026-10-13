@@ -239,6 +239,14 @@ describe('bounded sandbox USDC approval', () => {
     expect(mocks.writeContract).not.toHaveBeenCalled();
   });
 
+  it('rejects insufficient approval gas before any approval or funding write', async () => {
+    const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    rpc.getBalance.mockResolvedValue(1n);
+    await expect(sponsor.fundBundle('1', 0)).rejects.toThrow('insufficient_gas');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
   it.each(['write_timeout', 'receipt_timeout', 'reverted'])('never funds or reports an approval hash as bundle funding after %s', async failure => {
     const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
     if (failure === 'write_timeout') mocks.writeContract.mockRejectedValueOnce(new Error('private RPC endpoint'));
