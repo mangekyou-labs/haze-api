@@ -71,53 +71,56 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
     return () => controller.abort();
   }, []);
 
-  const refresh = useCallback(async () => {
-    const next = await jsonRequest<Snapshot>('/api/sandbox');
+  const acceptSnapshot = useCallback((next: Snapshot) => {
     setSnapshot(next);
-    return next;
-  }, []);
-  const verifiedTopup = useCallback((next: Snapshot) => {
     const selected = pendingTopup.current;
-    if (!selected || !next.topups?.some(t => t.requestId === selected.requestId && t.amountCents === selected.amountCents && t.paid)) return false;
+    if (!selected || !next.topups?.some(t => t.requestId === selected.requestId && t.amountCents === selected.amountCents && t.paid)) return;
     sessionStorage.removeItem(`zk-credits:checkout-request:${selected.amountCents}`);
     sessionStorage.removeItem('zk-credits:checkout-pending');
-    return true;
+    pendingTopup.current = null;
+    setCheckoutPending(false);
+    setNotice('Your simulated balance is ready.');
+    setError(null);
   }, []);
+  const refresh = useCallback(async () => {
+    const next = await jsonRequest<Snapshot>('/api/sandbox');
+    acceptSnapshot(next);
+    return next;
+  }, [acceptSnapshot]);
   useEffect(() => {
     let mounted = true;
     try { pendingTopup.current = JSON.parse(sessionStorage.getItem('zk-credits:checkout-pending') ?? 'null'); } catch { pendingTopup.current = null; }
     checkoutReturn.current ??= new URLSearchParams(window.location.search).get('checkout');
     const checkout = checkoutReturn.current;
     if (checkout) {
-      if (checkout === 'cancelled') sessionStorage.removeItem('zk-credits:checkout-pending');
+      if (checkout === 'cancelled') {
+        sessionStorage.removeItem('zk-credits:checkout-pending');
+        pendingTopup.current = null;
+        setNotice('Checkout cancelled. Your balance was not changed.');
+      }
       window.history.replaceState(null, '', window.location.pathname);
+    }
+    if (checkout === 'success' || pendingTopup.current) {
+      setCheckoutPending(true);
+      setNotice(checkout === 'success'
+        ? 'Checkout completed. Waiting for the verified payment to update your balance.'
+        : 'Checking the status of your pending top-up…');
     }
     void jsonRequest<Snapshot>('/api/sandbox').then(next => {
       if (!mounted) return;
-      setSnapshot(next);
-      if (checkout) {
-        const waiting = checkout === 'success' && !verifiedTopup(next);
-        setCheckoutPending(waiting);
-        setNotice(checkout === 'success'
-          ? waiting ? 'Checkout completed. Waiting for the verified payment to update your balance.' : 'Your simulated balance is ready.'
-          : 'Checkout cancelled. Your balance was not changed.');
-      }
+      acceptSnapshot(next);
     }).catch(cause => { if (mounted) setError(message(cause)); });
     return () => { mounted = false; };
-  }, [refresh, verifiedTopup]);
+  }, [acceptSnapshot]);
   const pending = snapshot?.bundles.some(b => b.state === 'unknown' || b.state === 'funding') || bundle?.state === 'unknown' || bundle?.state === 'funding';
   useEffect(() => {
     if (!pending && !checkoutPending) return;
-    const timer = window.setInterval(() => void refresh().then(next => {
-      if (checkoutPending && verifiedTopup(next)) {
-        setCheckoutPending(false); setNotice('Your simulated balance is ready.');
-      }
-    }).catch(() => {}), 5000);
+    const timer = window.setInterval(() => void refresh().catch(() => {}), 5000);
     const stop = checkoutPending ? window.setTimeout(() => {
       setCheckoutPending(false); setNotice('If your top-up has not arrived, refresh status in a moment. Payment verification may still be processing.');
     }, 60_000) : undefined;
     return () => { window.clearInterval(timer); if (stop) window.clearTimeout(stop); };
-  }, [pending, checkoutPending, refresh, verifiedTopup]);
+  }, [pending, checkoutPending, refresh]);
 
   const finish = useCallback(async (file: RecoveryCapsuleFile, metadata: Activation) => {
     if (downloaded.current === metadata.commitment) return;
@@ -144,10 +147,9 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
       sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify(pendingTopup.current));
       const result = await jsonRequest<{ url?: string; completed?: boolean }>('/api/sandbox/checkout', { requestId, amountCents });
       if (result.completed) {
-        const next = await refresh();
-        const verified = verifiedTopup(next);
-        setCheckoutPending(!verified);
-        setNotice(verified ? 'Your simulated balance is ready.' : 'Checkout completed. Waiting for the verified payment to update your balance.');
+        setCheckoutPending(true);
+        setNotice('Checkout completed. Waiting for the verified payment to update your balance.');
+        await refresh();
       }
       else if (result.url) window.location.assign(result.url);
       else throw new Error('checkout_unavailable');

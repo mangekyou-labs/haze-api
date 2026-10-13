@@ -29,6 +29,9 @@ events must match the persisted amount and session before crediting once.
 Checkout return verification checks the exact pending request and amount in the
 sanitized billing snapshot. An existing positive balance cannot stand in for a
 new payment. A delayed webhook leaves an honest verification-pending message.
+Pending verification survives reload and an initial snapshot failure. Every
+accepted snapshot, including manual refresh after polling stops, reconciles the
+exact paid request and clears its retry key before a new top-up is started.
 
 ## CROPS review
 
@@ -63,9 +66,10 @@ waiting for status, and an old balance falsely confirming a new payment.
 - Web unit tests: 62 passed across 12 files.
 - Web TypeScript check and production build: passed.
 - Web lint: zero errors; eight existing archive/config warnings.
-- Browser suite: 19 passed, covering held status requests, OAuth pending/errors,
+- Browser suite: 21 passed, covering held status requests, OAuth pending/errors,
   signed-in redirects, all three packages and retry IDs, delayed payment events,
-  source navigation, and existing recovery flows.
+  source navigation, reload after a failed snapshot, late webhook reconciliation
+  by manual refresh after the polling deadline, and existing recovery flows.
 - Gateway TypeScript check: passed.
 - Sandbox billing, PostgreSQL store, and pilot-route tests: 33 passed with
   `RUN_DB_TESTS=1` against a disposable local PostgreSQL instance. It was stopped

@@ -144,6 +144,50 @@ test('renders the authenticated dashboard while contract status is still loading
   await expect(page.getByText('Contract status unavailable · Base Sepolia testnet')).toBeVisible();
 });
 
+test('resumes pending payment verification after reload even when the first snapshot fails', async ({ page }) => {
+  const snapshot = await mockSandbox(page, 2000);
+  await signIn(page);
+  await page.evaluate(() => {
+    sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify({ requestId: 'reload-payment', amountCents: 500 }));
+    sessionStorage.setItem('zk-credits:checkout-request:500', 'reload-payment');
+  });
+  await page.route('**/api/sandbox', route => route.fulfill({ status: 503, json: { error: 'gateway_unavailable' } }));
+  await page.goto('/dashboard?checkout=success');
+  await expect(page.locator('p[role=alert]')).toBeVisible();
+  await page.unroute('**/api/sandbox');
+  await page.route('**/api/sandbox', route => route.fulfill({ json: snapshot }));
+  await page.reload();
+  await expect(page.getByText('Checking the status of your pending top-up…', { exact: true })).toBeVisible();
+  Object.assign(snapshot, { topups: [{ requestId: 'reload-payment', amountCents: 500, paid: true }] });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  expect(await page.evaluate(() => sessionStorage.getItem('zk-credits:checkout-pending'))).toBeNull();
+});
+
+test('manual refresh reconciles a late payment and the next same-amount top-up starts a new request', async ({ page }) => {
+  const snapshot = await mockSandbox(page, 0);
+  await signIn(page);
+  await page.clock.install();
+  await page.evaluate(() => {
+    sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify({ requestId: 'late-payment', amountCents: 2000 }));
+    sessionStorage.setItem('zk-credits:checkout-request:2000', 'late-payment');
+  });
+  await page.goto('/dashboard?checkout=success');
+  await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
+  await page.clock.fastForward(61_000);
+  await expect(page.getByText('Payment verification may still be processing.', { exact: false })).toBeVisible();
+  Object.assign(snapshot, { topups: [{ requestId: 'late-payment', amountCents: 2000, paid: true }], balanceCents: 2000, availableCents: 2000 });
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible();
+  let requestId = '';
+  await page.route('**/api/sandbox/checkout', route => {
+    requestId = route.request().postDataJSON().requestId;
+    return route.fulfill({ status: 503, json: { error: 'checkout_unavailable' } });
+  });
+  await page.getByRole('button', { name: 'Top up $20 in sandbox' }).click();
+  await expect(page.locator('p[role=alert]')).toBeVisible();
+  expect(requestId).not.toBe('late-payment');
+});
+
 test('shows friendly GitHub cancellation and expired sign-in recovery', async ({ page }) => {
   await page.goto('/sign-in?error=AccessDenied');
   await expect(page.locator('p[role=alert]')).toContainText('GitHub sign-in was cancelled');
