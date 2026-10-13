@@ -155,7 +155,7 @@ test('refreshes a successful checkout return until verified balance arrives', as
   Object.assign(snapshot, { topups: [{ requestId: 'pending-small', amountCents: 2000, paid: true }] });
   snapshot.balanceCents = 2000;
   snapshot.availableCents = 2000;
-  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 20_000 });
   await backup(page);
   await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
 });
@@ -191,7 +191,7 @@ test('resumes pending payment verification after reload even when the first snap
   await page.reload();
   await expect(page.getByText('Checking the status of your pending top-up…', { exact: true })).toBeVisible();
   Object.assign(snapshot, { topups: [{ requestId: 'reload-payment', amountCents: 500, paid: true }] });
-  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 20_000 });
   expect(await page.evaluate(() => sessionStorage.getItem('zk-credits:checkout-pending'))).toBeNull();
 });
 
@@ -238,7 +238,7 @@ test('waits for this top-up verification even when existing balance is positive'
   await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
   await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toHaveCount(0);
   Object.assign(snapshot, { topups: [{ requestId: 'pending-large', amountCents: 10000, paid: true }], balanceCents: 12000, availableCents: 12000 });
-  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 20_000 });
 });
 
 test('opens GitHub authorization with immediate pending feedback and one submission', async ({ page }) => {

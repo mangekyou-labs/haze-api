@@ -5,6 +5,7 @@ import { baseSepolia } from 'viem/chains';
 import { createPublicClient, createWalletClient, decodeEventLog, erc20Abi, http, toHex, type Hex } from 'viem';
 import { privateKeyToAccount, nonceManager } from 'viem/accounts';
 import { Attribution } from 'ox/erc8021';
+import { createRpcBudgetFetch } from '@zk-credits/shared/base';
 import { FundingPreBroadcastError } from './pilot-funding.js';
 import { FundingRevertedError, type SandboxFunderStatus } from './sandbox-billing.js';
 
@@ -56,16 +57,21 @@ function builderCodeDataSuffix(): Hex {
 
 const CIRCLE_BASE_SEPOLIA_USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e';
 const SANDBOX_BOND_USDC = 20_000_000n;
+// Shared by signing, reconciliation and event-sync clients in this process.
+const rpcFetch = createRpcBudgetFetch({ requestsPerMinute: 300, maxConcurrent: 8 });
+function baseTransport() {
+  return http(process.env.BASE_RPC_URL, { fetchFn: rpcFetch, retryCount: 0, timeout: 10_000 });
+}
 
 export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {}): BaseBondSponsor {
   const account = sponsorAccount();
   const client = createWalletClient({
     account,
     chain: baseSepolia,
-    transport: http(process.env.BASE_RPC_URL),
+    transport: baseTransport(),
     dataSuffix: builderCodeDataSuffix(),
   });
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
+  const publicClient = createPublicClient({ chain: baseSepolia, transport: baseTransport() });
   const address = contractAddress();
   async function checkPreflight(simulate: () => Promise<unknown>, estimateGas: () => Promise<bigint>) {
     await simulate();
@@ -231,7 +237,7 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
 }
 
 export function createBasePublicClient() {
-  return createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
+  return createPublicClient({ chain: baseSepolia, transport: baseTransport() });
 }
 
 export async function readCurrentBaseRoot(): Promise<string> {

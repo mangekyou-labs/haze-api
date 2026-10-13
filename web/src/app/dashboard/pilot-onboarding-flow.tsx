@@ -83,6 +83,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl, accountId }: { gatewayBase
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkoutPending, setCheckoutPending] = useState(false);
+  const [paymentCheckNeeded, setPaymentCheckNeeded] = useState(false);
   const restoredCheckout = useRef(false);
   const downloaded = useRef<string | null>(null);
   const pendingTopup = useRef<{ requestId: string; amountCents: number } | null>(null);
@@ -104,6 +105,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl, accountId }: { gatewayBase
     sessionStorage.removeItem(`zk-credits:checkout-request:${selected.amountCents}`);
     sessionStorage.removeItem('zk-credits:checkout-pending');
     pendingTopup.current = null;
+    setPaymentCheckNeeded(false);
     setCheckoutPending(false);
     setNotice('Your simulated balance is ready.');
     setError(null);
@@ -127,6 +129,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl, accountId }: { gatewayBase
       window.history.replaceState(null, '', window.location.pathname);
     }
     if (checkout === 'success' || pendingTopup.current) {
+      setPaymentCheckNeeded(true);
       setCheckoutPending(true);
       setNotice(checkout === 'success'
         ? 'Checkout completed. Waiting for the verified payment to update your balance.'
@@ -152,11 +155,22 @@ export function PilotOnboardingFlow({ gatewayBaseUrl, accountId }: { gatewayBase
   const pending = reconcilingActivation || snapshot?.bundles.some(b => b.state === 'unknown' || b.state === 'funding') || bundle?.state === 'unknown' || bundle?.state === 'funding';
   useEffect(() => {
     if (!pending && !checkoutPending) return;
-    const timer = window.setInterval(() => void refresh().catch(() => {}), 5000);
+    let inFlight = false;
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      if (stopped || inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      void refresh().catch(() => {}).finally(() => { inFlight = false; });
+    }, 10_000);
+    const stopActivation = window.setTimeout(() => {
+      stopped = true;
+      window.clearInterval(timer);
+      setNotice('Confirmation is taking longer than usual. Use Check again to continue checking this activation.');
+    }, 120_000);
     const stop = checkoutPending ? window.setTimeout(() => {
       setCheckoutPending(false); setNotice('If your top-up has not arrived, use Check again in a moment. Payment verification may still be processing.');
     }, 60_000) : undefined;
-    return () => { window.clearInterval(timer); if (stop) window.clearTimeout(stop); };
+    return () => { stopped = true; window.clearInterval(timer); window.clearTimeout(stopActivation); if (stop) window.clearTimeout(stop); };
   }, [pending, checkoutPending, refresh]);
 
   const finish = useCallback(async (file: RecoveryCapsuleFile, metadata: Activation) => {
@@ -189,6 +203,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl, accountId }: { gatewayBase
       let requestId = sessionStorage.getItem(`zk-credits:checkout-request:${amountCents}`);
       if (!requestId) { requestId = crypto.randomUUID(); sessionStorage.setItem(`zk-credits:checkout-request:${amountCents}`, requestId); }
       pendingTopup.current = { requestId, amountCents };
+      setPaymentCheckNeeded(true);
       sessionStorage.setItem('zk-credits:checkout-pending', JSON.stringify(pendingTopup.current));
       const result = await jsonRequest<{ url?: string; completed?: boolean }>('/api/sandbox/checkout', { requestId, amountCents });
       if (result.completed) {
@@ -353,7 +368,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl, accountId }: { gatewayBase
           </div>
         </div>
       </div>}
-      {step === 'fund' && !activationAttempted && !held && (error || !snapshot || checkoutPending || Boolean(pendingTopup.current)) && <button type="button" disabled={checking || busy} onClick={() => void checkAgain()} className="mt-3 block min-h-11 text-sm text-cyan-200 underline focus-visible:ring-2 focus-visible:ring-cyan-200">{checking ? 'Checking…' : 'Check again'}</button>}
+      {step === 'fund' && !activationAttempted && !held && (error || !snapshot || checkoutPending || paymentCheckNeeded) && <button type="button" disabled={checking || busy} onClick={() => void checkAgain()} className="mt-3 block min-h-11 text-sm text-cyan-200 underline focus-visible:ring-2 focus-visible:ring-cyan-200">{checking ? 'Checking…' : 'Check again'}</button>}
       {activation && <div className="mt-4 text-sm text-emerald-200"><p>Activated credential verified locally · 250 private calls · expires {formatDate(activation.expiry)}</p><button className="mt-3 min-h-11 underline" type="button" onClick={() => { if (capsule) downloadActivatedCredential(wrapWithActivation(capsule, activation)); }}>Download activated credential again</button></div>}
     </section>
 

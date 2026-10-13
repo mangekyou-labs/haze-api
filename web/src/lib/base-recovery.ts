@@ -10,6 +10,9 @@ import {
   type Hex,
 } from 'viem';
 import { baseSepolia } from 'viem/chains';
+import { createRpcBudgetFetch } from '@zk-credits/shared/base';
+
+const rpcFetch = createRpcBudgetFetch({ requestsPerMinute: 60, maxConcurrent: 4 });
 
 const BN254_FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 const BASE_CHAIN_ID = 84532;
@@ -223,7 +226,7 @@ export function createBaseRecoveryLookup(reader: BaseRecoveryReader, config: Bas
 }
 
 function createViemRecoveryReader(rpcUrl: string): BaseRecoveryReader {
-  const client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
+  const client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl, { fetchFn: rpcFetch, retryCount: 0, timeout: 10_000 }) });
   return {
     getChainId: () => client.getChainId(),
     getHead: () => client.getBlockNumber(),

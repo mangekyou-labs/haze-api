@@ -6,10 +6,11 @@ import { build } from 'esbuild';
 import { parseEnv } from 'node:util';
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
-// Read only the launch RPC; never copy the remaining launch environment.
+// Read the public client endpoint setting; never distribute the launch environment.
 const launchEnvironment = parseEnv(await readFile(resolve(packageDirectory, '../../.env.launch.local'), 'utf8'));
-const releaseRpc = launchEnvironment.BASE_RPC_URL?.trim();
-if (!releaseRpc) throw new Error('BASE_RPC_URL is required in .env.launch.local to build zk-credits.');
+// A distributed client must never inherit the operator's private RPC credential.
+// Set BASE_CLIENT_RPC_URL only to an endpoint intended for public distribution.
+const releaseRpc = launchEnvironment.BASE_CLIENT_RPC_URL?.trim() || 'https://sepolia.base.org';
 let parsedRpc;
 try { parsedRpc = new URL(releaseRpc); } catch { throw new Error('Release RPC must be an HTTP(S) URL.'); }
 if (!['https:', 'http:'].includes(parsedRpc.protocol) || parsedRpc.hash) throw new Error('Release RPC must be an HTTP(S) URL without a fragment.');

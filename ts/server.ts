@@ -246,14 +246,17 @@ const claimLeaseTimer = setInterval(() => {
   void claimStore.expireReservations(Date.now() - 5 * 60 * 1000).catch(() => undefined);
 }, 60 * 1000);
 claimLeaseTimer.unref();
+let baseSyncRunning = false;
 const baseSyncTimer = baseEventSync
   ? setInterval(() => {
+      if (baseSyncRunning) return;
+      baseSyncRunning = true;
       void (async () => {
         try {
           await baseEventSync?.syncOnce();
         } catch {
           console.error('Base event synchronization failed');
-        }
+        } finally { baseSyncRunning = false; }
       })().catch(() => {
         console.error('Base event synchronization failed');
       });
