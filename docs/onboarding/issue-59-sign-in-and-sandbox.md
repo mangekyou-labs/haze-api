@@ -18,8 +18,10 @@ callback failures, and denied authorization offer a readable retry path without
 exposing provider error details. An existing session redirects to the dashboard.
 The source repository link moves from the header and landing hero to the footer.
 The header, hero, footer, and page metadata use Haze Credits, with an H logo.
-The header offers Get Started to signed-out visitors and only shows Dashboard
-when the session contains an authenticated user ID.
+The header offers Sign in with a GitHub logo to signed-out visitors and only shows Dashboard
+when the session contains an authenticated user ID. The hero describes ZK API
+credits. The footer shows the product name and source link; the landing page
+omits the long credential/traffic note.
 
 The visible Stripe TEST choices are three selectable cards: $5, $20, and $100.
 $20 is selected by default. Native radio controls support keyboard selection,

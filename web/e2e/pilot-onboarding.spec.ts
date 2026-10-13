@@ -270,5 +270,5 @@ test('offers all test top-ups and resumes each selected amount after a Checkout 
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
   await page.goto('/');
   await expect(page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' })).toHaveCount(0);
-  await expect(page.getByTestId('site-header').getByRole('link', { name: 'Get Started' })).toHaveAttribute('href', '/sign-in');
+  await expect(page.getByTestId('site-header').getByRole('link', { name: 'Sign in with GitHub' })).toHaveAttribute('href', '/sign-in');
 });
