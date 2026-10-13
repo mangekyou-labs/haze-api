@@ -21,10 +21,14 @@ describe('product copy', () => {
     expect(read(file)).not.toMatch(/research pilot|honorarium|slots A and C|willingness.to.pay|founder.provisioned/i);
   });
 
-  it('states the network, audit status, and request privacy boundary', () => {
-    expect(read('web/src/components/site-footer.tsx')).toContain('Base Sepolia testnet');
-    expect(read('web/src/components/site-footer.tsx')).toContain('Not independently audited');
-    expect(read('web/src/app/page.tsx')).toMatch(/gateway and model provider[\s\S]*receive your prompts and can observe traffic metadata/);
+  it('keeps the approved landing copy concise without claiming anonymity', () => {
+    const footer = read('web/src/components/site-footer.tsx');
+    const landing = read('web/src/app/page.tsx');
+    expect(footer).toContain('Haze Credits');
+    expect(footer).not.toContain('Base Sepolia testnet');
+    expect(footer).not.toContain('Not independently audited');
+    expect(landing).toContain('ZK API credits');
+    expect(landing).not.toContain('Your credential stays on your device');
     for (const file of PRODUCT_PAGES) {
       expect(read(file)).not.toMatch(/\banonym(?:ous|ity)\b/i);
     }
