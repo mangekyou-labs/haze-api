@@ -11,7 +11,7 @@ async function signIn(page: Page) {
 }
 async function mockSandbox(page: Page, available = 2000) {
   const state = { balanceCents: available, reservedCents: 0, availableCents: available, bundlePriceCents: 2000,
-    bundles: [] as Record<string, unknown>[], funder: { address: CONTRACT, tokenAddress: CONTRACT, usdcBalance: '20000000', ready: true, reason: null, faucetUrl: 'https://faucet.circle.com/' } };
+    bundles: [] as Record<string, unknown>[], funder: { address: CONTRACT, tokenAddress: CONTRACT, usdcBalance: '20000000', ready: true, reason: null as string | null, faucetUrl: 'https://faucet.circle.com/' } };
   await page.route('**/api/sandbox', route => route.fulfill({ json: state }));
   return state;
 }
@@ -31,12 +31,43 @@ function bundle(commitment: string, state: string, reason: string | null = null)
     activation: state === 'funded' ? { commitment, network: 'eip155:84532', chainId: 84532, contractAddress: CONTRACT, deploymentDomain: '84532', tierId: 0, expiry: 1_900_000_000, transactionHash: HASH } : null };
 }
 
+test('guides setup sequentially and keeps activation diagnostics hidden until an attempt', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  snapshot.funder.ready = false;
+  snapshot.funder.reason = 'insufficient_allowance';
+  await signIn(page);
+  await expect(page.getByRole('heading', { name: '1. Save your recovery file' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: '$20 sandbox top-up', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Bundle status:', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Open the setup guide' })).toHaveCount(0);
+  await backup(page);
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: `/tmp/haze-dashboard-${width}.png`, fullPage: true });
+  }
+  await expect(page.getByText('insufficient_allowance', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('Its operator must approve it', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toHaveCSS('background-color', 'lab(85.3886 -36.7636 -21.5716)');
+  await expect(page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' })).toHaveCSS('background-color', 'lab(85.3886 -36.7636 -21.5716)');
+  await page.route('**/api/pilot/funding', route => {
+    const failed = bundle(route.request().postDataJSON().commitment, 'failed', 'insufficient_allowance');
+    snapshot.bundles = [failed];
+    return route.fulfill({ json: failed });
+  });
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByText('Its operator must approve it', { exact: false })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Get Base Sepolia USDC from the faucet' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Your bundles' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Open the setup guide' })).toHaveCount(0);
+});
+
 test('requires sign-in and simulated balance, without invite entry', async ({ page }) => {
   await page.goto('/dashboard'); await page.waitForURL('**/sign-in');
   await mockSandbox(page, 0); await signIn(page);
   await expect(page.locator('#invite-code')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
   await backup(page);
+  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Activate my credits' })).toBeDisabled();
 });
 
@@ -125,6 +156,7 @@ test('refreshes a successful checkout return until verified balance arrives', as
   snapshot.balanceCents = 2000;
   snapshot.availableCents = 2000;
   await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await backup(page);
   await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
 });
 
@@ -139,7 +171,7 @@ test('renders the authenticated dashboard while contract status is still loading
   await signIn(page);
   await expect(page.getByRole('heading', { name: 'Set up your credits' })).toBeVisible();
   await expect(page.getByText('Checking contract status…')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Download recovery file', exact: true })).toBeEnabled();
   release();
   await expect(page.getByText('Contract status unavailable · Base Sepolia testnet')).toBeVisible();
 });
@@ -173,6 +205,7 @@ test('manual refresh reconciles a late payment and the next same-amount top-up s
   });
   await page.goto('/dashboard?checkout=success');
   await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
+  await backup(page);
   await page.clock.fastForward(61_000);
   await expect(page.getByText('Payment verification may still be processing.', { exact: false })).toBeVisible();
   Object.assign(snapshot, { topups: [{ requestId: 'late-payment', amountCents: 2000, paid: true }], balanceCents: 2000, availableCents: 2000 });
@@ -235,6 +268,7 @@ test('offers all test top-ups and resumes each selected amount after a Checkout 
     return route.fulfill({ status: 503, json: { error: 'checkout_unavailable' } });
   });
   await signIn(page);
+  await backup(page);
   await expect(page.getByRole('radio', { name: '$20 sandbox top-up', exact: true })).toBeChecked();
   await page.getByRole('radio', { name: '$20 sandbox top-up', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
