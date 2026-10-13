@@ -17,6 +17,7 @@ const card = 'rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6';
 const usd = (cents: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
 const usdc = (units: string) => { const value = BigInt(units); return `${value / 1_000_000n}.${(value % 1_000_000n / 10_000n).toString().padStart(2, '0')}`; };
 const messages: Record<string, string> = {
+  unsupported_token: 'The funding service has an unsupported USDC token. Its operator must correct the Base Sepolia configuration.',
   unsupported_tier: 'The deployed contract does not match the sandbox bundle. Its operator must check the configuration.',
   sponsor_pending: 'Another funding transaction is being checked. Refresh status and retry when the funder is ready.',
   checkout_expired: 'Checkout expired. Select top up again to open a new session.',
@@ -39,11 +40,24 @@ const messages: Record<string, string> = {
   rpc_unavailable: 'Base Sepolia could not be reached. Keep your recovery file and retry in a moment.',
   gateway_unavailable: 'The service is unavailable. Try refreshing your status.',
 };
-function message(cause: unknown) { const code = cause instanceof Error ? cause.message : ''; return messages[code] ?? (/^[a-z_]+$/.test(code) || !code ? 'The service could not complete this request. Your recovery file is safe. Refresh status and retry.' : code); }
+class RequestFailure extends Error {
+  constructor(code: string, readonly ambiguous = false) { super(code); }
+}
+class CredentialFailure extends Error {}
+function message(cause: unknown) {
+  if (cause instanceof CredentialFailure) return cause.message;
+  const code = cause instanceof Error ? cause.message : '';
+  return messages[code] ?? 'The service could not complete this request. Your recovery file is safe. Refresh status and retry.';
+}
 async function jsonRequest<T>(url: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, { ...(body === undefined ? { cache: 'no-store' as const } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), signal: AbortSignal.timeout(25_000) });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? 'The request failed. Try again.');
+  let response: Response;
+  try {
+    response = await fetch(url, { ...(body === undefined ? { cache: 'no-store' as const } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), signal: AbortSignal.timeout(25_000) });
+  } catch { throw new RequestFailure('gateway_unavailable', true); }
+  let data;
+  try { data = await response.json(); } catch { throw new RequestFailure('gateway_unavailable', true); }
+  if (!data || typeof data !== 'object') throw new RequestFailure('gateway_unavailable', true);
+  if (!response.ok) throw new RequestFailure(typeof data.error === 'string' ? data.error : 'gateway_unavailable', response.status >= 500);
   return data as T;
 }
 
@@ -58,6 +72,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
   const [commitment, setCommitment] = useState<string | null>(null);
   const [step, setStep] = useState<'capsule' | 'backup' | 'fund' | 'active'>('capsule');
   const [activationAttempted, setActivationAttempted] = useState(false);
+  const [reconcilingActivation, setReconcilingActivation] = useState(false);
   const [activation, setActivation] = useState<Activation | null>(null);
   const [selectedBundle, setBundle] = useState<Bundle | null>(null);
   const bundle = snapshot?.bundles.find(b => b.commitment === commitment) ?? selectedBundle;
@@ -68,6 +83,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
   const downloaded = useRef<string | null>(null);
   const pendingTopup = useRef<{ requestId: string; amountCents: number } | null>(null);
   const checkoutReturn = useRef<string | null | undefined>(undefined);
+  const activationReconciliation = useRef<{ startedAt: number; snapshot: Snapshot | null } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -118,7 +134,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
     }).catch(cause => { if (mounted) setError(message(cause)); });
     return () => { mounted = false; };
   }, [acceptSnapshot]);
-  const pending = snapshot?.bundles.some(b => b.state === 'unknown' || b.state === 'funding') || bundle?.state === 'unknown' || bundle?.state === 'funding';
+  const pending = reconcilingActivation || snapshot?.bundles.some(b => b.state === 'unknown' || b.state === 'funding') || bundle?.state === 'unknown' || bundle?.state === 'funding';
   useEffect(() => {
     if (!pending && !checkoutPending) return;
     const timer = window.setInterval(() => void refresh().catch(() => {}), 5000);
@@ -131,18 +147,26 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
   const finish = useCallback(async (file: RecoveryCapsuleFile, metadata: Activation) => {
     if (downloaded.current === metadata.commitment) return;
     const activated = wrapWithActivation(file, metadata);
-    await verifyActivatedCredential(activated);
+    try { await verifyActivatedCredential(activated); } catch { throw new CredentialFailure('The activated credential could not be verified locally. Keep your recovery file and refresh status.'); }
     downloadActivatedCredential(activated);
     downloaded.current = metadata.commitment;
-    setActivation(metadata); setStep('active');
+    setActivation(metadata); setStep('active'); setError(null); setReconcilingActivation(false);
     setNotice('Activated credential downloaded and verified locally.');
   }, []);
   useEffect(() => {
     if (!commitment || !snapshot) return;
     const current = snapshot.bundles.find(b => b.commitment === commitment);
+    const reconciliation = activationReconciliation.current;
+    if (reconcilingActivation && reconciliation && snapshot !== reconciliation.snapshot &&
+      (current && current.state !== 'funding' && current.state !== 'unknown' || !current && Date.now() - reconciliation.startedAt >= 15_000)) {
+      setReconcilingActivation(false);
+      activationReconciliation.current = null;
+      setError(null);
+      setNotice(current ? null : 'No activation was found. Retry with this recovery file to activate the same bundle.');
+    }
     if (!current) return;
     if (current.activation && capsule) void finish(capsule, current.activation).catch(cause => setError(message(cause)));
-  }, [commitment, snapshot, capsule, finish]);
+  }, [commitment, snapshot, capsule, finish, reconcilingActivation]);
 
   async function topup(amountCents: number) {
     setBusy(true); setTopupAmount(amountCents); setError(null);
@@ -178,16 +202,21 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
     if (!file) return;
     setBusy(true); setError(null);
     try {
-      if (file.size > 64 * 1024) throw new Error('Choose a recovery file smaller than 64 KB.');
-      const imported = JSON.parse(await file.text()) as RecoveryCapsuleFile | ActivatedCredentialFile;
-      const verified = imported.kind === 'activated-credential'
-        ? await verifyActivatedCredential(imported) : await verifyRecoveryCapsule(imported);
+      if (file.size > 64 * 1024) throw new CredentialFailure('Choose a recovery file smaller than 64 KB.');
+      let imported: RecoveryCapsuleFile | ActivatedCredentialFile;
+      let verified: { commitment: string };
+      try {
+        imported = JSON.parse(await file.text()) as RecoveryCapsuleFile | ActivatedCredentialFile;
+        verified = imported.kind === 'activated-credential'
+          ? await verifyActivatedCredential(imported) : await verifyRecoveryCapsule(imported);
+      } catch { throw new CredentialFailure('Choose a valid recovery file. It could not be verified locally.'); }
       const parsed: RecoveryCapsuleFile = { ...imported, kind: 'recovery-capsule' };
-      if (step === 'backup' && verified.commitment !== commitment) throw new Error('Choose the recovery file you just downloaded.');
+      if (step === 'backup' && verified.commitment !== commitment) throw new CredentialFailure('Choose the recovery file you just downloaded.');
       setCapsule(parsed); setCommitment(verified.commitment); downloaded.current = null;
+      setBundle(null); setActivation(null); setActivationAttempted(false); setReconcilingActivation(false); setStep('fund'); setNotice('Backup verified locally.');
       const next = await refresh();
       const current = next.bundles.find(b => b.commitment === verified.commitment) ?? null;
-      setBundle(current); setActivationAttempted(false); setStep('fund'); setNotice('Backup verified locally.');
+      setBundle(current);
       if (current?.activation) await finish(parsed, current.activation);
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(false); }
@@ -199,11 +228,19 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
       const current = await jsonRequest<Bundle>('/api/pilot/funding', { commitment });
       setBundle(current);
       if (current.activation) await finish(capsule, current.activation);
-      await refresh();
-    } catch (cause) { setError(message(cause)); }
+      await refresh().catch(() => {});
+    } catch (cause) {
+      setError(message(cause));
+      if (cause instanceof RequestFailure && cause.ambiguous) {
+        activationReconciliation.current = { startedAt: Date.now(), snapshot };
+        setReconcilingActivation(true);
+        setNotice('Checking your activation. Keep your recovery file; this request will not be sent again while its status is being checked.');
+        await refresh().catch(() => {});
+      }
+    }
     finally { setBusy(false); }
   }
-  const held = bundle?.state === 'funding' || bundle?.state === 'unknown';
+  const held = reconcilingActivation || bundle?.state === 'funding' || bundle?.state === 'unknown';
 
   return <div className="space-y-6">
     <section className={card}>

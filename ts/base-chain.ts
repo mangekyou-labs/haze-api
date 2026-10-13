@@ -67,6 +67,13 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
   });
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http(process.env.BASE_RPC_URL) });
   const address = contractAddress();
+  async function checkPreflight(simulate: () => Promise<unknown>, estimateGas: () => Promise<bigint>) {
+    await simulate();
+    const [gas, fees, balance] = await Promise.all([
+      estimateGas(), publicClient.estimateFeesPerGas(), publicClient.getBalance({ address: account.address }),
+    ]);
+    if (balance < gas * fees.maxFeePerGas * 125n / 100n) throw new FundingPreBroadcastError('insufficient_gas');
+  }
   return {
     async fundingStatus() {
       const [chainId, sponsor, token, tier] = await Promise.all([
@@ -136,12 +143,10 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
           const approvalWrite = { address: status.tokenAddress as Hex, abi: erc20Abi,
             functionName: 'approve' as const, args: [address, SANDBOX_BOND_USDC] as const };
           try {
-            await publicClient.simulateContract({ ...approvalWrite, account });
-            const [gas, fees, balance] = await Promise.all([
-              publicClient.estimateContractGas({ ...approvalWrite, account }),
-              publicClient.estimateFeesPerGas(), publicClient.getBalance({ address: account.address }),
-            ]);
-            if (balance < gas * fees.maxFeePerGas * 125n / 100n) throw new FundingPreBroadcastError('insufficient_gas');
+            await checkPreflight(
+              () => publicClient.simulateContract({ ...approvalWrite, account }),
+              () => publicClient.estimateContractGas({ ...approvalWrite, account }),
+            );
           } catch (error) {
             if (error instanceof FundingPreBroadcastError) throw error;
             throw new FundingPreBroadcastError('approval_failed');
@@ -175,12 +180,10 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
       const write = { address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'fundBundle' as const, args: [toHex(BigInt(commitment), { size: 32 }), tierId] as const };
       let nonce: number;
       try {
-        await publicClient.simulateContract({ ...write, account });
-        const [gas, fees, balance] = await Promise.all([
-          publicClient.estimateContractGas({ ...write, account }),
-          publicClient.estimateFeesPerGas(), publicClient.getBalance({ address: account.address }),
-        ]);
-        if (balance < gas * fees.maxFeePerGas * 125n / 100n) throw new FundingPreBroadcastError('insufficient_gas');
+        await checkPreflight(
+          () => publicClient.simulateContract({ ...write, account }),
+          () => publicClient.estimateContractGas({ ...write, account }),
+        );
         nonce = await publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' });
       } catch (error) {
         if (error instanceof FundingPreBroadcastError) throw error;
