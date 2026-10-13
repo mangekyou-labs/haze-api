@@ -306,3 +306,99 @@ test('offers all test top-ups and resumes each selected amount after a Checkout 
   await expect(page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' })).toHaveCount(0);
   await expect(page.getByTestId('site-header').getByRole('link', { name: 'Sign in with GitHub' })).toHaveAttribute('href', '/sign-in');
 });
+
+
+test('retains a locally verified backup when the service lookup fails and retries without file selection', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  await signIn(page);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download recovery file' }).click();
+  const path = (await (await download).path())!;
+  await page.route('**/api/sandbox', route => route.fulfill({ status: 503, json: { error: 'gateway_unavailable' } }));
+  await page.locator('#capsule-file').setInputFiles(path);
+  await expect(page.getByText('Recovery file saved and verified.', { exact: true })).toBeVisible();
+  await expect(page.locator('p[role=alert]')).toContainText('service is unavailable');
+  await page.unroute('**/api/sandbox');
+  await page.route('**/api/sandbox', route => route.fulfill({ json: snapshot }));
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByRole('button', { name: 'Activate my credits', exact: true })).toBeEnabled();
+  await expect(page.locator('p[role=alert]')).toHaveCount(0);
+});
+
+
+test('reconciles an interrupted activation even before a bundle appears and never sends it again', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  await signIn(page);
+  const { commitment } = await backup(page);
+  let attempts = 0;
+  let reads = 0;
+  await page.unroute('**/api/sandbox');
+  await page.route('**/api/sandbox', route => {
+    reads++;
+    if (reads >= 3) snapshot.bundles = [bundle(commitment, 'funded')];
+    return route.fulfill({ json: snapshot });
+  });
+  await page.route('**/api/pilot/funding', route => {
+    attempts++;
+    return route.fulfill({ status: 502, json: { error: 'gateway_unavailable' } });
+  });
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByRole('button', { name: 'Waiting for confirmation…' })).toBeDisabled();
+  expect(reads).toBeGreaterThanOrEqual(1);
+  await download;
+  await expect(page.getByRole('button', { name: 'Download activated credential again' })).toBeVisible();
+  await expect(page.locator('p[role="alert"]')).toHaveCount(0);
+  expect(attempts).toBe(1);
+});
+
+test('maps transport and unknown service errors safely while preserving local file guidance', async ({ page }) => {
+  await mockSandbox(page);
+  await signIn(page);
+  await page.locator('#capsule-file').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('not json') });
+  await expect(page.locator('p[role="alert"]')).toHaveText('Choose a valid recovery file. It could not be verified locally.');
+  await backup(page);
+  await page.unroute('**/api/sandbox');
+  await page.route('**/api/sandbox', route => route.abort('failed'));
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.locator('p[role="alert"]')).toHaveText('The service is unavailable. Try refreshing your status.');
+  await page.unroute('**/api/sandbox');
+  await page.route('**/api/sandbox', route => route.fulfill({ status: 400, json: { error: 'internal provider debug: https://private.rpc/credential' } }));
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.locator('p[role="alert"]')).toHaveText('The service could not complete this request. Your recovery file is safe. Refresh status and retry.');
+});
+
+test('shows safe approval recovery and unsupported token configuration guidance', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  await signIn(page);
+  await backup(page);
+  let reason = 'approval_pending';
+  await page.route('**/api/pilot/funding', route => {
+    const failed = bundle(route.request().postDataJSON().commitment, 'failed', reason);
+    snapshot.bundles = [failed];
+    return route.fulfill({ json: failed });
+  });
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByText('Preparing your credits. Please retry in a moment; your balance is safe.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Get Base Sepolia USDC from the faucet' })).toHaveCount(0);
+  reason = 'unsupported_token';
+  await page.getByRole('button', { name: 'Retry activation' }).click();
+  await expect(page.getByText('The funding service has an unsupported USDC token. Its operator must correct the Base Sepolia configuration.')).toBeVisible();
+});
+
+test('allows the same recovery file to retry after reconciliation confirms no activation record', async ({ page }) => {
+  await mockSandbox(page);
+  await signIn(page);
+  await backup(page);
+  await page.clock.install();
+  let attempts = 0;
+  await page.route('**/api/pilot/funding', route => {
+    attempts++;
+    return route.fulfill({ status: 503, json: { error: 'gateway_unavailable' } });
+  });
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByRole('button', { name: 'Waiting for confirmation…' })).toBeDisabled();
+  await page.clock.fastForward(16_000);
+  await expect(page.getByRole('button', { name: 'Activate my credits' })).toBeEnabled();
+  expect(attempts).toBe(1);
+});
