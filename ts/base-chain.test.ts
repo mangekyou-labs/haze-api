@@ -157,3 +157,96 @@ describe('Base bond sponsor attribution', () => {
     expect(mocks.getContractEvents).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: 0n, toBlock: 7n }));
   });
 });
+
+describe('bounded sandbox USDC approval', () => {
+  const TOKEN = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+  beforeEach(() => {
+    vi.stubEnv('BASE_SPONSOR_PRIVATE_KEY', `0x${'11'.repeat(32)}`);
+    vi.stubEnv('BASE_PRIVATE_CREDIT_BOND_ADDRESS', '0x1111111111111111111111111111111111111111');
+    vi.stubEnv('BASE_BUILDER_CODE', BUILDER_CODE);
+    let allowance = 0n;
+    mocks.createWalletClient.mockReturnValue({ writeContract: mocks.writeContract });
+    mocks.createPublicClient.mockReturnValue({
+      getChainId: vi.fn().mockResolvedValue(84532),
+      readContract: vi.fn().mockImplementation(async ({ functionName }) => ({
+        sponsor: '0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A', usdc: TOKEN,
+        tierConfig: [250n, 20_000_000n], balanceOf: 20_000_000n, allowance,
+      })[functionName as string]),
+      getBalance: vi.fn().mockResolvedValue(10n ** 18n),
+      getTransactionCount: vi.fn().mockResolvedValue(0),
+      simulateContract: vi.fn().mockResolvedValue({}),
+      estimateContractGas: vi.fn().mockResolvedValue(100000n),
+      estimateFeesPerGas: vi.fn().mockResolvedValue({ maxFeePerGas: 1000000000n }),
+      waitForTransactionReceipt: mocks.waitForTransactionReceipt,
+    });
+    mocks.writeContract.mockResolvedValue(TRANSACTION);
+    mocks.waitForTransactionReceipt.mockImplementation(async () => {
+      allowance = 20_000_000n;
+      return { status: 'success', logs: [] };
+    });
+  });
+  afterEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); });
+
+  it('approves exactly one bundle and confirms approval before broadcasting funding', async () => {
+    const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
+    await expect(sponsor.fundingStatus()).resolves.toMatchObject({ ready: true, allowance: '0' });
+    const broadcast = vi.fn();
+    await expect(sponsor.fundBundle('1', 0, broadcast)).rejects.toThrow('base_funding_event_missing');
+    expect(mocks.writeContract.mock.calls.map(([write]) => write.functionName)).toEqual(['approve', 'fundBundle']);
+    expect(mocks.writeContract.mock.calls[0][0]).toMatchObject({ address: TOKEN, args: ['0x1111111111111111111111111111111111111111', 20_000_000n] });
+    expect(broadcast).toHaveBeenCalledExactlyOnceWith(TRANSACTION);
+  });
+
+  it('leaves automatic approval off by default', async () => {
+    await expect(createBaseBondSponsor().fundingStatus()).resolves.toMatchObject({ ready: false, reason: 'insufficient_allowance' });
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('uses existing allowance without another approval', async () => {
+    const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
+    await mocks.waitForTransactionReceipt(); // confirmed previous approval
+    await expect(sponsor.fundBundle('1', 0)).rejects.toThrow('base_funding_event_missing');
+    expect(mocks.writeContract.mock.calls.map(([write]) => write.functionName)).toEqual(['fundBundle']);
+  });
+
+  it.each([
+    ['wrong_chain', 'chain', 1],
+    ['sponsor_mismatch', 'sponsor', '0x0000000000000000000000000000000000000001'],
+    ['unsupported_token', 'usdc', '0x0000000000000000000000000000000000000001'],
+    ['unsupported_tier', 'tierConfig', [999n, 20_000_000n]],
+  ])('rejects %s before approval or funding', async (reason, field, value) => {
+    const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    if (field === 'chain') rpc.getChainId.mockResolvedValue(value);
+    else {
+      const original = rpc.readContract.getMockImplementation();
+      rpc.readContract.mockImplementation(async (request: { functionName: string }) => request.functionName === field ? value : original(request));
+    }
+    await expect(sponsor.fundBundle('1', 0)).rejects.toThrow(reason);
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-sandbox funding tiers before approval', async () => {
+    await expect(createBaseBondSponsor({ autoApproveUsdc: true }).fundBundle('1', 1)).rejects.toThrow('unsupported_tier');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('does not replace an unconfirmed sponsor transaction with another approval', async () => {
+    const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    rpc.getTransactionCount.mockImplementation(async ({ blockTag }: { blockTag: string }) => blockTag === 'pending' ? 1 : 0);
+    await expect(sponsor.fundBundle('1', 0)).rejects.toThrow('approval_pending');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it.each(['write_timeout', 'receipt_timeout', 'reverted'])('never funds or reports an approval hash as bundle funding after %s', async failure => {
+    const sponsor = createBaseBondSponsor({ autoApproveUsdc: true });
+    if (failure === 'write_timeout') mocks.writeContract.mockRejectedValueOnce(new Error('private RPC endpoint'));
+    else if (failure === 'receipt_timeout') mocks.waitForTransactionReceipt.mockRejectedValueOnce(new Error('private RPC endpoint'));
+    else mocks.waitForTransactionReceipt.mockResolvedValueOnce({ status: 'reverted' });
+    const broadcast = vi.fn();
+    await expect(sponsor.fundBundle('1', 0, broadcast)).rejects.toThrow(failure === 'reverted' ? 'approval_failed' : 'approval_pending');
+    expect(mocks.writeContract.mock.calls.map(([write]) => write.functionName)).toEqual(['approve']);
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+});

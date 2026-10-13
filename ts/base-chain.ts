@@ -54,7 +54,10 @@ function builderCodeDataSuffix(): Hex {
   return Attribution.toDataSuffix({ codes: [value] });
 }
 
-export function createBaseBondSponsor(): BaseBondSponsor {
+const CIRCLE_BASE_SEPOLIA_USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e';
+const SANDBOX_BOND_USDC = 20_000_000n;
+
+export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {}): BaseBondSponsor {
   const account = sponsorAccount();
   const client = createWalletClient({
     account,
@@ -78,7 +81,9 @@ export function createBaseBondSponsor(): BaseBondSponsor {
         publicClient.getBalance({ address: account.address }),
       ]);
       const reason = tier[0] !== 250n || tier[1] !== 20_000_000n ? 'unsupported_tier' : chainId !== 84532 ? 'wrong_chain' : sponsor.toLowerCase() !== account.address.toLowerCase() ? 'sponsor_mismatch'
-        : usdc < 20_000_000n ? 'insufficient_usdc' : gas === 0n ? 'insufficient_gas' : allowance < 20_000_000n ? 'insufficient_allowance' : null;
+        : usdc < 20_000_000n ? 'insufficient_usdc' : gas === 0n ? 'insufficient_gas'
+        : options.autoApproveUsdc && token.toLowerCase() !== CIRCLE_BASE_SEPOLIA_USDC ? 'unsupported_token'
+        : allowance < SANDBOX_BOND_USDC && !options.autoApproveUsdc ? 'insufficient_allowance' : null;
       return { address: sponsor, tokenAddress: token, usdcBalance: usdc.toString(), gasBalanceWei: gas.toString(), allowance: allowance.toString(),
         ready: !reason, reason, faucetUrl: token.toLowerCase() === '0x036cbd53842c5426634e7929541ec2318f3dcf7e' ? 'https://faucet.circle.com/' : '' };
     },
@@ -119,6 +124,42 @@ export function createBaseBondSponsor(): BaseBondSponsor {
       return undefined;
     },
     async fundBundle(commitment: string, tierId: number, onBroadcast?: (hash: string) => Promise<void>) {
+      if (options.autoApproveUsdc) {
+        // The sandbox adapter holds the database sponsor lock across approval
+        // and funding. Only this testnet token and one tier-0 bond are approved.
+        if (tierId !== 0) throw new FundingPreBroadcastError('unsupported_tier');
+        let status: SandboxFunderStatus;
+        try { status = await this.fundingStatus(); }
+        catch { throw new FundingPreBroadcastError('funder_unavailable'); }
+        if (!status.ready) throw new FundingPreBroadcastError(status.reason ?? 'funder_unavailable');
+        if (BigInt(status.allowance) < SANDBOX_BOND_USDC) {
+          let approvalHash: Hex;
+          try {
+            const [pendingNonce, latestNonce] = await Promise.all([
+              publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' }),
+              publicClient.getTransactionCount({ address: account.address, blockTag: 'latest' }),
+            ]);
+            if (pendingNonce !== latestNonce) throw new FundingPreBroadcastError('approval_pending');
+            approvalHash = await client.writeContract({ address: status.tokenAddress as Hex, abi: erc20Abi,
+              functionName: 'approve', args: [address, SANDBOX_BOND_USDC], nonce: pendingNonce });
+          } catch (error) {
+            if (error instanceof FundingPreBroadcastError) throw error;
+            // A write timeout may still have sent approval. No bundle was sent.
+            throw new FundingPreBroadcastError('approval_pending');
+          }
+          let approval;
+          try {
+            approval = await publicClient.waitForTransactionReceipt({ hash: approvalHash,
+              confirmations: Number(process.env.BASE_CONFIRMATIONS ?? '3') });
+          } catch { throw new FundingPreBroadcastError('approval_pending'); }
+          if (approval.status !== 'success') throw new FundingPreBroadcastError('approval_failed');
+          try {
+            const confirmedAllowance = await publicClient.readContract({ address: status.tokenAddress as Hex,
+              abi: erc20Abi, functionName: 'allowance', args: [account.address, address] });
+            if (confirmedAllowance < SANDBOX_BOND_USDC) throw new Error('allowance_not_updated');
+          } catch { throw new FundingPreBroadcastError('approval_failed'); }
+        }
+      }
       const write = { address, abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'fundBundle' as const, args: [toHex(BigInt(commitment), { size: 32 }), tierId] as const };
       let nonce: number;
       try {

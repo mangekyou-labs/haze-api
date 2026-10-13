@@ -142,7 +142,7 @@ export class SandboxBillingService {
     } catch (error) {
       if (error instanceof FundingRevertedError) return this.view(await this.fail(accountId, claim.bundle, 'transaction_reverted'));
       if (error instanceof FundingPreBroadcastError && !broadcast) {
-        const reason = ['insufficient_usdc', 'insufficient_gas', 'insufficient_allowance', 'sponsor_not_configured', 'sponsor_mismatch', 'wrong_chain', 'preflight_failed', 'sponsor_pending', 'unsupported_tier'].includes(error.message) ? error.message : 'funder_unavailable';
+        const reason = ['insufficient_usdc', 'insufficient_gas', 'insufficient_allowance', 'sponsor_not_configured', 'sponsor_mismatch', 'wrong_chain', 'preflight_failed', 'sponsor_pending', 'unsupported_tier', 'unsupported_token', 'approval_pending', 'approval_failed'].includes(error.message) ? error.message : 'funder_unavailable';
         return this.view(await this.fail(accountId, claim.bundle, reason, reason === 'insufficient_usdc'));
       }
       // RPC/receipt/database failures can leave a mined transaction. Hold funds.
