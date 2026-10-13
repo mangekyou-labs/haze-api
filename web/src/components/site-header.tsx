@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { renderSession } from '@/lib/session';
 
-export async function SiteHeader() {
+export async function SiteHeader({ dashboard = false }: { dashboard?: boolean } = {}) {
   const session = await renderSession();
 
   return (
@@ -24,7 +24,7 @@ export async function SiteHeader() {
           {session?.user?.id ? (
             <Link
               href="/dashboard"
-              className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white transition-colors hover:bg-indigo-500"
+              className={`inline-flex min-h-11 items-center rounded-lg px-4 py-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 ${dashboard ? 'bg-cyan-300 text-zinc-950 hover:bg-cyan-200 focus-visible:ring-cyan-200' : 'bg-indigo-600 text-white hover:bg-indigo-500 focus-visible:ring-indigo-300'}`}
             >
               Dashboard
             </Link>
