@@ -19,6 +19,19 @@ possessing the file can spend its credits. Keep it private. Fund your pilot
 credential, then download the activated credential. No credential password is
 created or entered. Files and secrets are never uploaded to the service.
 
+When topping up through Stripe test Checkout, the dashboard keeps the verified
+recovery file in this tab's session storage for the redirect. On return it
+verifies the file locally and removes the temporary copy, restoring the same
+activation step and selected amount. The handoff expires after 30 minutes and
+is restricted to the signed-in account. Files and secrets are never sent to
+Stripe or the gateway. Keep the downloaded recovery file for future visits.
+
+After an activation attempt, the dashboard shows bundle and funding contract
+status with recovery actions. Use **Check again** to check the connection and
+payment confirmation; use **Retry activation** for a confirmed failure. Pending
+transactions remain held until their outcome is known. A funding-service failure
+does not require another Stripe payment.
+
 ## Release availability
 
 Published `zk-credits@0.2.9` implements the passwordless journey with a public
