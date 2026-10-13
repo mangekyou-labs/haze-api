@@ -96,6 +96,14 @@ export function billingContract(makeStore: () => SandboxStore) {
     expect((await s.billing.fund(s.accountId, s.commitment)).state).toBe('failed');
     expect((await s.billing.snapshot(s.accountId)).availableCents).toBe(2000);
   });
+  it.each(['approval_pending', 'approval_failed'])('keeps balance available after %s without recording approval as bundle funding', async reason => {
+    const s = setup(); await s.pay();
+    s.sponsor.fund.mockRejectedValueOnce(new FundingPreBroadcastError(reason));
+    expect(await s.billing.fund(s.accountId, s.commitment)).toMatchObject({ state: 'failed', reason, transactionHash: null });
+    expect(await s.billing.snapshot(s.accountId)).toMatchObject({ availableCents: 2000, reservedCents: 0 });
+    expect((await s.billing.fund(s.accountId, s.commitment)).state).toBe('funded');
+    expect(await s.billing.snapshot(s.accountId)).toMatchObject({ balanceCents: 0, reservedCents: 0 });
+  });
   it('holds a persisted hash after timeout, reconciles after restart, and debits once', async () => {
     const s = setup(); await s.pay();
     s.sponsor.fund.mockImplementationOnce(async (_, broadcast) => { await broadcast(HASH); throw new Error('timeout'); });

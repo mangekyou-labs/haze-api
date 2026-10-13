@@ -13,7 +13,9 @@ export function createBundleFundingSponsor(options: {
 }): SandboxSponsor {
   let chainSponsor: BaseBondSponsor | undefined;
   function requireSponsor(): BaseBondSponsor {
-    try { return chainSponsor ??= (options.createChainSponsor ?? createBaseBondSponsor)(); }
+    try { return chainSponsor ??= options.createChainSponsor?.() ?? createBaseBondSponsor({
+      autoApproveUsdc: process.env.BASE_SANDBOX_AUTO_APPROVE_USDC === 'true',
+    }); }
     catch { throw new FundingPreBroadcastError('sponsor_not_configured'); }
   }
 
