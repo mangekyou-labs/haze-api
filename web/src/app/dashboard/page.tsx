@@ -42,6 +42,7 @@ export default async function DashboardPage() {
 
         <PilotOnboardingFlow
           gatewayBaseUrl={PUBLIC_GATEWAY_URL}
+          accountId={session.user.id}
         />
 
 

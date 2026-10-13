@@ -6,7 +6,7 @@ import { FundingPreBroadcastError } from './pilot-funding.js';
 import { FundingRevertedError } from './sandbox-billing.js';
 import { HASH, ready } from './sandbox-test-support.js';
 
-function setup() {
+function setup(now?: () => number) {
   const query = vi.fn(async (sql: string) => ({ rows: [{ acquired: true }], rowCount: sql.includes('SELECT 1 FROM') ? 0 : 1 }));
   const release = vi.fn();
   const connect = vi.fn(async () => ({ query, release }));
@@ -21,11 +21,34 @@ function setup() {
     releaseBond: vi.fn(),
   };
   const createChainSponsor = vi.fn(() => chain);
-  const sponsor = createBundleFundingSponsor({ pool: { connect } as unknown as Pool, createChainSponsor });
+  const sponsor = createBundleFundingSponsor({ pool: { connect } as unknown as Pool, createChainSponsor, now });
   return { sponsor, chain, createChainSponsor, connect, query, release };
 }
 
 describe('bundle funding sponsor', () => {
+  it('coalesces simultaneous status reads and refreshes after ten seconds', async () => {
+    let now = 0;
+    const s = setup(() => now);
+    await Promise.all([s.sponsor.status(), s.sponsor.status(), s.sponsor.status()]);
+    expect(s.chain.fundingStatus).toHaveBeenCalledOnce();
+    now = 9999;
+    await s.sponsor.status();
+    expect(s.chain.fundingStatus).toHaveBeenCalledOnce();
+    now = 10_000;
+    await s.sponsor.status();
+    expect(s.chain.fundingStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates readiness after funding and never caches an RPC failure', async () => {
+    const s = setup();
+    s.chain.fundingStatus.mockRejectedValueOnce(new Error('RPC busy'));
+    await expect(s.sponsor.status()).rejects.toThrow('RPC busy');
+    await s.sponsor.status();
+    await s.sponsor.fund('123', async () => {});
+    await s.sponsor.status();
+    expect(s.chain.fundingStatus).toHaveBeenCalledTimes(3);
+  });
+
   it('constructs lazily and shares the chain adapter across readiness, funding and recovery', async () => {
     const s = setup();
     expect(s.createChainSponsor).not.toHaveBeenCalled();

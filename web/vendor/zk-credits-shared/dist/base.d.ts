@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
+export { createRpcBudgetFetch } from './rpc-budget.js';
 export declare const BN254_FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 export declare const BASE_MEMBERSHIP_TREE_DEPTH = 20;
 export declare const BASE_MEMBERSHIP_TREE_CAPACITY: number;

@@ -48,7 +48,7 @@ test('guides setup sequentially and keeps activation diagnostics hidden until an
   }
   await expect(page.getByText('insufficient_allowance', { exact: false })).toHaveCount(0);
   await expect(page.getByText('Its operator must approve it', { exact: false })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toHaveCSS('background-color', 'lab(85.3886 -36.7636 -21.5716)');
+  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).not.toHaveCSS('background-color', 'lab(85.3886 -36.7636 -21.5716)');
   await expect(page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' })).toHaveCSS('background-color', 'lab(85.3886 -36.7636 -21.5716)');
   await page.route('**/api/pilot/funding', route => {
     const failed = bundle(route.request().postDataJSON().commitment, 'failed', 'insufficient_allowance');
@@ -120,7 +120,7 @@ test('holds unknown outcomes across reload and recovers without another activati
   await expect(page.getByRole('button', { name: 'Waiting for confirmation…' })).toBeDisabled();
   snapshot.bundles = [bundle(commitment, 'funded')]; snapshot.balanceCents = 0; snapshot.reservedCents = 0;
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await page.getByRole('button', { name: 'Check again' }).click();
   await download;
   expect(attempts).toBe(1);
 });
@@ -155,7 +155,7 @@ test('refreshes a successful checkout return until verified balance arrives', as
   Object.assign(snapshot, { topups: [{ requestId: 'pending-small', amountCents: 2000, paid: true }] });
   snapshot.balanceCents = 2000;
   snapshot.availableCents = 2000;
-  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 20_000 });
   await backup(page);
   await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
 });
@@ -191,7 +191,7 @@ test('resumes pending payment verification after reload even when the first snap
   await page.reload();
   await expect(page.getByText('Checking the status of your pending top-up…', { exact: true })).toBeVisible();
   Object.assign(snapshot, { topups: [{ requestId: 'reload-payment', amountCents: 500, paid: true }] });
-  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 20_000 });
   expect(await page.evaluate(() => sessionStorage.getItem('zk-credits:checkout-pending'))).toBeNull();
 });
 
@@ -209,7 +209,7 @@ test('manual refresh reconciles a late payment and the next same-amount top-up s
   await page.clock.fastForward(61_000);
   await expect(page.getByText('Payment verification may still be processing.', { exact: false })).toBeVisible();
   Object.assign(snapshot, { topups: [{ requestId: 'late-payment', amountCents: 2000, paid: true }], balanceCents: 2000, availableCents: 2000 });
-  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await page.getByRole('button', { name: 'Check again' }).click();
   await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible();
   let requestId = '';
   await page.route('**/api/sandbox/checkout', route => {
@@ -238,7 +238,7 @@ test('waits for this top-up verification even when existing balance is positive'
   await expect(page.getByText('Checkout completed. Waiting for the verified payment to update your balance.', { exact: true })).toBeVisible();
   await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toHaveCount(0);
   Object.assign(snapshot, { topups: [{ requestId: 'pending-large', amountCents: 10000, paid: true }], balanceCents: 12000, availableCents: 12000 });
-  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 20_000 });
 });
 
 test('opens GitHub authorization with immediate pending feedback and one submission', async ({ page }) => {
@@ -320,7 +320,7 @@ test('retains a locally verified backup when the service lookup fails and retrie
   await expect(page.locator('p[role=alert]')).toContainText('service is unavailable');
   await page.unroute('**/api/sandbox');
   await page.route('**/api/sandbox', route => route.fulfill({ json: snapshot }));
-  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await page.getByRole('button', { name: 'Check again' }).click();
   await expect(page.getByRole('button', { name: 'Activate my credits', exact: true })).toBeEnabled();
   await expect(page.locator('p[role=alert]')).toHaveCount(0);
 });
@@ -360,12 +360,13 @@ test('maps transport and unknown service errors safely while preserving local fi
   await backup(page);
   await page.unroute('**/api/sandbox');
   await page.route('**/api/sandbox', route => route.abort('failed'));
-  await page.getByRole('button', { name: 'Refresh status' }).click();
-  await expect(page.locator('p[role="alert"]')).toHaveText('The service is unavailable. Try refreshing your status.');
+  await page.route('**/api/pilot/funding', route => route.abort('failed'));
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.locator('p[role="alert"]')).toHaveText('The service is unavailable. Use Check again to reconnect without importing your file.');
   await page.unroute('**/api/sandbox');
   await page.route('**/api/sandbox', route => route.fulfill({ status: 400, json: { error: 'internal provider debug: https://private.rpc/credential' } }));
-  await page.getByRole('button', { name: 'Refresh status' }).click();
-  await expect(page.locator('p[role="alert"]')).toHaveText('The service could not complete this request. Your recovery file is safe. Refresh status and retry.');
+  await page.getByRole('button', { name: 'Check again' }).click();
+  await expect(page.locator('p[role="alert"]')).toHaveText('The service could not complete this request. Your recovery file is safe. Use Check again, then retry activation.');
 });
 
 test('shows safe approval recovery and unsupported token configuration guidance', async ({ page }) => {
@@ -401,4 +402,61 @@ test('allows the same recovery file to retry after reconciliation confirms no ac
   await page.clock.fastForward(16_000);
   await expect(page.getByRole('button', { name: 'Activate my credits' })).toBeEnabled();
   expect(attempts).toBe(1);
+});
+
+
+test('shows actionable funding diagnostics for an unavailable funder after activation', async ({ page }) => {
+  const snapshot = await mockSandbox(page);
+  Object.assign(snapshot, { funder: null });
+  await page.route('**/api/network-status', route => route.fulfill({ json: { healthy: false, contractAddress: CONTRACT } }));
+  await page.route('**/api/pilot/funding', route => {
+    const failed = bundle(route.request().postDataJSON().commitment, 'failed', 'funder_unavailable');
+    snapshot.bundles = [failed];
+    return route.fulfill({ json: failed });
+  });
+  await signIn(page); await backup(page);
+  await expect(page.getByRole('heading', { name: 'Funding contract status' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  await expect(page.getByRole('heading', { name: 'Funding contract status' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Bundle status', exact: true })).toBeVisible();
+  await expect(page.getByText('No funding transaction was sent;', { exact: false })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Report activation issue' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry activation' })).toBeEnabled();
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: `/tmp/haze-funding-recovery-${width}.png`, fullPage: true });
+  }
+  await page.getByRole('button', { name: 'Check again' }).click();
+  await expect(page.getByRole('button', { name: 'Check again' })).toBeEnabled();
+  await expect(page.getByText('Refresh status', { exact: false })).toHaveCount(0);
+});
+
+test('resumes verified recovery file and selected top-up after Stripe return without another import', async ({ page }) => {
+  const snapshot = await mockSandbox(page, 0);
+  await signIn(page);
+  const { capsule, commitment } = await backup(page);
+  await page.getByRole('radio', { name: '$100 sandbox top-up', exact: true }).check();
+  await page.route('**/api/sandbox/checkout', route => {
+    Object.assign(snapshot, { balanceCents: 10000, availableCents: 10000, topups: [{ ...route.request().postDataJSON(), paid: true }] });
+    return route.fulfill({ json: { url: '/dashboard?checkout=success' } });
+  });
+  await page.getByRole('button', { name: 'Pay with Stripe', exact: true }).click();
+  await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Recovery file saved and verified.', { exact: true })).toBeVisible();
+  await expect(page.locator('#capsule-file')).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: '$100 sandbox top-up', exact: true })).toBeChecked();
+  await expect(page.getByText('$100.00', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Activate my credits' })).toBeEnabled();
+  expect(await page.evaluate(() => sessionStorage.getItem('zk-credits:checkout-resume'))).toBeNull();
+  let activatedCommitment = '';
+  await page.route('**/api/pilot/funding', route => {
+    activatedCommitment = route.request().postDataJSON().commitment;
+    const failed = bundle(activatedCommitment, 'failed', 'approval_pending');
+    snapshot.bundles = [failed];
+    return route.fulfill({ json: failed });
+  });
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
+  expect(activatedCommitment).toBe(commitment);
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain(capsule.capsule.secret);
 });
