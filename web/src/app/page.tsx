@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { REPO_URL, SiteHeader } from '@/components/site-header';
+import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 
 const STEPS = [
@@ -24,7 +24,7 @@ export default function Home() {
           </span>
 
           <h1 className="mx-auto mt-6 max-w-3xl text-5xl font-bold tracking-tight text-white sm:text-6xl">
-            ZK API Credits
+            Haze Credits
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-zinc-400">
             API credits for your coding agent. Prove each spend locally,
@@ -38,14 +38,6 @@ export default function Home() {
             >
               Get Started
             </Link>
-            <a
-              href={REPO_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-xl border border-zinc-700 px-6 py-3 font-medium text-zinc-200 transition-colors hover:bg-zinc-800/60"
-            >
-              GitHub
-            </a>
           </div>
 
           <div className="mt-20 grid gap-4 text-left sm:grid-cols-2 lg:grid-cols-3">

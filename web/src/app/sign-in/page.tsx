@@ -10,7 +10,7 @@ import { SiteFooter } from '@/components/site-footer';
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ error?: string | string[] }> }) {
   const session = await renderSession();
 
-  if (session) {
+  if (session?.user?.id) {
     redirect('/dashboard');
   }
 

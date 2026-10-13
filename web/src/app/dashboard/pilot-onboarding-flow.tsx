@@ -48,6 +48,7 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
   const [networkLoading, setNetworkLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [topupAmount, setTopupAmount] = useState<number | null>(null);
+  const [selectedAmount, setSelectedAmount] = useState(2000);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [capsule, setCapsule] = useState<RecoveryCapsuleFile | null>(null);
   const [commitment, setCommitment] = useState<string | null>(null);
@@ -203,8 +204,29 @@ export function PilotOnboardingFlow({ gatewayBaseUrl }: { gatewayBaseUrl: string
     <section className={card}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><h2 className="text-lg font-semibold text-zinc-100">Sandbox balance</h2><p className="mt-1 text-sm text-zinc-400">Stripe test payments add simulated dollars. No real money is charged.</p></div>
-        <div className="flex flex-wrap gap-2">{[500, 2000, 10000].map(amount => <button key={amount} type="button" className={button} aria-busy={topupAmount === amount} disabled={busy} onClick={() => void topup(amount)}>{topupAmount === amount ? 'Opening Stripe test Checkout…' : `Top up $${amount / 100} in sandbox`}</button>)}</div>
       </div>
+      <fieldset disabled={busy} className="mt-6">
+        <legend className="text-sm font-medium text-zinc-300">Choose an amount</legend>
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
+          {[{ amount: 500, detail: 'Toward a bundle' }, { amount: 2000, detail: '1 bundle' }, { amount: 10000, detail: '5 bundles' }].map(({ amount, detail }) => (
+            <label key={amount} className="relative min-w-0 cursor-pointer">
+              <input type="radio" name="sandbox-topup-amount" aria-label={`$${amount / 100} sandbox top-up`} checked={selectedAmount === amount} onChange={() => setSelectedAmount(amount)} className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" />
+              <span className="flex h-full min-h-32 flex-col sm:min-h-28 rounded-xl border border-zinc-700 bg-zinc-950/40 p-3 transition-colors peer-hover:border-zinc-500 peer-checked:border-stripe peer-checked:bg-stripe/10 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-300 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-zinc-900 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 sm:p-4">
+                <span className="flex items-center justify-between gap-1">
+                  <span className="font-semibold text-lg text-white tabular-nums sm:text-2xl">${amount / 100}</span>
+                  <span aria-hidden="true" className={`absolute bottom-3 right-3 flex h-4 w-4 items-center justify-center rounded-full border sm:bottom-auto sm:right-4 sm:top-5 ${selectedAmount === amount ? 'border-stripe bg-stripe text-white' : 'border-zinc-600'}`}>
+                    {selectedAmount === amount && <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 8 3 3 7-7" /></svg>}
+                  </span>
+                </span>
+                <span className="mt-2 text-xs text-zinc-400 sm:text-sm">{detail}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <button type="button" disabled={busy} aria-busy={topupAmount !== null} onClick={() => void topup(selectedAmount)} className="mt-4 min-h-12 w-full rounded-lg bg-stripe px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-stripe-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-60">
+        {topupAmount !== null ? 'Opening Stripe test Checkout…' : 'Pay with Stripe'}
+      </button>
       <dl className="mt-4 flex flex-wrap gap-8 text-sm"><div><dt className="text-zinc-400">Available</dt><dd className="mt-1 font-mono text-xl text-zinc-100 tabular-nums">{snapshot ? usd(snapshot.availableCents) : 'Loading…'}</dd></div><div><dt className="text-zinc-400">Held for funding</dt><dd className="mt-1 font-mono text-xl text-zinc-100 tabular-nums">{snapshot ? usd(snapshot.reservedCents) : '—'}</dd></div></dl>
       <p className="mt-3 text-xs text-zinc-400">$5 adds balance toward a bundle; $20 activates one 250-credit bundle; $100 covers five bundles. Stripe test balance is separate from the shared funder’s Base Sepolia test USDC and gas. Use test card 4242 4242 4242 4242, a future expiry, and any CVC. Each 250-credit bundle costs $20 simulated dollars, deducted only after Base confirms.</p>
       <button type="button" disabled={checking} aria-busy={checking} onClick={() => { setChecking(true); setError(null); void refresh().catch(cause => setError(message(cause))).finally(() => setChecking(false)); }} className="mt-3 min-h-11 text-sm text-cyan-200 underline underline-offset-4">Refresh status</button>

@@ -16,10 +16,15 @@ GitHub remains the billing identity provider. The submit control shows a pending
 state and prevents duplicate submissions. Expired or unreadable OAuth checks,
 callback failures, and denied authorization offer a readable retry path without
 exposing provider error details. An existing session redirects to the dashboard.
-The source repository link moves from the header to the footer. The existing dark
-neutral palette, cyan accents, typography, and USD formatting remain in use.
+The source repository link moves from the header and landing hero to the footer.
+The header, hero, footer, and page metadata use Haze Credits, with an H logo.
+The header offers Get Started to signed-out visitors and only shows Dashboard
+when the session contains an authenticated user ID.
 
-The visible Stripe TEST choices are $5, $20, and $100. $5 contributes balance
+The visible Stripe TEST choices are three selectable cards: $5, $20, and $100.
+$20 is selected by default. Native radio controls support keyboard selection,
+and selecting an amount sends no payment request. One purple Pay with Stripe
+button opens Checkout for the selected amount. $5 contributes balance
 toward activation; $20 funds one activation; $100 covers five separate activations.
 They do not introduce contract tiers. Both Checkout and the billing service
 allowlist these amounts, while omitted amounts preserve the existing $20 API.
@@ -69,7 +74,9 @@ waiting for status, and an old balance falsely confirming a new payment.
 - Browser suite: 21 passed, covering held status requests, OAuth pending/errors,
   signed-in redirects, all three packages and retry IDs, delayed payment events,
   source navigation, reload after a failed snapshot, late webhook reconciliation
-  by manual refresh after the polling deadline, and existing recovery flows.
+  by manual refresh after the polling deadline, keyboard/card amount selection
+  without a payment request, signed-out navigation after sign-out, and existing
+  recovery flows. Desktop and mobile layouts were visually inspected.
 - Gateway TypeScript check: passed.
 - Sandbox billing, PostgreSQL store, and pilot-route tests: 33 passed with
   `RUN_DB_TESTS=1` against a disposable local PostgreSQL instance. It was stopped

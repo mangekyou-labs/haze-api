@@ -35,7 +35,7 @@ test('requires sign-in and simulated balance, without invite entry', async ({ pa
   await page.goto('/dashboard'); await page.waitForURL('**/sign-in');
   await mockSandbox(page, 0); await signIn(page);
   await expect(page.locator('#invite-code')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
   await backup(page);
   await expect(page.getByRole('button', { name: 'Activate my credits' })).toBeDisabled();
 });
@@ -125,7 +125,7 @@ test('refreshes a successful checkout return until verified balance arrives', as
   snapshot.balanceCents = 2000;
   snapshot.availableCents = 2000;
   await expect(page.getByText('Your simulated balance is ready.', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
 });
 
 test('renders the authenticated dashboard while contract status is still loading', async ({ page }) => {
@@ -139,7 +139,7 @@ test('renders the authenticated dashboard while contract status is still loading
   await signIn(page);
   await expect(page.getByRole('heading', { name: 'Set up your credits' })).toBeVisible();
   await expect(page.getByText('Checking contract status…')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Top up $20 in sandbox' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Pay with Stripe', exact: true })).toBeEnabled();
   release();
   await expect(page.getByText('Contract status unavailable · Base Sepolia testnet')).toBeVisible();
 });
@@ -183,7 +183,7 @@ test('manual refresh reconciles a late payment and the next same-amount top-up s
     requestId = route.request().postDataJSON().requestId;
     return route.fulfill({ status: 503, json: { error: 'checkout_unavailable' } });
   });
-  await page.getByRole('button', { name: 'Top up $20 in sandbox' }).click();
+  await page.getByRole('button', { name: 'Pay with Stripe', exact: true }).click();
   await expect(page.locator('p[role=alert]')).toBeVisible();
   expect(requestId).not.toBe('late-payment');
 });
@@ -235,8 +235,18 @@ test('offers all test top-ups and resumes each selected amount after a Checkout 
     return route.fulfill({ status: 503, json: { error: 'checkout_unavailable' } });
   });
   await signIn(page);
+  await expect(page.getByRole('radio', { name: '$20 sandbox top-up', exact: true })).toBeChecked();
+  await page.getByRole('radio', { name: '$20 sandbox top-up', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('radio', { name: '$100 sandbox top-up', exact: true })).toBeChecked();
+  expect(requests).toHaveLength(0);
   for (const dollars of [5, 20, 100]) {
-    const button = page.getByRole('button', { name: `Top up $${dollars} in sandbox`, exact: true });
+    const choice = page.getByRole('radio', { name: `$${dollars} sandbox top-up`, exact: true });
+    const button = page.getByRole('button', { name: 'Pay with Stripe', exact: true });
+    const previousRequests = requests.length;
+    await choice.check();
+    await expect(choice).toBeChecked();
+    expect(requests).toHaveLength(previousRequests); // Selection alone must never start a payment.
     await button.click();
     await expect(page.locator('p[role=alert]')).toContainText('Retry to resume the same top-up');
     await expect(button).toBeEnabled();
@@ -253,4 +263,12 @@ test('offers all test top-ups and resumes each selected amount after a Checkout 
   await expect(page.getByText('dev@zkcredits.test', { exact: true })).toBeVisible();
   await expect(page.getByTestId('site-header').getByRole('link', { name: 'GitHub' })).toHaveCount(0);
   await expect(page.getByTestId('site-footer').getByRole('link', { name: 'Source code' })).toBeVisible();
+  await page.goto('/');
+  await expect(page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' })).toBeVisible();
+  await page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' }).click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
+  await page.goto('/');
+  await expect(page.getByTestId('site-header').getByRole('link', { name: 'Dashboard' })).toHaveCount(0);
+  await expect(page.getByTestId('site-header').getByRole('link', { name: 'Get Started' })).toHaveAttribute('href', '/sign-in');
 });

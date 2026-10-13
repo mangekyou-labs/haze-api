@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { renderSession } from '@/lib/session';
 
-export const REPO_URL = 'https://github.com/mangekyou-labs/haze-api';
-
 export async function SiteHeader() {
   const session = await renderSession();
 
@@ -17,13 +15,13 @@ export async function SiteHeader() {
           className="flex items-center gap-2.5 font-semibold tracking-tight text-zinc-100"
         >
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-cyan-400 font-mono text-sm font-bold text-white">
-            Z
+            H
           </span>
-          ZK API Credits
+          Haze Credits
         </Link>
 
         <nav className="flex items-center gap-5 text-sm">
-          {session ? (
+          {session?.user?.id ? (
             <Link
               href="/dashboard"
               className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white transition-colors hover:bg-indigo-500"
@@ -35,7 +33,7 @@ export async function SiteHeader() {
               href="/sign-in"
               className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white transition-colors hover:bg-indigo-500"
             >
-              Sign in
+              Get Started
             </Link>
           )}
         </nav>

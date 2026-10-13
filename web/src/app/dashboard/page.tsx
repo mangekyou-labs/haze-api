@@ -10,7 +10,7 @@ const PUBLIC_GATEWAY_URL = process.env.PUBLIC_GATEWAY_URL?.trim()
 
 export default async function DashboardPage() {
   const session = await renderSession();
-  if (!session) redirect('/sign-in');
+  if (!session?.user?.id) redirect('/sign-in');
 
   return (
     <main className="flex min-h-screen flex-col">
@@ -33,7 +33,7 @@ export default async function DashboardPage() {
           >
             <button
               type="submit"
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800/60"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800/60"
             >
               Sign out
             </button>
