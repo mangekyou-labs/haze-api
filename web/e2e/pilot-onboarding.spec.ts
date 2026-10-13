@@ -360,7 +360,8 @@ test('maps transport and unknown service errors safely while preserving local fi
   await backup(page);
   await page.unroute('**/api/sandbox');
   await page.route('**/api/sandbox', route => route.abort('failed'));
-  await page.getByRole('button', { name: 'Check again' }).click();
+  await page.route('**/api/pilot/funding', route => route.abort('failed'));
+  await page.getByRole('button', { name: 'Activate my credits' }).click();
   await expect(page.locator('p[role="alert"]')).toHaveText('The service is unavailable. Use Check again to reconnect without importing your file.');
   await page.unroute('**/api/sandbox');
   await page.route('**/api/sandbox', route => route.fulfill({ status: 400, json: { error: 'internal provider debug: https://private.rpc/credential' } }));
