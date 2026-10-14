@@ -46,7 +46,7 @@ export function createBundleFundingSponsor(options: {
     },
     async reconcile(commitment, hash) {
       const sponsor = requireSponsor();
-      const found = await sponsor.reconcileBundle(commitment);
+      const found = await sponsor.reconcileBundle(commitment, hash);
       if (found) return { state: 'funded', transactionHash: found.transaction, expiry: Math.floor(found.expiryAt / 1000) };
       if (hash && await sponsor.isConfirmedRevert(hash)) return { state: 'reverted' };
       return undefined;

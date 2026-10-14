@@ -2,17 +2,17 @@
  * persisted or returned by the API. */
 
 import { baseSepolia } from 'viem/chains';
-import { createPublicClient, createWalletClient, decodeEventLog, erc20Abi, http, toHex, type Hex } from 'viem';
+import { createPublicClient, createWalletClient, decodeEventLog, erc20Abi, http, toHex, TransactionReceiptNotFoundError, type Hex } from 'viem';
 import { privateKeyToAccount, nonceManager } from 'viem/accounts';
 import { Attribution } from 'ox/erc8021';
-import { createRpcBudgetFetch } from '@zk-credits/shared/base';
+import { createResilientRpcFetch } from '@zk-credits/shared/base';
 import { FundingPreBroadcastError } from './pilot-funding.js';
 import { FundingRevertedError, type SandboxFunderStatus } from './sandbox-billing.js';
 
 /** Sponsor-side bond operations used to fund pilot test-credit bundles. */
 export interface BaseBondSponsor {
   fundBundle(commitment: string, tierId: number, onBroadcast?: (hash: string) => Promise<void>): Promise<{ transaction: string; expiryAt?: number }>;
-  reconcileBundle(commitment: string): Promise<{ transaction: string; expiryAt: number } | undefined>;
+  reconcileBundle(commitment: string, hash?: string | null): Promise<{ transaction: string; expiryAt: number } | undefined>;
   fundingStatus(): Promise<SandboxFunderStatus>;
   isConfirmedRevert(hash: string): Promise<boolean>;
   releaseBond(commitment: string): Promise<{ transaction: string }>;
@@ -58,9 +58,9 @@ function builderCodeDataSuffix(): Hex {
 const CIRCLE_BASE_SEPOLIA_USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e';
 const SANDBOX_BOND_USDC = 20_000_000n;
 // Shared by signing, reconciliation and event-sync clients in this process.
-const rpcFetch = createRpcBudgetFetch({ requestsPerMinute: 300, maxConcurrent: 8 });
-function baseTransport() {
-  return http(process.env.BASE_RPC_URL, { fetchFn: rpcFetch, retryCount: 0, timeout: 10_000 });
+const rpcFetch = createResilientRpcFetch({ requestsPerMinute: 300, maxConcurrent: 8 });
+function baseTransport(background = false) {
+  return http(process.env.BASE_RPC_URL, { fetchFn: background ? rpcFetch.background : rpcFetch, retryCount: 0, timeout: 30_000 });
 }
 
 export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {}): BaseBondSponsor {
@@ -105,19 +105,39 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
       const latest = await publicClient.getBlockNumber();
       return receipt.status === 'reverted' && latest - receipt.blockNumber + 1n >= BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
     },
-    async reconcileBundle(commitment: string) {
+    async reconcileBundle(commitment: string, hash?: string | null) {
+      const wanted = toHex(BigInt(commitment), { size: 32 }).toLowerCase();
+      const confirmations = BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
+      if (hash) {
+        const receipt = await publicClient.getTransactionReceipt({ hash: hash as Hex }).catch(error => {
+          if (error instanceof TransactionReceiptNotFoundError) return undefined;
+          throw error; // Provider failure is not evidence that the transaction is missing.
+        });
+        if (receipt?.status === 'success') {
+          const latest = await publicClient.getBlockNumber();
+          // Match the finalized window used by event/witness synchronization.
+          for (const log of latest - receipt.blockNumber >= confirmations ? receipt.logs : []) {
+            if (log.address.toLowerCase() !== address.toLowerCase()) continue;
+            try {
+              const decoded = decodeEventLog({ abi: PRIVATE_CREDIT_BOND_ABI, data: log.data, topics: log.topics, eventName: 'BundleFunded' });
+              if (decoded.args.commitment?.toLowerCase() === wanted && decoded.args.expiry !== undefined) {
+                return { transaction: receipt.transactionHash, expiryAt: Number(decoded.args.expiry) * 1000 };
+              }
+            } catch { /* unrelated receipt event */ }
+          }
+        }
+        // Missing/replaced transactions still need authoritative commitment recovery.
+      }
       const configuredRange = process.env.BASE_SYNC_MAX_BLOCK_RANGE?.trim();
       if (configuredRange && (!/^\d+$/u.test(configuredRange) || BigInt(configuredRange) <= 0n)) {
         throw new Error('BASE_SYNC_MAX_BLOCK_RANGE must be a positive whole number');
       }
       const maxBlockRange = configuredRange ? BigInt(configuredRange) : 2_000n;
       const latest = await publicClient.getBlockNumber();
-      const confirmations = BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
       if (latest <= confirmations) return undefined;
       const target = latest - confirmations;
       const deployment = process.env.BASE_DEPLOYMENT_BLOCK && /^\d+$/u.test(process.env.BASE_DEPLOYMENT_BLOCK)
         ? BigInt(process.env.BASE_DEPLOYMENT_BLOCK) : 0n;
-      const wanted = toHex(BigInt(commitment), { size: 32 }).toLowerCase();
       for (let fromBlock = deployment; fromBlock <= target; fromBlock += maxBlockRange) {
         const toBlock = fromBlock + maxBlockRange - 1n < target ? fromBlock + maxBlockRange - 1n : target;
         const logs = await publicClient.getContractEvents({
@@ -236,8 +256,8 @@ export function createBaseBondSponsor(options: { autoApproveUsdc?: boolean } = {
   };
 }
 
-export function createBasePublicClient() {
-  return createPublicClient({ chain: baseSepolia, transport: baseTransport() });
+export function createBasePublicClient(options: { background?: boolean } = {}) {
+  return createPublicClient({ chain: baseSepolia, transport: baseTransport(options.background) });
 }
 
 export async function readCurrentBaseRoot(): Promise<string> {

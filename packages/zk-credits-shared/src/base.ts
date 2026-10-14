@@ -5,6 +5,7 @@
  */
 
 export { createRpcBudgetFetch } from './rpc-budget.js';
+export { createResilientRpcFetch } from './rpc-resilience.js';
 
 export const BN254_FIELD_ORDER =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;

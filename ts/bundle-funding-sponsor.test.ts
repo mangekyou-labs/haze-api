@@ -126,7 +126,7 @@ describe('bundle funding sponsor', () => {
     s.chain.reconcileBundle.mockResolvedValueOnce({ transaction: HASH, expiryAt: 1_900_000_000_999 });
     s.chain.isConfirmedRevert.mockResolvedValue(true);
     expect(await s.sponsor.reconcile('123', 'old-hash')).toEqual({ state: 'funded', transactionHash: HASH, expiry: 1_900_000_000 });
-    expect(s.chain.reconcileBundle).toHaveBeenCalledWith('123');
+    expect(s.chain.reconcileBundle).toHaveBeenCalledWith('123', 'old-hash');
     expect(s.chain.isConfirmedRevert).not.toHaveBeenCalled();
   });
 

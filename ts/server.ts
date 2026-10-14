@@ -72,7 +72,7 @@ let baseEventSync: BaseContractEventSynchronizer | undefined;
 if (baseContractAddress && process.env.BASE_RPC_URL && /^0x[0-9a-fA-F]{40}$/u.test(baseContractAddress)) {
   baseEventSync = new BaseContractEventSynchronizer({
     contractAddress: baseContractAddress,
-    client: createBasePublicClient() as never,
+    client: createBasePublicClient({ background: true }) as never,
     store: baseEventStore,
     deploymentBlock: initialBaseState.deploymentBlock,
     confirmations: BigInt(process.env.BASE_CONFIRMATIONS ?? '3'),

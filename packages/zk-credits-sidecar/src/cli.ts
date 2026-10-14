@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { homedir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { codingTaskEvidence, codingTaskProviderArgs, validateCodingTaskArgs } from './task-evidence.js';
@@ -133,6 +134,7 @@ async function readHiddenValue(prompt: string): Promise<string> {
 
 function printHelp(): void {
   console.log(`Usage:
+  zk-credits --version
   zk-credits cline [cline arguments...]
   zk-credits config rpc
   zk-credits setup [codex|x402] [--legacy] [--model <model>]
@@ -600,6 +602,11 @@ async function runCodingTask(args: readonly string[]): Promise<void> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === '--version' || args[0] === '-v') {
+    const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    console.log(metadata.version);
+    return;
+  }
   const localHelp = ['doctor', 'stop', 'status', 'serve', 'setup', 'config', 'investigate'].includes(args[0] ?? '')
     && args.slice(1).some((arg) => arg === '--help' || arg === '-h');
   if (args[0] === '--help' || args[0] === '-h' || !args[0] || localHelp) {

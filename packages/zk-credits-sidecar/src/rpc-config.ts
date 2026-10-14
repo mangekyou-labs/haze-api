@@ -1,3 +1,4 @@
+import { rpcFetch } from './rpc-transport.js';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -16,14 +17,14 @@ export function validateRpcUrl(value: string): string {
     return url.href;
   } catch { throw new Error('RPC endpoint must be an HTTP(S) URL. ' + RPC_GUIDANCE); }
 }
-export async function checkBaseSepoliaRpc(value: string, request: typeof fetch = fetch): Promise<string> {
+export async function checkBaseSepoliaRpc(value: string, request: typeof fetch = rpcFetch): Promise<string> {
   const rpcUrl = validateRpcUrl(value);
   let result: unknown;
   try {
     const response = await request(rpcUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error();
     const body = await response.json() as { result?: unknown; error?: unknown };
