@@ -22,3 +22,15 @@ after listen, its public health endpoint answered successfully in about half a
 second. Startup and event-sync suites passed five tests; gateway typecheck passed.
 The live rollout logged a nine-minute initial-sync delay before opening its port,
 confirming a startup dependency separate from the user's local RPC setting.
+
+
+Legacy setup follow-up: reconstructed the witness from public cached leaves,
+reproduced gateway known:false, and confirmed exact equality with onchain
+currentRoot. Aggregate gateway status showed 77,356 blocks of lag and a
+10-block scan range. Its configured RPC accepted 100- and 2,000-block probes.
+The new root recovery regression failed before implementation (known:false
+instead of true). After implementation, gateway/payment/chain/indexer/startup
+suites passed: 56 tests, including a real pinned proof accepted despite an
+index miss. TypeScript validation passed. RPC failures return sanitized 503;
+contract false still rejects. No credential secrets, signatures or funding
+transactions were used.

@@ -259,7 +259,8 @@ describe('Base zk-prepaid gateway', () => {
           currentRoot: witness.root,
           knownRoots: [witness.root],
         },
-        rootSnapshot: () => ({ currentRoot: witness.root, knownRoots: [witness.root] }),
+        rootSnapshot: () => ({ currentRoot: '1', knownRoots: ['1'] }),
+        confirmedRootKnown: async (root) => root === witness.root,
       });
 
       const requestBody = '{"model":"demo","messages":[{"role":"user","content":"hello"}]}';
@@ -395,6 +396,27 @@ describe('Base zk-prepaid gateway', () => {
     expect(invalid.status).toBe(400);
     expect(invalid.body).toEqual({ error: 'invalid_root' });
     expect(JSON.stringify(found.body)).not.toContain('0x1');
+  });
+
+  it('checks confirmed contract membership when the index is behind, preserving RPC uncertainty', async () => {
+    let calls = 0;
+    const gateway = await createZkPrepaidGateway({
+      ...gatewayOptions(),
+      rootSnapshot: () => ({ currentRoot: '1', knownRoots: ['1'] }),
+      confirmedRootKnown: async (root: string) => {
+        calls += 1;
+        if (root === '4') throw new Error('private provider failure');
+        return root === '2';
+      },
+    });
+    expect((await request(gateway.app).post('/v1/root-known').send({ root: '1' })).body).toEqual({ known: true });
+    expect(calls).toBe(0);
+    expect((await request(gateway.app).post('/v1/root-known').send({ root: '0x2' })).body).toEqual({ known: true });
+    expect((await request(gateway.app).post('/v1/root-known').send({ root: '3' })).body).toEqual({ known: false });
+    const unavailable = await request(gateway.app).post('/v1/root-known').send({ root: '4' });
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.body).toEqual({ error: 'root_index_unavailable' });
+    expect(calls).toBe(3);
   });
 
   it('limits public root checks and fails closed when the root index is unavailable', async () => {

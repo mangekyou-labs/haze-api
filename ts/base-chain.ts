@@ -25,6 +25,7 @@ export const PRIVATE_CREDIT_BOND_ABI = [
   { type: 'function', name: 'fundBundle', stateMutability: 'nonpayable', inputs: [{ name: 'commitment', type: 'bytes32' }, { name: 'tierId', type: 'uint8' }], outputs: [] },
   { type: 'function', name: 'releaseBond', stateMutability: 'nonpayable', inputs: [{ name: 'commitment', type: 'bytes32' }], outputs: [] },
   { type: 'function', name: 'currentRoot', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'knownRoot', stateMutability: 'view', inputs: [{ name: 'root', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
   { type: 'function', name: 'rootAt', stateMutability: 'view', inputs: [{ name: 'index', type: 'uint256' }], outputs: [{ type: 'bytes32' }] },
   { type: 'event', name: 'BundleFunded', anonymous: false, inputs: [
     { indexed: true, name: 'commitment', type: 'bytes32' },
@@ -269,4 +270,17 @@ export async function readCurrentBaseRoot(): Promise<string> {
 export async function readInitialBaseRoot(): Promise<string> {
   const client = createBasePublicClient();
   return String(await client.readContract({ address: contractAddress(), abi: PRIVATE_CREDIT_BOND_ABI, functionName: 'rootAt', args: [0n] }));
+}
+
+/** Confirm membership without waiting for historical event backfill. Never reads unconfirmed state. */
+export async function readConfirmedBaseRootKnown(root: string): Promise<boolean> {
+  const client = createBasePublicClient();
+  const confirmations = BigInt(process.env.BASE_CONFIRMATIONS ?? '3');
+  if (confirmations < 0n) throw new Error('invalid_base_confirmations');
+  const head = await client.getBlockNumber({ cacheTime: 0 });
+  const blockNumber = head > confirmations ? head - confirmations : 0n;
+  return await client.readContract({
+    address: contractAddress(), abi: PRIVATE_CREDIT_BOND_ABI,
+    functionName: 'knownRoot', args: [toHex(BigInt(root), { size: 32 })], blockNumber,
+  });
 }

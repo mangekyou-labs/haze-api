@@ -21,7 +21,7 @@ vi.mock('viem', async (importOriginal) => {
 });
 
 import { FundingPreBroadcastError } from './pilot-funding.js';
-import { createBaseBondSponsor, PRIVATE_CREDIT_BOND_ABI } from './base-chain.js';
+import { createBaseBondSponsor, PRIVATE_CREDIT_BOND_ABI, readConfirmedBaseRootKnown } from './base-chain.js';
 
 const TRANSACTION = `0x${'ab'.repeat(32)}` as const;
 const BUILDER_CODE = 'bc_testcode';
@@ -53,6 +53,19 @@ describe('Base bond sponsor attribution', () => {
     delete process.env.BASE_RPC_URL;
     delete process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS;
     delete process.env.BASE_BUILDER_CODE;
+  });
+
+  it('checks root membership at the same confirmation depth as the indexer', async () => {
+    const readContract = vi.fn().mockResolvedValue(true);
+    mocks.getBlockNumber.mockResolvedValue(100n);
+    mocks.createPublicClient.mockReturnValue({ getBlockNumber: mocks.getBlockNumber, readContract });
+    await expect(readConfirmedBaseRootKnown('2')).resolves.toBe(true);
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'knownRoot', args: [toHex(2n, { size: 32 })], blockNumber: 97n,
+    }));
+    readContract.mockRejectedValue(new Error('RPC unavailable'));
+    await expect(readConfirmedBaseRootKnown('2')).rejects.toThrow('RPC unavailable');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
   });
 
   it('attaches the configured Builder Code to funding and release writes', async () => {

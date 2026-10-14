@@ -95,6 +95,8 @@ export interface ZkPrepaidGatewayOptions {
   rootSnapshot?: () => GatewayRootSnapshot | Promise<GatewayRootSnapshot>;
   /** Per-client POST /v1/root-known quota. Production defaults to 60 requests per minute. */
   rootCheckRequestsPerMinute?: number;
+  /** Authoritative contract membership at the configured confirmation depth, used on index misses. */
+  confirmedRootKnown?: (root: string) => Promise<boolean>;
   /** Authenticated public sandbox billing; never accepts browser-supplied identity. */
   sandboxBilling?: SandboxBillingService;
   /** Provisioning-plane detached funding; absent means the pilot endpoints fail closed. */
@@ -265,7 +267,7 @@ function normalizeField(value: string | undefined): string | null {
 async function loadGroth16Verifier(
   config: GatewayConfig,
   clock: () => number,
-  readRoots: () => GatewayRootSnapshot | Promise<GatewayRootSnapshot>,
+  rootKnown: (root: string) => Promise<boolean>,
 ): Promise<ZkPrepaidGatewayOptions['verifyProof']> {
   const vkPath = process.env.ZK_PREPAID_VERIFYING_KEY_PATH;
   if (!vkPath) return async () => ({ isValid: false, invalidReason: 'verifier_not_configured' });
@@ -274,18 +276,11 @@ async function loadGroth16Verifier(
     const vk = JSON.parse(await readFile(vkPath, 'utf8')) as object;
     const expectedDomain = normalizeField(config.deploymentDomain);
     return async (payment) => {
-      const roots = await readRoots();
-      const knownRoots = new Set(
-        [...(roots.knownRoots ?? []), roots.currentRoot]
-          .map((root) => normalizeField(root))
-          .filter((root): root is string => root !== null),
-      );
       const publicSignals = payment.payload.publicSignals;
       const root = normalizeField(publicSignals[PUBLIC_SIGNAL_INDEX.root]);
       const timestamp = normalizeField(publicSignals[PUBLIC_SIGNAL_INDEX.timestamp]);
       const domain = normalizeField(publicSignals[PUBLIC_SIGNAL_INDEX.domain]);
-      if (knownRoots.size === 0) return { isValid: false, invalidReason: 'contract_root_not_configured' };
-      if (!root || !knownRoots.has(root)) return { isValid: false, invalidReason: 'unknown_contract_root' };
+      if (!root || !(await rootKnown(root))) return { isValid: false, invalidReason: 'unknown_contract_root' };
       if (!expectedDomain || domain !== expectedDomain) return { isValid: false, invalidReason: 'deployment_domain_mismatch' };
       // The gateway window (paid path, facilitator routes) and the scheme's
       // structural check already bind this challenge. This repeats the window
@@ -471,7 +466,12 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
   const readRoots = async (): Promise<GatewayRootSnapshot> => options.rootSnapshot
     ? await options.rootSnapshot()
     : { currentRoot: config.currentRoot, knownRoots: config.knownRoots };
-  const proofVerifier = options.verifyProof ?? await loadGroth16Verifier(config, now, readRoots);
+  const rootKnown = async (root: string): Promise<boolean> => {
+    const roots = await readRoots();
+    if ([...(roots.knownRoots ?? []), roots.currentRoot].some((known) => normalizeField(known) === root)) return true;
+    return options.confirmedRootKnown ? await options.confirmedRootKnown(root) : false;
+  };
+  const proofVerifier = options.verifyProof ?? await loadGroth16Verifier(config, now, rootKnown);
   const facilitator = createZkPrepaidFacilitator({ claimStore, verifyProof: proofVerifier, now, hashSignal: signalHash });
   const claimLifecycle: ClaimLifecycle = facilitator.claimLifecycle;
   const sandboxBilling = options.sandboxBilling;
@@ -766,13 +766,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     const requestedRoot = normalizeField(typeof body.root === 'string' ? body.root : undefined);
     if (!requestedRoot) { jsonError(res, 400, 'invalid_root'); return; }
     try {
-      const roots = await readRoots();
-      const knownRoots = new Set(
-        [...(roots.knownRoots ?? []), roots.currentRoot]
-          .map((root) => normalizeField(root))
-          .filter((root): root is string => root !== null),
-      );
-      res.json({ known: knownRoots.has(requestedRoot) });
+      res.json({ known: await rootKnown(requestedRoot) });
     } catch {
       jsonError(res, 503, 'root_index_unavailable');
     }
@@ -788,13 +782,7 @@ export async function createZkPrepaidGateway(options: ZkPrepaidGatewayOptions = 
     const requestedRoot = normalizeField(typeof body.root === 'string' ? body.root : undefined);
     if (!requestedRoot) { jsonError(res, 400, 'invalid_root'); return; }
     try {
-      const roots = await readRoots();
-      const knownRoots = new Set(
-        [...(roots.knownRoots ?? []), roots.currentRoot]
-          .map((root) => normalizeField(root))
-          .filter((root): root is string => root !== null),
-      );
-      res.json({ known: knownRoots.has(requestedRoot) });
+      res.json({ known: await rootKnown(requestedRoot) });
     } catch {
       jsonError(res, 503, 'root_index_unavailable');
     }

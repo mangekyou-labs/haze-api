@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createZkPrepaidGateway } from './zk-prepaid-gateway.js';
-import { createBaseBondSponsor, readInitialBaseRoot } from './base-chain.js';
+import { createBaseBondSponsor, readInitialBaseRoot, readConfirmedBaseRootKnown } from './base-chain.js';
 import { createPool, runMigrations } from './db/index.js';
 import { PostgresClaimStore, createClaimStore } from './claim-store.js';
 import {
@@ -230,6 +230,7 @@ const { app } = await createZkPrepaidGateway({
       : undefined,
     v2Compatibility: readV2Compatibility,
   },
+  confirmedRootKnown: baseEventSync ? readConfirmedBaseRootKnown : undefined,
   rootSnapshot: () => baseEventSync
     ? baseEventSync.snapshot()
     : { currentRoot: initialBaseState.currentRoot, knownRoots: initialBaseState.knownRoots },

@@ -40,3 +40,19 @@ synchronization before opening its HTTP port. Start that synchronization after
 listening, using the same non-overlapping loop as periodic recovery. Liveness
 responds during backfill; durable root snapshots still govern payment checks.
 The initial constructor-root read retains its existing bounded RPC deadline.
+
+
+Follow-up legacy setup QA reproduced a valid witness being rejected: its root
+matched the deployed contract currentRoot, but the gateway index lagged by
+77,356 blocks. BASE_SYNC_MAX_BLOCK_RANGE was 10; read-only probes of the actual
+configured gateway RPC accepted 100 and 2,000 blocks. Restore the tested
+2,000-block range to reduce catch-up requests by 200 times.
+
+Use the durable finalized index first. On an index miss, both public/admin root
+checks and the production proof verifier use contract knownRoot(root) at
+head minus BASE_CONFIRMATIONS (default three), never latest unconfirmed state.
+A true contract result permits the normal proof checks; false rejects the root.
+Read failures remain uncertainty (503 for root-check, verifier failure for
+payment), with no manual whitelist, credential changes or chain transactions.
+Do not persist fallback results or advance the history cursor; historical
+backfill and reorg handling remain owned by the indexer.
