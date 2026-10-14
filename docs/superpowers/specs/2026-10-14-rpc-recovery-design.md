@@ -34,3 +34,9 @@ RPC configuration persists across sessions, with explicit environment precedence
 Validation seams: JSON-RPC fetch under deterministic throttling, sponsor recovery
 through its public adapter, concurrent local witness requests, and billing
 reservations after uncertain submission. Existing browser recovery remains valid.
+
+Live rollout exposed a second startup dependency: the gateway awaited history
+synchronization before opening its HTTP port. Start that synchronization after
+listening, using the same non-overlapping loop as periodic recovery. Liveness
+responds during backfill; durable root snapshots still govern payment checks.
+The initial constructor-root read retains its existing bounded RPC deadline.

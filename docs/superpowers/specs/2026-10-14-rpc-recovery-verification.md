@@ -15,3 +15,10 @@ Read-only live diagnosis found an owner-only saved custom RPC, different from th
 Saved RPC settings load in new sessions unless BASE_RPC_URL overrides them. An already running sidecar must restart to load a changed endpoint. The final Codex HTTP 402/reconnect remains unconfirmed: no signed funding or paid request was performed. Provider quota errors and gateway payment errors must remain separate.
 
 The exact tested commit and remote CI/deployment outcomes are recorded separately in `/tmp/haze-rpc-qa-verification.json` after committing.
+
+Follow-up startup regression: a real gateway process with a stalled local RPC
+failed to listen within five seconds before the fix; after moving history sync
+after listen, its public health endpoint answered successfully in about half a
+second. Startup and event-sync suites passed five tests; gateway typecheck passed.
+The live rollout logged a nine-minute initial-sync delay before opening its port,
+confirming a startup dependency separate from the user's local RPC setting.
