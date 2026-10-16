@@ -4,11 +4,16 @@ Hosted funding uses the operator-owned `BASE_RPC_URL`. Users can choose their
 local client's endpoint with `zk-credits config rpc`; arbitrary user URLs are
 not accepted by the signing service.
 
+Updated by [RPC recovery](2026-10-14-rpc-recovery-design.md): safe reads now use
+bounded retries and a cancellable queue with a 30-second deadline, including
+response-body reads. Submission methods still have no automatic retries.
+
 All gateway RPC clients share a token bucket with 300 tokens, refilling at 300
 requests per minute, and at most eight concurrent HTTP requests. Web recovery
 uses a separate bucket of 60 tokens, refilling at 60 requests per minute, with
 four concurrent requests. Exhaustion rejects locally before contacting the
-provider. HTTP transports have a ten-second timeout and no automatic retries.
+provider. The original ten-second, no-retry transport is superseded by the
+recovery transport described above.
 Provider HTTP 429 responses impose a shared cooldown honoring Retry-After.
 
 Funding-status reads share an in-flight request and a ten-second successful

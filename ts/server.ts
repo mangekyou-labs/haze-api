@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createZkPrepaidGateway } from './zk-prepaid-gateway.js';
-import { createBaseBondSponsor, readInitialBaseRoot } from './base-chain.js';
+import { createBaseBondSponsor, readInitialBaseRoot, readConfirmedBaseRootKnown } from './base-chain.js';
 import { createPool, runMigrations } from './db/index.js';
 import { PostgresClaimStore, createClaimStore } from './claim-store.js';
 import {
@@ -72,21 +72,14 @@ let baseEventSync: BaseContractEventSynchronizer | undefined;
 if (baseContractAddress && process.env.BASE_RPC_URL && /^0x[0-9a-fA-F]{40}$/u.test(baseContractAddress)) {
   baseEventSync = new BaseContractEventSynchronizer({
     contractAddress: baseContractAddress,
-    client: createBasePublicClient() as never,
+    client: createBasePublicClient({ background: true }) as never,
     store: baseEventStore,
     deploymentBlock: initialBaseState.deploymentBlock,
     confirmations: BigInt(process.env.BASE_CONFIRMATIONS ?? '3'),
     maxBlockRange: resolveBaseSyncMaxBlockRange(),
     initialRoot: initialBaseState.currentRoot,
   });
-  try {
-    await baseEventSync.syncOnce();
-  } catch {
-    // A temporary RPC outage must not take down the API. The last durable
-    // snapshot (or explicit environment roots) remains the fail-closed source
-    // until the next sync attempt.
-    console.error('Base event synchronization failed');
-  }
+
 }
 
 // Detached pilot provisioning needs both the durable provisioning store and a
@@ -237,6 +230,7 @@ const { app } = await createZkPrepaidGateway({
       : undefined,
     v2Compatibility: readV2Compatibility,
   },
+  confirmedRootKnown: baseEventSync ? readConfirmedBaseRootKnown : undefined,
   rootSnapshot: () => baseEventSync
     ? baseEventSync.snapshot()
     : { currentRoot: initialBaseState.currentRoot, knownRoots: initialBaseState.knownRoots },
@@ -247,25 +241,24 @@ const claimLeaseTimer = setInterval(() => {
 }, 60 * 1000);
 claimLeaseTimer.unref();
 let baseSyncRunning = false;
+function syncBaseEvents(): void {
+  if (!baseEventSync || baseSyncRunning) return;
+  baseSyncRunning = true;
+  void baseEventSync.syncOnce().catch(() => {
+    console.error('Base event synchronization failed');
+  }).finally(() => { baseSyncRunning = false; });
+}
 const baseSyncTimer = baseEventSync
-  ? setInterval(() => {
-      if (baseSyncRunning) return;
-      baseSyncRunning = true;
-      void (async () => {
-        try {
-          await baseEventSync?.syncOnce();
-        } catch {
-          console.error('Base event synchronization failed');
-        } finally { baseSyncRunning = false; }
-      })().catch(() => {
-        console.error('Base event synchronization failed');
-      });
-    }, Number(process.env.BASE_SYNC_INTERVAL_MS ?? 30_000))
+  ? setInterval(syncBaseEvents, Number(process.env.BASE_SYNC_INTERVAL_MS ?? 30_000))
   : undefined;
 baseSyncTimer?.unref();
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`zk-prepaid gateway listening on ${port}`);
+  const address = server.address();
+  console.log(`zk-prepaid gateway listening on ${typeof address === 'object' && address ? address.port : port}`);
+  // History backfill may be slow during an RPC outage. Serve liveness first;
+  // the durable root snapshot remains the fail-closed payment authority.
+  syncBaseEvents();
 });
 
 async function shutdown(signal: string): Promise<void> {

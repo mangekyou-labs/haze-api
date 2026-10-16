@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Attribution } from 'ox/erc8021';
+import { encodeAbiParameters, encodeEventTopics, toHex, TransactionReceiptNotFoundError } from 'viem';
 
 const mocks = vi.hoisted(() => ({
   createWalletClient: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock('viem', async (importOriginal) => {
 });
 
 import { FundingPreBroadcastError } from './pilot-funding.js';
-import { createBaseBondSponsor } from './base-chain.js';
+import { createBaseBondSponsor, PRIVATE_CREDIT_BOND_ABI, readConfirmedBaseRootKnown } from './base-chain.js';
 
 const TRANSACTION = `0x${'ab'.repeat(32)}` as const;
 const BUILDER_CODE = 'bc_testcode';
@@ -54,6 +55,19 @@ describe('Base bond sponsor attribution', () => {
     delete process.env.BASE_BUILDER_CODE;
   });
 
+  it('checks root membership at the same confirmation depth as the indexer', async () => {
+    const readContract = vi.fn().mockResolvedValue(true);
+    mocks.getBlockNumber.mockResolvedValue(100n);
+    mocks.createPublicClient.mockReturnValue({ getBlockNumber: mocks.getBlockNumber, readContract });
+    await expect(readConfirmedBaseRootKnown('2')).resolves.toBe(true);
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'knownRoot', args: [toHex(2n, { size: 32 })], blockNumber: 97n,
+    }));
+    readContract.mockRejectedValue(new Error('RPC unavailable'));
+    await expect(readConfirmedBaseRootKnown('2')).rejects.toThrow('RPC unavailable');
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
   it('attaches the configured Builder Code to funding and release writes', async () => {
     const sponsor = createBaseBondSponsor();
 
@@ -68,6 +82,52 @@ describe('Base bond sponsor attribution', () => {
       'releaseBond',
     ]);
     expect(mocks.waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: TRANSACTION, confirmations: 3 }));
+  });
+
+  it('recovers confirmed funding from its matching receipt without historical scans', async () => {
+    const sponsor = createBaseBondSponsor();
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    rpc.getTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success', transactionHash: TRANSACTION, blockNumber: 7n,
+      logs: [{ address: process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS,
+        topics: encodeEventTopics({ abi: PRIVATE_CREDIT_BOND_ABI, eventName: 'BundleFunded', args: { commitment: toHex(123n, { size: 32 }), tierId: 0n } }),
+        data: encodeAbiParameters([{ type: 'uint64' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes32' }], [1800000000n, 0n, 20000000n, toHex(1n, { size: 32 })]),
+      }],
+    });
+    mocks.getBlockNumber.mockResolvedValue(10n);
+    mocks.getContractEvents.mockResolvedValue([]);
+    await expect(sponsor.reconcileBundle('123', TRANSACTION)).resolves.toEqual({ transaction: TRANSACTION, expiryAt: 1800000000000 });
+    expect(rpc.getTransactionReceipt).toHaveBeenCalledWith({ hash: TRANSACTION });
+    expect(mocks.getContractEvents).not.toHaveBeenCalled();
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it.each(['pending', 'missing', 'wrong-contract', 'wrong-commitment'])('keeps commitment recovery when the receipt is %s', async (reason) => {
+    const sponsor = createBaseBondSponsor();
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    const receipt = { status: 'success', transactionHash: TRANSACTION, blockNumber: reason === 'pending' ? 8n : 7n,
+      logs: [{ address: reason === 'wrong-contract' ? '0x0000000000000000000000000000000000000001' : process.env.BASE_PRIVATE_CREDIT_BOND_ADDRESS,
+        topics: encodeEventTopics({ abi: PRIVATE_CREDIT_BOND_ABI, eventName: 'BundleFunded', args: { commitment: toHex(reason === 'wrong-commitment' ? 456n : 123n, { size: 32 }), tierId: 0n } }),
+        data: encodeAbiParameters([{ type: 'uint64' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes32' }], [1800000000n, 0n, 20000000n, toHex(1n, { size: 32 })]),
+      }],
+    };
+    rpc.getTransactionReceipt = reason === 'missing'
+      ? vi.fn().mockRejectedValue(new TransactionReceiptNotFoundError({ hash: TRANSACTION }))
+      : vi.fn().mockResolvedValue(receipt);
+    mocks.getBlockNumber.mockResolvedValue(10n);
+    const replacement = `0x${'cd'.repeat(32)}`;
+    mocks.getContractEvents.mockResolvedValue([{ args: { commitment: toHex(123n, { size: 32 }), expiry: 1800000000n }, transactionHash: replacement }]);
+    await expect(sponsor.reconcileBundle('123', TRANSACTION)).resolves.toEqual({ transaction: replacement, expiryAt: 1800000000000 });
+    expect(mocks.getContractEvents).toHaveBeenCalledWith(expect.objectContaining({ toBlock: 7n }));
+    expect(mocks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('preserves uncertainty after a receipt provider failure', async () => {
+    const sponsor = createBaseBondSponsor();
+    const rpc = mocks.createPublicClient.mock.results.at(-1)!.value;
+    rpc.getTransactionReceipt = vi.fn().mockRejectedValue(new Error('RPC unavailable'));
+    await expect(sponsor.reconcileBundle('123', TRANSACTION)).rejects.toThrow('RPC unavailable');
+    expect(mocks.getContractEvents).not.toHaveBeenCalled();
+    expect(mocks.writeContract).not.toHaveBeenCalled();
   });
 
   it('releases definitively before a write when gas or pending-nonce reads fail', async () => {

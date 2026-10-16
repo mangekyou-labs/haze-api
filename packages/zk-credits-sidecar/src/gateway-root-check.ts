@@ -19,20 +19,39 @@ export async function requireGatewayKnownRoot(
   origin: URL,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetcher(new URL('/v1/root-known', origin), {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify({ root }),
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch {
-    throw new Error('The gateway could not confirm that the activated credential root is known');
+  const deadline = AbortSignal.timeout(60_000);
+  for (let attempt = 0; attempt < 3 && !deadline.aborted; attempt += 1) {
+    let response: Response | undefined;
+    let body: unknown;
+    try {
+      response = await fetcher(new URL('/v1/root-known', origin), {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ root }),
+        signal: AbortSignal.any([deadline, AbortSignal.timeout(30_000)]),
+      });
+      if (response.status === 200) body = await response.json();
+    } catch { /* Reachability/body failures remain uncertain, never unknown. */ }
+    if (response?.status === 200 && isRecord(body) && body.known === true) return;
+    if (response?.status === 200 && isRecord(body) && body.known === false) {
+      throw new Error('The activated credential root is not in the gateway known-root set; stop setup and reconcile the V2 activation');
+    }
+    if (response && ![429, 500, 502, 503, 504].includes(response.status)) break;
+    if (attempt === 2) break;
+    const retry = response?.headers.get('Retry-After');
+    const providerDelay = retry ? (/^\d+$/u.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now()) : 0;
+    const delay = Math.max(500 * 2 ** attempt, Number.isFinite(providerDelay) ? providerDelay : 0);
+    await response?.body?.cancel().catch(() => {});
+    try { await waitForGateway(delay, deadline); } catch { break; }
   }
-  let body: unknown;
-  try { body = await response.json(); } catch { body = undefined; }
-  if (response.status !== 200 || !isRecord(body) || body.known !== true) {
-    throw new Error('The activated credential root is not in the gateway known-root set; stop setup and reconcile the V2 activation');
-  }
+  throw new Error('The gateway is temporarily unavailable and could not confirm the activated credential root. Retry zk-credits setup codex; changing the local RPC does not change the gateway connection.');
+}
+
+function waitForGateway(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
 }

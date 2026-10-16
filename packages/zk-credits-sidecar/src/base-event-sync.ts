@@ -21,6 +21,7 @@ import {
 } from '@zk-credits/shared/base';
 import type { BaseCreditWitness, BaseWitnessProvider } from './base-sidecar.js';
 import { RPC_GUIDANCE } from './rpc-config.js';
+import { rpcFetch } from './rpc-transport.js';
 
 const BUNDLE_FUNDED_ABI = parseAbi([
   'event BundleFunded(bytes32 indexed commitment, uint8 indexed tierId, uint64 expiry, uint256 leafIndex, uint256 bondAmount, bytes32 root)',
@@ -112,12 +113,15 @@ function serializeLeaves(leaves: Map<number, { commitment: string; leaf: string;
 
 /** Creates a witness provider that syncs finalized BundleFunded events. */
 export function createBaseEventWitnessProvider(options: BaseEventWitnessProviderOptions): BaseWitnessProvider {
-  const client = options.client ?? createPublicClient({ chain: baseSepolia, transport: http(options.rpcUrl) }) as unknown as BaseEventWitnessClient;
+  const client = options.client ?? createPublicClient({ chain: baseSepolia,
+    transport: http(options.rpcUrl, { fetchFn: rpcFetch, retryCount: 0, timeout: 30_000 }),
+  }) as unknown as BaseEventWitnessClient;
   const contract = address(options.contractAddress);
   const confirmations = options.confirmations ?? 3n;
   const maxBlockRange = options.maxBlockRange ?? 2_000n;
   let cache: CachedLeafState | undefined;
   let leaves = new Map<number, { commitment: string; leaf: string; expiry?: number }>();
+  let pendingSync: Promise<void> | undefined;
 
   async function rpcCall<T>(operation: Promise<T>): Promise<T> {
     try { return await operation; }
@@ -175,7 +179,8 @@ export function createBaseEventWitnessProvider(options: BaseEventWitnessProvider
 
   return {
     async witnessForCredential(credential: CreditCredential): Promise<BaseCreditWitness> {
-      await synchronize();
+      pendingSync ??= synchronize().finally(() => { pendingSync = undefined; });
+      await pendingSync;
       const commitment = field(credential.commitment, 'credential commitment');
       const entry = [...leaves.entries()].find(([, value]) => value.commitment === commitment);
       if (!entry) throw new Error('No funded Base bundle was found for this credential');
